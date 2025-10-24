@@ -1,6 +1,5 @@
 package com.android.CaveArt
 
-import com.android.CaveArt.R
 import android.app.Activity
 import android.app.Application
 import android.app.WallpaperManager
@@ -8,7 +7,6 @@ import android.content.Context
 import android.graphics.BitmapFactory
 import android.os.Build
 import android.os.Bundle
-import android.view.View
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -20,7 +18,6 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -32,17 +29,19 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PhotoLibrary
@@ -67,23 +66,27 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.lerp
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -92,6 +95,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.IOException
 import kotlin.math.absoluteValue
+import androidx.core.view.WindowCompat
 
 private const val FLAG_HOME_SCREEN = 1
 private const val FLAG_LOCK_SCREEN = 2
@@ -108,6 +112,7 @@ data class Wallpaper(
 class WallpaperViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun loadWallpapersDynamically(context: Context): List<Wallpaper> {
+    	
         val drawableFields = R.drawable::class.java.fields
         val wallpaperList = mutableListOf<Wallpaper>()
 
@@ -144,18 +149,24 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         return wallpaperList.sortedBy { it.title }
     }
 
-    val allWallpapers: List<Wallpaper> = loadWallpapersDynamically(application.applicationContext)
+    
+    val baseWallpapers: List<Wallpaper> = loadWallpapersDynamically(application.applicationContext)
+
+    
+    val allWallpapers: List<Wallpaper> = List(4) { baseWallpapers }.flatten()
 
     var selectedTag by mutableStateOf("All")
         private set
 
-    val allTags: List<String> = listOf("All") + allWallpapers.map { it.tag }.distinct().sorted()
+    val allTags: List<String> = listOf("All") + baseWallpapers.map { it.tag }.distinct().sorted()
 
+    
     val filteredWallpapers by derivedStateOf {
         if (selectedTag == "All") {
-            allWallpapers
+            allWallpapers 
         } else {
-            allWallpapers.filter { it.tag == selectedTag }
+           
+            baseWallpapers.filter { it.tag == selectedTag }
         }
     }
 
@@ -183,44 +194,52 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
     val scope = rememberCoroutineScope()
     val view = LocalView.current
     val darkTheme = isSystemInDarkTheme()
+
+    
+    val window = (view.context as Activity).window
+    val systemBarsColor = MaterialTheme.colorScheme.background
+
     SideEffect {
-        val window = (view.context as Activity).window
-        val systemUiFlags = if (!darkTheme) {
-            @Suppress("DEPRECATION")
-            window.decorView.systemUiVisibility or View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
-        } else {
-            @Suppress("DEPRECATION")
-            window.decorView.systemUiVisibility and View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR.inv()
-        }
-        @Suppress("DEPRECATION")
-        window.decorView.systemUiVisibility = systemUiFlags
+        
+        window.statusBarColor = systemBarsColor.toArgb()
+        window.navigationBarColor = systemBarsColor.toArgb()
+
+      
+        WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !darkTheme
+        WindowCompat.getInsetsController(window, view).isAppearanceLightNavigationBars = !darkTheme
     }
 
     var isSettingWallpaper by remember { mutableStateOf(false) }
     var showDestinationSheet by remember { mutableStateOf(false) }
-    var selectedWallpaperForDetail by remember { mutableStateOf<Wallpaper?>(null) }
+    
+    var wallpaperToApplyState by remember { mutableStateOf<Wallpaper?>(null) }
+    
+    var selectedWallpaperIndex by remember { mutableIntStateOf(-1) }
+    var showFilterPanel by remember { mutableStateOf(false) }
 
-    BackHandler(enabled = selectedWallpaperForDetail != null) {
-        selectedWallpaperForDetail = null
+    val isDetailViewActive = selectedWallpaperIndex != -1
+
+    BackHandler(enabled = isDetailViewActive) {
+        selectedWallpaperIndex = -1
     }
 
     val filteredWallpapers = viewModel.filteredWallpapers
     val selectedTag = viewModel.selectedTag
 
-    val pagerState = rememberPagerState(
+    val mainPagerState = rememberPagerState(
         pageCount = { filteredWallpapers.size }
     )
 
     LaunchedEffect(selectedTag) {
         if (filteredWallpapers.isNotEmpty()) {
-            pagerState.scrollToPage(0)
+            mainPagerState.scrollToPage(0)
         }
     }
-
+    
     val currentWallpaper by remember {
         derivedStateOf {
             if (filteredWallpapers.isNotEmpty()) {
-                filteredWallpapers[pagerState.currentPage]
+                filteredWallpapers.getOrNull(mainPagerState.currentPage)
             } else {
                 null
             }
@@ -230,22 +249,38 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background
     ) { paddingValues ->
-
-        if (selectedWallpaperForDetail != null) {
-            WallpaperDetailScreen(
-                wallpaper = selectedWallpaperForDetail!!,
-                onClose = { selectedWallpaperForDetail = null },
-                onApplyClick = { showDestinationSheet = true }
-            )
+    
+        AnimatedVisibility(
+            visible = isDetailViewActive,
+            enter = fadeIn(),
+            exit = fadeOut()
+        ) {
+        	
+            if (filteredWallpapers.isNotEmpty()) {
+                WallpaperDetailScreen(
+                    wallpapers = filteredWallpapers,
+                    initialPageIndex = selectedWallpaperIndex,
+                    onClose = { selectedWallpaperIndex = -1 },
+                    
+                    onApplyClick = { wallpaper ->
+                        wallpaperToApplyState = wallpaper
+                        showDestinationSheet = true
+                    }
+                )
+            }
         }
-
-        if (selectedWallpaperForDetail == null) {
+        
+        AnimatedVisibility(
+            visible = !isDetailViewActive,
+            enter = fadeIn(),
+            exit = fadeOut()
+        ) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(paddingValues)
             ) {
-
+            	
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -256,6 +291,7 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                     Button(
                         onClick = {
                             if (currentWallpaper != null) {
+                                wallpaperToApplyState = currentWallpaper 
                                 showDestinationSheet = true
                             } else {
                                 Toast.makeText(context, "Please select a wallpaper first.", Toast.LENGTH_SHORT).show()
@@ -290,9 +326,9 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                         color = MaterialTheme.colorScheme.onBackground
                     )
                 } else {
-                    
+                	
                     HorizontalPager(
-                        state = pagerState,
+                        state = mainPagerState,
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(400.dp)
@@ -302,7 +338,7 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                         val wallpaper = filteredWallpapers[pageIndex]
 
                         val pageOffset = (
-                                (pagerState.currentPage - pageIndex) + pagerState.currentPageOffsetFraction
+                                (mainPagerState.currentPage - pageIndex) + mainPagerState.currentPageOffsetFraction
                                 ).absoluteValue.coerceIn(0f, 1f)
 
                         val scale = lerp(
@@ -319,7 +355,8 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
 
                         WallpaperPreviewCard(
                             wallpaper = wallpaper,
-                            onClick = { selectedWallpaperForDetail = wallpaper },
+                            
+                            onClick = { selectedWallpaperIndex = pageIndex },
                             modifier = Modifier.graphicsLayer {
                                 scaleX = scale
                                 scaleY = scale
@@ -328,102 +365,159 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                         )
                     }
 
-                    Column(
+                    
+                    Box(
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
                             .fillMaxWidth()
                             .navigationBarsPadding()
-                            .padding(bottom = 48.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
+                            .padding(bottom = 72.dp), 
+                        contentAlignment = Alignment.Center
                     ) {
-                        Row(
+                        FixedTransitionIndicator(
+                            pagerState = mainPagerState,
                             modifier = Modifier
-                                .padding(horizontal = 16.dp)
-                                .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            viewModel.allTags.forEach { tag ->
-                                CategoryChip(
-                                    title = tag,
-                                    isSelected = tag == selectedTag,
-                                    onClick = { viewModel.selectTag(tag) }
-                                )
-                            }
-                        }
+                        )
+                    }
+
+                    
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .fillMaxWidth()
+                            .navigationBarsPadding()
+                            .padding(bottom = 16.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CategoryChip(
+                            title = "Filter: $selectedTag",
+                            isSelected = true,
+                            onClick = { showFilterPanel = true },
+                            icon = Icons.Default.FilterList
+                        )
                     }
                 }
             }
         }
-        if (showDestinationSheet && (currentWallpaper != null || selectedWallpaperForDetail != null)) {
-            val wallpaperToApply = selectedWallpaperForDetail ?: currentWallpaper
 
-            if (wallpaperToApply != null) {
-                val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-                ModalBottomSheet(
-                    onDismissRequest = { showDestinationSheet = false },
-                    sheetState = sheetState,
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+        
+        if (showFilterPanel) {
+            val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+            ModalBottomSheet(
+                onDismissRequest = { showFilterPanel = false },
+                sheetState = sheetState,
+                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp, vertical = 24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
+                    Text(
+                        text = "Select Wallpaper Category",
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 24.dp, vertical = 24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
+                            .padding(top = 8.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        Text(
-                            text = "Apply Wallpaper To",
-                            style = MaterialTheme.typography.headlineSmall,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.padding(bottom = 24.dp),
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-
-                        val applyWallpaperAction: (Int) -> Unit = { destination ->
-                            isSettingWallpaper = true
-                            scope.launch {
-                                withContext(Dispatchers.IO) {
-                                    setDeviceWallpaper(context, wallpaperToApply.resourceId, wallpaperToApply.title, destination)
-                                }
-                                showDestinationSheet = false
-                                isSettingWallpaper = false
-                                selectedWallpaperForDetail = null
-                            }
+                        viewModel.allTags.forEach { tag ->
+                            CategoryChip(
+                                title = tag,
+                                isSelected = tag == selectedTag,
+                                onClick = {
+                                    viewModel.selectTag(tag)
+                                    showFilterPanel = false
+                                },
+                                modifier = Modifier.fillMaxWidth(0.7f)
+                            )
                         }
-
-                        DestinationButton(
-                            icon = Icons.Default.PhotoLibrary,
-                            title = "Home & Lock Screens",
-                            subtitle = "Set as both your main and lock screen wallpaper.",
-                            isSetting = isSettingWallpaper,
-                            onClick = { applyWallpaperAction(FLAG_BOTH) }
-                        )
-
-                        Divider(modifier = Modifier.padding(vertical = 12.dp), color = MaterialTheme.colorScheme.outlineVariant)
-
-                        DestinationButton(
-                            icon = Icons.Default.PhotoLibrary,
-                            title = "Home Screen Only",
-                            subtitle = "Set only for your main home screen.",
-                            isSetting = isSettingWallpaper,
-                            onClick = { applyWallpaperAction(FLAG_HOME_SCREEN) }
-                        )
-
-                        Divider(modifier = Modifier.padding(vertical = 12.dp), color = MaterialTheme.colorScheme.outlineVariant)
-
-                        DestinationButton(
-                            icon = Icons.Default.Lock,
-                            title = "Lock Screen Only",
-                            subtitle = "Set only for your device's lock screen.",
-                            isSetting = isSettingWallpaper,
-                            onClick = { applyWallpaperAction(FLAG_LOCK_SCREEN) }
-                        )
-
-                        Spacer(modifier = Modifier.height(32.dp))
                     }
+
+                    Spacer(modifier = Modifier.height(16.dp))
                 }
             }
         }
 
+
+        
+        if (showDestinationSheet && wallpaperToApplyState != null) {
+            val wallpaperToApply = wallpaperToApplyState!!
+
+            val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+            ModalBottomSheet(
+                onDismissRequest = { showDestinationSheet = false; wallpaperToApplyState = null },
+                sheetState = sheetState,
+                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp, vertical = 24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = "Apply Wallpaper To",
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(bottom = 24.dp),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+
+                    val applyWallpaperAction: (Int) -> Unit = { destination ->
+                        isSettingWallpaper = true
+                        scope.launch {
+                            withContext(Dispatchers.IO) {
+                                setDeviceWallpaper(context, wallpaperToApply.resourceId, wallpaperToApply.title, destination)
+                            }
+                            showDestinationSheet = false
+                            isSettingWallpaper = false
+                            wallpaperToApplyState = null 
+                        }
+                    }
+
+                    DestinationButton(
+                        icon = Icons.Default.PhotoLibrary,
+                        title = "Home & Lock Screens",
+                        subtitle = "Set as both your main and lock screen wallpaper.",
+                        isSetting = isSettingWallpaper,
+                        onClick = { applyWallpaperAction(FLAG_BOTH) }
+                    )
+
+                    Divider(modifier = Modifier.padding(vertical = 12.dp), color = MaterialTheme.colorScheme.outlineVariant)
+
+                    DestinationButton(
+                        icon = Icons.Default.PhotoLibrary,
+                        title = "Home Screen Only",
+                        subtitle = "Set only for your main home screen.",
+                        isSetting = isSettingWallpaper,
+                        onClick = { applyWallpaperAction(FLAG_HOME_SCREEN) }
+                    )
+
+                    Divider(modifier = Modifier.padding(vertical = 12.dp), color = MaterialTheme.colorScheme.outlineVariant)
+
+                    DestinationButton(
+                        icon = Icons.Default.Lock,
+                        title = "Lock Screen Only",
+                        subtitle = "Set only for your device's lock screen.",
+                        isSetting = isSettingWallpaper,
+                        onClick = { applyWallpaperAction(FLAG_LOCK_SCREEN) }
+                    )
+
+                    Spacer(modifier = Modifier.height(32.dp))
+                }
+            }
+        }
+
+        
         AnimatedVisibility(
             visible = isSettingWallpaper,
             enter = fadeIn(),
@@ -434,33 +528,108 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun FixedTransitionIndicator(
+    pagerState: PagerState,
+    modifier: Modifier = Modifier,
+    activeColor: Color = MaterialTheme.colorScheme.primary,
+    inactiveColor: Color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
+    trackWidth: Dp = 80.dp,
+    baseTrackHeight: Dp = 4.dp
+) {
+    if (pagerState.pageCount <= 1) return
+
+  
+    val absoluteTransitionFraction = pagerState.currentPageOffsetFraction.absoluteValue
+    val transitionFraction = pagerState.currentPageOffsetFraction
+
+    
+    val heightIncrease = 2.dp * absoluteTransitionFraction
+    val activeTrackHeight = baseTrackHeight + heightIncrease
+
+    
+    val activeWidth = trackWidth * absoluteTransitionFraction
+    
+    val offsetX: Dp = if (transitionFraction < 0) {
+        
+        0.dp
+    } else {
+        
+        trackWidth - activeWidth
+    }
+
+    
+    Box(
+        modifier = modifier
+            .width(trackWidth)
+            .height(baseTrackHeight)
+            .background(inactiveColor, RoundedCornerShape(50))
+    ) {
+        
+        Box(
+            modifier = Modifier
+                .offset(x = offsetX)
+                .width(activeWidth)
+                .height(activeTrackHeight) 
+                .background(activeColor, RoundedCornerShape(50))
+                .align(Alignment.CenterStart) 
+        )
+    }
+}
+
+
+
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun WallpaperDetailScreen(
-    wallpaper: Wallpaper,
+    wallpapers: List<Wallpaper>,
+    initialPageIndex: Int,
     onClose: () -> Unit,
-    onApplyClick: () -> Unit
+    onApplyClick: (Wallpaper) -> Unit
 ) {
+    
+    val detailPagerState = rememberPagerState(
+        initialPage = initialPageIndex,
+        pageCount = { wallpapers.size }
+    )
+
+ 
+    val currentWallpaper = wallpapers.getOrNull(detailPagerState.currentPage)
+
+    if (currentWallpaper == null) {
+        onClose()
+        return
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
     ) {
-
-        Image(
-            painter = painterResource(id = wallpaper.resourceId),
-            contentDescription = "Fullscreen: ${wallpaper.title}",
-            contentScale = ContentScale.Crop,
+        
+        HorizontalPager(
+            state = detailPagerState,
             modifier = Modifier.fillMaxSize()
-        )
-
+        ) { pageIndex ->
+           
+            Image(
+                painter = painterResource(id = wallpapers[pageIndex].resourceId),
+                contentDescription = "Fullscreen: ${wallpapers[pageIndex].title}",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+        
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .statusBarsPadding()
-                .padding(16.dp),
+                .padding(horizontal = 16.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
+            
             IconButton(
                 onClick = onClose,
                 modifier = Modifier.background(Color.Black.copy(alpha = 0.3f), RoundedCornerShape(50))
@@ -471,42 +640,60 @@ fun WallpaperDetailScreen(
                     tint = Color.White
                 )
             }
-            Text(
-                text = wallpaper.title,
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                color = Color.White,
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(horizontal = 16.dp),
-                textAlign = TextAlign.Center
-            )
-            Spacer(modifier = Modifier.width(48.dp))
-        }
 
-        Button(
-            onClick = onApplyClick,
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .statusBarsPadding()
-                .padding(top = 72.dp)
-                .height(64.dp)
-                .widthIn(min = 200.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.95f),
-                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-            ),
-            shape = RoundedCornerShape(28.dp)
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Image, contentDescription = "Set")
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "SET WALLPAPER",
-                    fontWeight = FontWeight.ExtraBold,
-                    style = MaterialTheme.typography.labelLarge
-                )
+            
+            Button(
+              
+                onClick = { onApplyClick(currentWallpaper) },
+                modifier = Modifier
+                    .height(48.dp) 
+                    .widthIn(min = 120.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f),
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                ),
+                shape = RoundedCornerShape(24.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Image, contentDescription = "Set", modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "APPLY",
+                        fontWeight = FontWeight.ExtraBold,
+                        style = MaterialTheme.typography.labelLarge
+                    )
+                }
             }
+        }
+        
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .fillMaxWidth()
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.6f)),
+                        startY = 0f,
+                        endY = 400f
+                    )
+                )
+                .navigationBarsPadding()
+                .padding(horizontal = 24.dp, vertical = 32.dp),
+            verticalArrangement = Arrangement.Bottom
+        ) {
+            Text(
+                text = currentWallpaper.tag,
+                color = Color.White.copy(alpha = 0.7f),
+                style = MaterialTheme.typography.labelLarge,
+                fontSize = 14.sp
+            )
+            Text(
+                text = currentWallpaper.title,
+                color = Color.White,
+                style = MaterialTheme.typography.headlineLarge,
+                fontWeight = FontWeight.Bold,
+                lineHeight = 38.sp
+            )
         }
     }
 }
@@ -522,6 +709,7 @@ fun WallpaperPreviewCard(wallpaper: Wallpaper, onClick: () -> Unit, modifier: Mo
         shape = RoundedCornerShape(32.dp),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
+      
         Image(
             painter = painterResource(id = wallpaper.resourceId),
             contentDescription = "Preview: ${wallpaper.title}",
@@ -532,9 +720,16 @@ fun WallpaperPreviewCard(wallpaper: Wallpaper, onClick: () -> Unit, modifier: Mo
 }
 
 @Composable
-fun CategoryChip(title: String, isSelected: Boolean, onClick: () -> Unit) {
+fun CategoryChip(
+    title: String,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    icon: ImageVector? = null
+) {
     Button(
         onClick = onClick,
+        modifier = modifier,
         colors = ButtonDefaults.buttonColors(
             containerColor = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
             contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
@@ -543,7 +738,17 @@ fun CategoryChip(title: String, isSelected: Boolean, onClick: () -> Unit) {
         shape = RoundedCornerShape(50),
         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp)
     ) {
-        Text(text = title, fontWeight = FontWeight.SemiBold)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (icon != null) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+            }
+            Text(text = title, fontWeight = FontWeight.SemiBold)
+        }
     }
 }
 
@@ -651,8 +856,14 @@ fun setDeviceWallpaper(context: Context, resourceId: Int, title: String, destina
 
     try {
         val bitmap = BitmapFactory.decodeResource(context.resources, resourceId)
-
-        wallpaperManager.setBitmap(bitmap, null, true, destination)
+        
+        @Suppress("DEPRECATION")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            wallpaperManager.setBitmap(bitmap, null, true, destination)
+        } else {
+            
+            wallpaperManager.setBitmap(bitmap)
+        }
 
         android.os.Handler(context.mainLooper).post {
             Toast.makeText(context, "Wallpaper '$title' set successfully to $destinationText!", Toast.LENGTH_LONG).show()
@@ -679,7 +890,6 @@ fun WallpaperAppTheme(content: @Composable () -> Unit) {
     val colorScheme = when {
         dynamicColorSupported && darkTheme -> dynamicDarkColorScheme(context)
         dynamicColorSupported && !darkTheme -> dynamicLightColorScheme(context)
-        darkTheme -> MaterialTheme.colorScheme
         else -> MaterialTheme.colorScheme
     }
 
