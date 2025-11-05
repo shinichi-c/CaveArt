@@ -19,3 +19,7 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+# R8 rule to keep alive wallpaper after app compress 😙
+-keepclassmembers class **.R$drawable {
+    public static <fields>;
+}
