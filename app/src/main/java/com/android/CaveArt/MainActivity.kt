@@ -12,6 +12,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing 
+import androidx.compose.animation.core.animateFloatAsState 
+import androidx.compose.animation.core.tween 
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -57,6 +60,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch 
 import androidx.compose.material3.Text
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
@@ -84,9 +88,8 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
-import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.dp 
+import androidx.compose.ui.unit.sp 
 import androidx.compose.ui.util.lerp
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -96,6 +99,7 @@ import kotlinx.coroutines.withContext
 import java.io.IOException
 import kotlin.math.absoluteValue
 import androidx.core.view.WindowCompat
+import com.android.CaveArt.FastScrollIndicator 
 
 private const val FLAG_HOME_SCREEN = 1
 private const val FLAG_LOCK_SCREEN = 2
@@ -153,10 +157,17 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     val baseWallpapers: List<Wallpaper> = loadWallpapersDynamically(application.applicationContext)
 
     
-    val allWallpapers: List<Wallpaper> = List(4) { baseWallpapers }.flatten()
+    val allWallpapers: List<Wallpaper> = baseWallpapers
 
     var selectedTag by mutableStateOf("All")
         private set
+        
+    private val _isHapticsEnabled = mutableStateOf(true)
+    val isHapticsEnabled: Boolean by _isHapticsEnabled
+    
+    fun setHapticsEnabled(enabled: Boolean) {
+        _isHapticsEnabled.value = enabled
+    }
 
     val allTags: List<String> = listOf("All") + baseWallpapers.map { it.tag }.distinct().sorted()
 
@@ -179,8 +190,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            WallpaperAppTheme {
-                SwipableWallpaperScreen()
+            WallpaperAppTheme { 
+                SwipableWallpaperScreen() 
             }
         }
     }
@@ -229,6 +240,26 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
     val mainPagerState = rememberPagerState(
         pageCount = { filteredWallpapers.size }
     )
+    
+    var animateCardKey by remember { mutableIntStateOf(mainPagerState.currentPage) }
+    var lastPage by remember { mutableIntStateOf(mainPagerState.currentPage) }
+
+    LaunchedEffect(mainPagerState.currentPage) {
+        if (lastPage != mainPagerState.currentPage) {
+            animateCardKey = mainPagerState.currentPage
+        }
+        lastPage = mainPagerState.currentPage
+    }
+    val onDragStartHaptics: () -> Unit = {
+        if (viewModel.isHapticsEnabled) {
+            view.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+        }
+    }
+    val onPageChangeHaptics: () -> Unit = {
+        if (viewModel.isHapticsEnabled) {
+            view.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY)
+        }
+    }
 
     LaunchedEffect(selectedTag) {
         if (filteredWallpapers.isNotEmpty()) {
@@ -355,13 +386,12 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
 
                         WallpaperPreviewCard(
                             wallpaper = wallpaper,
-                            
+                            normalPageScale = scale,
+                            normalPageAlpha = alpha,
                             onClick = { selectedWallpaperIndex = pageIndex },
-                            modifier = Modifier.graphicsLayer {
-                                scaleX = scale
-                                scaleY = scale
-                                this.alpha = alpha
-                            }
+                            modifier = Modifier,
+                            animationTriggerKey = animateCardKey, 
+                            pageIndex = pageIndex
                         )
                     }
 
@@ -374,9 +404,15 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                             .padding(bottom = 72.dp), 
                         contentAlignment = Alignment.Center
                     ) {
-                        FixedTransitionIndicator(
+                        FastScrollIndicator(
                             pagerState = mainPagerState,
-                            modifier = Modifier
+                            modifier = Modifier,
+                            defaultTrackWidth = 80.dp, 
+                            dragTrackWidth = 200.dp, 
+                            defaultTrackHeight = 4.dp, 
+                            dragTrackHeight = 10.dp,
+                            onDragStartHaptics = onDragStartHaptics,
+                            onPageChangeHaptics = onPageChangeHaptics
                         )
                     }
 
@@ -422,10 +458,45 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth(0.9f)
+                            .height(64.dp)
+                            .padding(horizontal = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(horizontalAlignment = Alignment.Start) {
+                            Text(
+                                text = "Fast Scroll Haptics",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = if (viewModel.isHapticsEnabled) "Tap/vibration feedback is ON" else "Tap/vibration feedback is OFF",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = viewModel.isHapticsEnabled,
+                            onCheckedChange = { viewModel.setHapticsEnabled(it) }
+                        )
+                    }
+                    
+                    Divider(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 12.dp), 
+                        color = MaterialTheme.colorScheme.outlineVariant
+                    )
+                    
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(top = 8.dp),
+                            
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
@@ -527,57 +598,6 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
         }
     }
 }
-
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-fun FixedTransitionIndicator(
-    pagerState: PagerState,
-    modifier: Modifier = Modifier,
-    activeColor: Color = MaterialTheme.colorScheme.primary,
-    inactiveColor: Color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
-    trackWidth: Dp = 80.dp,
-    baseTrackHeight: Dp = 4.dp
-) {
-    if (pagerState.pageCount <= 1) return
-
-  
-    val absoluteTransitionFraction = pagerState.currentPageOffsetFraction.absoluteValue
-    val transitionFraction = pagerState.currentPageOffsetFraction
-
-    
-    val heightIncrease = 2.dp * absoluteTransitionFraction
-    val activeTrackHeight = baseTrackHeight + heightIncrease
-
-    
-    val activeWidth = trackWidth * absoluteTransitionFraction
-    
-    val offsetX: Dp = if (transitionFraction < 0) {
-        
-        0.dp
-    } else {
-        
-        trackWidth - activeWidth
-    }
-
-    
-    Box(
-        modifier = modifier
-            .width(trackWidth)
-            .height(baseTrackHeight)
-            .background(inactiveColor, RoundedCornerShape(50))
-    ) {
-        
-        Box(
-            modifier = Modifier
-                .offset(x = offsetX)
-                .width(activeWidth)
-                .height(activeTrackHeight) 
-                .background(activeColor, RoundedCornerShape(50))
-                .align(Alignment.CenterStart) 
-        )
-    }
-}
-
 
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -700,12 +720,39 @@ fun WallpaperDetailScreen(
 
 
 @Composable
-fun WallpaperPreviewCard(wallpaper: Wallpaper, onClick: () -> Unit, modifier: Modifier = Modifier) {
+fun WallpaperPreviewCard(
+    wallpaper: Wallpaper, 
+    onClick: () -> Unit, 
+    modifier: Modifier = Modifier,
+    normalPageScale: Float,
+    normalPageAlpha: Float,
+    animationTriggerKey: Int = -1,
+    pageIndex: Int = -2
+) {
+    val isAnimated = animationTriggerKey == pageIndex
+    
+    val targetScale = if (isAnimated) 1.05f else 1f
+    
+    val animatedScale by animateFloatAsState(
+        targetValue = targetScale,
+        animationSpec = tween(
+            durationMillis = 150,
+            easing = FastOutSlowInEasing
+        ), label = "WallpaperScaleAnimation"
+    )
+    
+    val combinedScale = normalPageScale * animatedScale
+
     Card(
         modifier = modifier
             .fillMaxSize()
             .padding(horizontal = 4.dp)
-            .clickable(onClick = onClick),
+            .clickable(onClick = onClick)
+            .graphicsLayer {
+                scaleX = combinedScale 
+                scaleY = combinedScale
+                alpha = normalPageAlpha
+            },
         shape = RoundedCornerShape(32.dp),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
@@ -866,12 +913,12 @@ fun setDeviceWallpaper(context: Context, resourceId: Int, title: String, destina
         }
 
         android.os.Handler(context.mainLooper).post {
-            Toast.makeText(context, "Wallpaper '$title' set successfully to $destinationText!", Toast.LENGTH_LONG).show()
+            Toast.makeText(context, "Wallpaper '" + title + "' set successfully to " + destinationText + "!", Toast.LENGTH_LONG).show()
         }
     } catch (e: IOException) {
         e.printStackTrace()
         android.os.Handler(context.mainLooper).post {
-            Toast.makeText(context, "Failed to set wallpaper: ${e.message}", Toast.LENGTH_LONG).show()
+            Toast.makeText(context, "Failed to set wallpaper: " + e.message, Toast.LENGTH_LONG).show()
         }
     } catch (e: SecurityException) {
         e.printStackTrace()
