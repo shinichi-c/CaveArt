@@ -198,7 +198,7 @@ fun FastScrollIndicator(
                 modifier = Modifier
                     .offset(x = constrainedDotOffset)
                     .size(dotSize)
-                    .background(MaterialTheme.colorScheme.tertiary, CircleShape)
+                    .background(activeColor, CircleShape)
                     .align(Alignment.CenterStart) 
             )
         }
