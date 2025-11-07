@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn 
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -38,6 +39,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.grid.GridCells 
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid 
+import androidx.compose.foundation.lazy.grid.items 
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
@@ -48,6 +52,7 @@ import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -227,6 +232,7 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
     
     var selectedWallpaperIndex by remember { mutableIntStateOf(-1) }
     var showFilterPanel by remember { mutableStateOf(false) }
+    var showSettingsPanel by remember { mutableStateOf(false) } 
 
     val isDetailViewActive = selectedWallpaperIndex != -1
 
@@ -312,41 +318,18 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                     .padding(paddingValues)
             ) {
             	
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .statusBarsPadding()
-                        .padding(top = 16.dp),
-                    contentAlignment = Alignment.TopCenter
-                ) {
-                    Button(
-                        onClick = {
-                            if (currentWallpaper != null) {
-                                wallpaperToApplyState = currentWallpaper 
-                                showDestinationSheet = true
-                            } else {
-                                Toast.makeText(context, "Please select a wallpaper first.", Toast.LENGTH_SHORT).show()
-                            }
-                        },
+                val wallpaper = currentWallpaper
+                if (wallpaper != null) {
+                    Text(
+                        text = wallpaper.title,
                         modifier = Modifier
-                            .widthIn(min = 180.dp)
-                            .height(56.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.95f),
-                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                        ),
-                        shape = RoundedCornerShape(28.dp)
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Image, contentDescription = "Set Wallpaper")
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "SET WALLPAPER",
-                                fontWeight = FontWeight.ExtraBold,
-                                style = MaterialTheme.typography.labelLarge
-                            )
-                        }
-                    }
+                            .align(Alignment.TopCenter)
+                            .statusBarsPadding()
+                            .padding(top = 16.dp),
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
                 }
 
                 if (filteredWallpapers.isEmpty()) {
@@ -394,14 +377,13 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                             pageIndex = pageIndex
                         )
                     }
-
                     
                     Box(
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
                             .fillMaxWidth()
                             .navigationBarsPadding()
-                            .padding(bottom = 72.dp), 
+                            .padding(bottom = 100.dp), 
                         contentAlignment = Alignment.Center
                     ) {
                         FastScrollIndicator(
@@ -415,21 +397,26 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                             onPageChangeHaptics = onPageChangeHaptics
                         )
                     }
-
                     
                     Box(
                         modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .fillMaxWidth()
+                            .align(Alignment.BottomCenter) 
                             .navigationBarsPadding()
-                            .padding(bottom = 16.dp),
+                            .padding(bottom = 24.dp), 
                         contentAlignment = Alignment.Center
                     ) {
-                        CategoryChip(
-                            title = "Filter: $selectedTag",
-                            isSelected = true,
-                            onClick = { showFilterPanel = true },
-                            icon = Icons.Default.FilterList
+                        ConnectedWallpaperActions(
+                            currentWallpaper = currentWallpaper,
+                            onSetWallpaperClick = { 
+                                if (currentWallpaper != null) {
+                                    wallpaperToApplyState = currentWallpaper 
+                                    showDestinationSheet = true
+                                } else {
+                                    Toast.makeText(context, "Please select a wallpaper first.", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            onFilterClick = { showFilterPanel = true },
+                            onSettingsClick = { showSettingsPanel = true } 
                         )
                     }
                 }
@@ -458,33 +445,6 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth(0.9f)
-                            .height(64.dp)
-                            .padding(horizontal = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column(horizontalAlignment = Alignment.Start) {
-                            Text(
-                                text = "Fast Scroll Haptics",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = if (viewModel.isHapticsEnabled) "Tap/vibration feedback is ON" else "Tap/vibration feedback is OFF",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Switch(
-                            checked = viewModel.isHapticsEnabled,
-                            onCheckedChange = { viewModel.setHapticsEnabled(it) }
-                        )
-                    }
-                    
                     Divider(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -492,15 +452,17 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                         color = MaterialTheme.colorScheme.outlineVariant
                     )
                     
-                    Column(
+                    LazyVerticalGrid(
+                        columns = GridCells.Adaptive(minSize = 120.dp), 
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(top = 8.dp),
-                            
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                            .padding(top = 8.dp)
+                            .heightIn(max = 300.dp), 
+                        contentPadding = PaddingValues(horizontal = 4.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        viewModel.allTags.forEach { tag ->
+                        items(viewModel.allTags) { tag ->
                             CategoryChip(
                                 title = tag,
                                 isSelected = tag == selectedTag,
@@ -508,14 +470,21 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                                     viewModel.selectTag(tag)
                                     showFilterPanel = false
                                 },
-                                modifier = Modifier.fillMaxWidth(0.7f)
+                                modifier = Modifier.fillMaxWidth() 
                             )
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(16.dp))
                 }
             }
+        }
+        
+        
+        if (showSettingsPanel) {
+            SettingsSheet( 
+                viewModel = viewModel,
+                onDismiss = { showSettingsPanel = false }
+            )
         }
 
 
@@ -595,6 +564,76 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
             exit = fadeOut()
         ) {
             LoadingOverlay(title = "Setting Wallpaper...")
+        }
+    }
+}
+
+@Composable
+fun ConnectedWallpaperActions(
+    currentWallpaper: Wallpaper?,
+    onSetWallpaperClick: () -> Unit,
+    onFilterClick: () -> Unit,
+    onSettingsClick: () -> Unit 
+) {
+    val enabled = currentWallpaper != null
+    val buttonHeight = 48.dp 
+    val iconSize = 20.dp
+    val commonButtonColors = ButtonDefaults.buttonColors(
+        containerColor = MaterialTheme.colorScheme.primaryContainer,
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+    )
+    
+    Row(
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+    	
+        Button(
+            onClick = onSettingsClick, 
+            modifier = Modifier
+                .height(buttonHeight)
+                .width(buttonHeight),
+            colors = commonButtonColors,
+            shape = RoundedCornerShape(topStart = 24.dp, bottomStart = 24.dp, topEnd = 0.dp, bottomEnd = 0.dp), 
+            contentPadding = PaddingValues(0.dp)
+        ) {
+             Icon(
+                imageVector = Icons.Default.Settings,
+                contentDescription = "App Settings",
+                modifier = Modifier.size(iconSize)
+            )
+        }
+        
+        Button(
+            onClick = onSetWallpaperClick,
+            enabled = enabled,
+            modifier = Modifier
+                .height(buttonHeight),
+            colors = commonButtonColors,
+            shape = RoundedCornerShape(0.dp) 
+        ) {
+            Icon(Icons.Default.Image, contentDescription = "Set Wallpaper", modifier = Modifier.size(iconSize))
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "APPLY", 
+                fontWeight = FontWeight.ExtraBold,
+                style = MaterialTheme.typography.labelLarge
+            )
+        }
+        
+        Button(
+            onClick = onFilterClick,
+            modifier = Modifier
+                .height(buttonHeight)
+                .width(buttonHeight),
+            colors = commonButtonColors,
+            shape = RoundedCornerShape(topStart = 0.dp, bottomStart = 0.dp, topEnd = 24.dp, bottomEnd = 24.dp), 
+            contentPadding = PaddingValues(0.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.FilterList,
+                contentDescription = "Filter Wallpapers",
+                modifier = Modifier.size(iconSize)
+            )
         }
     }
 }
@@ -777,10 +816,13 @@ fun CategoryChip(
     Button(
         onClick = onClick,
         modifier = modifier,
-        colors = ButtonDefaults.buttonColors(
-            containerColor = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-            contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
-        ),
+        
+colors = ButtonDefaults.filledTonalButtonColors( 
+    containerColor = if (isSelected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+    contentColor = if (isSelected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+),
+
+
         elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp, pressedElevation = 0.dp),
         shape = RoundedCornerShape(50),
         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp)
@@ -798,6 +840,7 @@ fun CategoryChip(
         }
     }
 }
+
 
 @Composable
 fun DestinationButton(
