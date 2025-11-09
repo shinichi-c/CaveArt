@@ -4,9 +4,12 @@ import android.app.Activity
 import android.app.Application
 import android.app.WallpaperManager
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.os.Build
 import android.os.Bundle
+import android.util.DisplayMetrics
+import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -103,8 +106,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.IOException
 import kotlin.math.absoluteValue
+import kotlin.math.max
 import androidx.core.view.WindowCompat
-import com.android.CaveArt.FastScrollIndicator 
 
 private const val FLAG_HOME_SCREEN = 1
 private const val FLAG_LOCK_SCREEN = 2
@@ -172,6 +175,13 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     
     fun setHapticsEnabled(enabled: Boolean) {
         _isHapticsEnabled.value = enabled
+    }
+    
+    private val _isFixedAlignmentEnabled = mutableStateOf(true)
+    val isFixedAlignmentEnabled: Boolean by _isFixedAlignmentEnabled 
+
+    fun setFixedAlignmentEnabled(enabled: Boolean) {
+        _isFixedAlignmentEnabled.value = enabled
     }
 
     val allTags: List<String> = listOf("All") + baseWallpapers.map { it.tag }.distinct().sorted()
@@ -387,15 +397,15 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                         contentAlignment = Alignment.Center
                     ) {
                         FastScrollIndicator(
-                            pagerState = mainPagerState,
-                            modifier = Modifier,
-                            defaultTrackWidth = 80.dp, 
-                            dragTrackWidth = 200.dp, 
-                            defaultTrackHeight = 4.dp, 
-                            dragTrackHeight = 10.dp,
-                            onDragStartHaptics = onDragStartHaptics,
-                            onPageChangeHaptics = onPageChangeHaptics
-                        )
+                             pagerState = mainPagerState,
+                             modifier = Modifier,
+                             defaultTrackWidth = 80.dp, 
+                             dragTrackWidth = 200.dp, 
+                             defaultTrackHeight = 4.dp, 
+                             dragTrackHeight = 10.dp,
+                             onDragStartHaptics = onDragStartHaptics,
+                             onPageChangeHaptics = onPageChangeHaptics
+                         )
                     }
                     
                     Box(
@@ -491,6 +501,8 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
         
         if (showDestinationSheet && wallpaperToApplyState != null) {
             val wallpaperToApply = wallpaperToApplyState!!
+            
+            val isFixedAlignmentEnabled = viewModel.isFixedAlignmentEnabled
 
             val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
             ModalBottomSheet(
@@ -516,7 +528,13 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                         isSettingWallpaper = true
                         scope.launch {
                             withContext(Dispatchers.IO) {
-                                setDeviceWallpaper(context, wallpaperToApply.resourceId, wallpaperToApply.title, destination)
+                                setDeviceWallpaper(
+                                    context, 
+                                    wallpaperToApply.resourceId, 
+                                    wallpaperToApply.title, 
+                                    destination,
+                                    isFixedAlignmentEnabled
+                                )
                             }
                             showDestinationSheet = false
                             isSettingWallpaper = false
@@ -567,6 +585,7 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
         }
     }
 }
+
 
 @Composable
 fun ConnectedWallpaperActions(
@@ -935,7 +954,14 @@ fun LoadingOverlay(title: String) {
     }
 }
 
-fun setDeviceWallpaper(context: Context, resourceId: Int, title: String, destination: Int) {
+
+fun setDeviceWallpaper(
+    context: Context, 
+    resourceId: Int, 
+    title: String, 
+    destination: Int, 
+    isFixedAlignmentEnabled: Boolean
+) {
     val wallpaperManager = WallpaperManager.getInstance(context)
     val destinationText = when (destination) {
         FLAG_HOME_SCREEN -> "Home Screen"
@@ -945,14 +971,55 @@ fun setDeviceWallpaper(context: Context, resourceId: Int, title: String, destina
     }
 
     try {
-        val bitmap = BitmapFactory.decodeResource(context.resources, resourceId)
+        val originalBitmap = BitmapFactory.decodeResource(context.resources, resourceId)
+        
+        val bitmapToSet: Bitmap
+        val allowParallax: Boolean
+
+        if (isFixedAlignmentEnabled) {
+        	
+            val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+            val metrics = DisplayMetrics()
+            
+            @Suppress("DEPRECATION")
+            windowManager.defaultDisplay.getMetrics(metrics)
+            val screenWidth = metrics.widthPixels
+            val screenHeight = metrics.heightPixels
+            val bitmapWidth = originalBitmap.width
+            val bitmapHeight = originalBitmap.height
+
+            val scale: Float = maxOf(
+                screenWidth.toFloat() / bitmapWidth,
+                screenHeight.toFloat() / bitmapHeight
+            )
+            
+            val scaledWidth = (bitmapWidth * scale).toInt()
+            val scaledHeight = (bitmapHeight * scale).toInt()
+            
+            val xOffset = (scaledWidth - screenWidth) / 2
+            val yOffset = (scaledHeight - screenHeight) / 2
+            
+            val scaledBitmap = Bitmap.createScaledBitmap(originalBitmap, scaledWidth, scaledHeight, true)
+            bitmapToSet = Bitmap.createBitmap(
+                scaledBitmap,
+                xOffset,
+                yOffset,
+                screenWidth,
+                screenHeight
+            )
+            allowParallax = false
+            
+        } else {
+            bitmapToSet = originalBitmap
+            allowParallax = true        
+        }
         
         @Suppress("DEPRECATION")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            wallpaperManager.setBitmap(bitmap, null, true, destination)
-        } else {
             
-            wallpaperManager.setBitmap(bitmap)
+            wallpaperManager.setBitmap(bitmapToSet, null, allowParallax, destination) 
+        } else {
+            wallpaperManager.setBitmap(bitmapToSet)
         }
 
         android.os.Handler(context.mainLooper).post {
@@ -970,6 +1037,7 @@ fun setDeviceWallpaper(context: Context, resourceId: Int, title: String, destina
         }
     }
 }
+
 
 @Composable
 fun WallpaperAppTheme(content: @Composable () -> Unit) {

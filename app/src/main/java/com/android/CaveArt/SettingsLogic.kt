@@ -37,8 +37,8 @@ fun SettingsSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 24.dp, vertical = 24.dp)
-                .navigationBarsPadding(),
+                .navigationBarsPadding()
+                .padding(horizontal = 24.dp, vertical = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
@@ -46,16 +46,51 @@ fun SettingsSheet(
                 text = "App Settings",
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.padding(bottom = 8.dp)
             )
             
             Divider(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 12.dp), 
+                    .padding(vertical = 12.dp),
                 color = MaterialTheme.colorScheme.outlineVariant
             )
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(72.dp)
+                    .padding(horizontal = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(horizontalAlignment = Alignment.Start) {
+                    Text(
+                        text = "Disable Wallpaper Scrolling",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = if (viewModel.isFixedAlignmentEnabled) "Image pre-cropped to screen size" else "Full image is set, enabling parallax/scrolling effect",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = viewModel.isFixedAlignmentEnabled,
+                    onCheckedChange = { viewModel.setFixedAlignmentEnabled(it) }
+                )
+            }
             
+            Divider(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 12.dp),
+                color = MaterialTheme.colorScheme.outlineVariant
+            )
+
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
