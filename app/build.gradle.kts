@@ -14,10 +14,11 @@ android {
         applicationId = "com.android.CaveArt"
         minSdk = 35
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.5-squirrel"
 
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+      
+  testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     
     signingConfigs {
@@ -25,7 +26,8 @@ android {
             if (project.hasProperty("RELEASE_STORE_FILE")) {
                 storeFile = file(project.property("RELEASE_STORE_FILE") as String)
                 storePassword = project.property("RELEASE_STORE_PASSWORD") as String
-                keyAlias = project.property("RELEASE_KEY_ALIAS") as String
+                keyAlias = project.property("RELEASE_KEY_ALIAS") as 
+String
                 keyPassword = project.property("RELEASE_KEY_PASSWORD") as String
             }
         }
@@ -36,7 +38,8 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
+  
+              getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
             signingConfig = signingConfigs.getByName("release") 
@@ -46,7 +49,8 @@ android {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
-    kotlinOptions {
+  
+  kotlinOptions {
         jvmTarget = "11"
     }
     buildFeatures {
@@ -70,7 +74,17 @@ dependencies {
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.6.2")
+   
+ implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.6.2")
     implementation("androidx.compose.material:material-icons-extended")
-    implementation("androidx.appcompat:appcompat:1.6.1") 
+    implementation("androidx.appcompat:appcompat:1.6.1")
+
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.8.1")
+
+    implementation("com.google.android.gms:play-services-mlkit-image-labeling:16.0.8")
+    implementation("com.google.android.gms:play-services-mlkit-subject-segmentation:16.0.0-beta1")
+
+    implementation("com.google.accompanist:accompanist-systemuicontroller:0.34.0")
+    
+    implementation("androidx.palette:palette-ktx:1.0.0")
 }
