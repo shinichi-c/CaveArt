@@ -28,7 +28,7 @@ fun SettingsSheet(
     onDismiss: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    
+
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
@@ -39,41 +39,67 @@ fun SettingsSheet(
                 .fillMaxWidth()
                 .navigationBarsPadding()
                 .padding(horizontal = 24.dp, vertical = 24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
                 text = "App Settings",
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.padding(bottom = 8.dp)
+                modifier = Modifier.padding(bottom = 16.dp),
+                color = MaterialTheme.colorScheme.onSurface
             )
             
-            Divider(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 12.dp),
-                color = MaterialTheme.colorScheme.outlineVariant
-            )
-
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(72.dp)
+                    .height(64.dp)
                     .padding(horizontal = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Column(horizontalAlignment = Alignment.Start) {
                     Text(
-                        text = "Disable Wallpaper Scrolling",
+                        text = "Debug Subject Mask",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        text = if (viewModel.isFixedAlignmentEnabled) "Image pre-cropped to screen size" else "Full image is set, enabling parallax/scrolling effect",
+                        text = if (viewModel.isDebugMaskEnabled) "Shows subject mask instead of wallpaper" else "Shows normal wallpaper",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = viewModel.isDebugMaskEnabled,
+                    onCheckedChange = { viewModel.setDebugMaskEnabled(it) }
+                )
+            }
+
+            Divider(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 12.dp),
+                color = MaterialTheme.colorScheme.outlineVariant
+            )
+            
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(64.dp)
+                    .padding(horizontal = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(horizontalAlignment = Alignment.Start) {
+                    Text(
+                        text = "Fixed Wallpaper Alignment",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = if (viewModel.isFixedAlignmentEnabled) "Image remains static (No Parallax)" else "Image scrolls with screen (Parallax)",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -83,14 +109,14 @@ fun SettingsSheet(
                     onCheckedChange = { viewModel.setFixedAlignmentEnabled(it) }
                 )
             }
-            
+
             Divider(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(vertical = 12.dp),
                 color = MaterialTheme.colorScheme.outlineVariant
             )
-
+            
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -117,7 +143,7 @@ fun SettingsSheet(
                     onCheckedChange = { viewModel.setHapticsEnabled(it) }
                 )
             }
-            
+
             Spacer(modifier = Modifier.height(16.dp))
         }
     }
