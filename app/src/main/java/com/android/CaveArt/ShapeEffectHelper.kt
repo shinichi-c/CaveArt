@@ -4,9 +4,6 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
-import android.graphics.PorterDuff
-import android.graphics.PorterDuffXfermode
-import android.graphics.Rect
 import android.graphics.RectF
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.segmentation.subject.SubjectSegmentation
@@ -35,12 +32,13 @@ object ShapeEffectHelper {
         val width = originalBitmap.width
         val height = originalBitmap.height
         val image = InputImage.fromBitmap(originalBitmap, 0)
-
+        
         val finalBitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(finalBitmap)
         val paint = Paint(Paint.ANTI_ALIAS_FLAG)
 
         try {
+            
             val result = segmenter.process(image).await()
             val rawBounds = Geometric.calculateCircleBounds(result, originalBitmap)
 
@@ -59,20 +57,21 @@ object ShapeEffectHelper {
             canvas.drawColor(backgroundColor)
             
             val shapePath = ShapePathProvider.getPathForShape(shape, shapeBounds)
-            canvas.save()
+            val saveCount = canvas.save()
             canvas.clipPath(shapePath)
             canvas.drawBitmap(originalBitmap, 0f, 0f, paint)
-            canvas.restore()
+            canvas.restoreToCount(saveCount)
             
             if (enable3DPop) {
                 val maskBuffer = result.foregroundConfidenceMask
                 if (maskBuffer != null) {
                     val subjectBitmap = createSubjectCutout(originalBitmap, maskBuffer)
                     
-                    canvas.save()
+                    val popSaveCount = canvas.save()
+                    
                     canvas.clipRect(0f, 0f, width.toFloat(), shapeBounds.bottom)
                     canvas.drawBitmap(subjectBitmap, 0f, 0f, paint)
-                    canvas.restore()
+                    canvas.restoreToCount(popSaveCount)
                     
                     subjectBitmap.recycle()
                 }
@@ -100,7 +99,8 @@ object ShapeEffectHelper {
         val lowThreshold = 0.40f
         val highThreshold = 0.65f 
 
-        for (i in 0 until w * h) {
+        val len = w * h
+        for (i in 0 until len) {
             val confidence = maskBuffer.get()
             
             if (confidence < lowThreshold) {
@@ -112,10 +112,8 @@ object ShapeEffectHelper {
             } else {
                 
                 val originalPixel = origPixels[i]
-                
                 val t = (confidence - lowThreshold) / (highThreshold - lowThreshold)
                 val alpha = (t * 255).toInt()
-                
                 newPixels[i] = (alpha shl 24) or (originalPixel and 0x00FFFFFF)
             }
         }
