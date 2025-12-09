@@ -3,7 +3,10 @@ package com.android.CaveArt
 import android.app.Activity
 import android.graphics.BitmapFactory
 import android.graphics.RectF
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Canvas
@@ -12,6 +15,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -34,6 +38,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asComposePath
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -72,8 +77,31 @@ fun WallpaperDetailScreen(
     val currentWallpaper = wallpapers.getOrNull(detailPagerState.currentPage) ?: return run { onClose() }
     
     val isMagicMode = viewModel.isMagicShapeEnabled
+    
+    BackHandler(enabled = isMagicMode) {
+        viewModel.setMagicShapeEnabled(false)
+    }
+    
+    var areControlsVisible by remember { mutableStateOf(true) }
+    
+    LaunchedEffect(isMagicMode, detailPagerState.currentPage) {
+        areControlsVisible = true
+    }
 
-    Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .pointerInput(isMagicMode) {
+                detectTapGestures(
+                    onTap = {
+                        if (isMagicMode) {
+                            areControlsVisible = !areControlsVisible
+                        }
+                    }
+                )
+            }
+    ) {
         
         HorizontalPager(state = detailPagerState, modifier = Modifier.fillMaxSize()) { pageIndex ->
             val resourceId = wallpapers[pageIndex].resourceId
@@ -101,32 +129,38 @@ fun WallpaperDetailScreen(
             }
         }
         
-        Row(
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .fillMaxWidth()
-                .background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.6f), Color.Transparent)))
-                .statusBarsPadding()
-                .padding(horizontal = 24.dp, vertical = 16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+        AnimatedVisibility(
+            visible = !isMagicMode || areControlsVisible,
+            enter = fadeIn() + slideInVertically { -it },
+            exit = fadeOut() + slideOutVertically { -it },
+            modifier = Modifier.align(Alignment.TopCenter)
         ) {
-             IconButton(onClick = onClose) {
-                Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
-            }
-            
-            Column(horizontalAlignment = Alignment.End) {
-                Text(
-                    text = currentWallpaper.title,
-                    color = Color.White,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
-                )
-                 Text(
-                    text = currentWallpaper.tag.uppercase(),
-                    color = Color.White.copy(alpha = 0.7f),
-                    style = MaterialTheme.typography.labelSmall
-                )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.6f), Color.Transparent)))
+                    .statusBarsPadding()
+                    .padding(horizontal = 24.dp, vertical = 16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                 IconButton(onClick = onClose) {
+                    Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
+                }
+                
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        text = currentWallpaper.title,
+                        color = Color.White,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                     Text(
+                        text = currentWallpaper.tag.uppercase(),
+                        color = Color.White.copy(alpha = 0.7f),
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
             }
         }
         
@@ -169,7 +203,7 @@ fun WallpaperDetailScreen(
             }
             
             AnimatedVisibility(
-                visible = isMagicMode,
+                visible = isMagicMode && areControlsVisible,
                 enter = slideInVertically { it },
                 exit = slideOutVertically { it }
             ) {
