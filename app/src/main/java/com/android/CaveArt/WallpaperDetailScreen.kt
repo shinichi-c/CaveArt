@@ -3,8 +3,10 @@ package com.android.CaveArt
 import android.app.Activity
 import android.graphics.BitmapFactory
 import android.graphics.RectF
+import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.*
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -33,7 +35,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asComposePath
@@ -41,6 +46,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -50,6 +56,8 @@ import com.google.accompanist.systemuicontroller.rememberSystemUiController
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.sin
+import kotlin.math.pow
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -77,13 +85,13 @@ fun WallpaperDetailScreen(
     val currentWallpaper = wallpapers.getOrNull(detailPagerState.currentPage) ?: return run { onClose() }
     
     val isMagicMode = viewModel.isMagicShapeEnabled
-    
+
     BackHandler(enabled = isMagicMode) {
         viewModel.setMagicShapeEnabled(false)
     }
-    
+
     var areControlsVisible by remember { mutableStateOf(true) }
-    
+
     LaunchedEffect(isMagicMode, detailPagerState.currentPage) {
         areControlsVisible = true
     }
@@ -104,24 +112,24 @@ fun WallpaperDetailScreen(
     ) {
         
         HorizontalPager(state = detailPagerState, modifier = Modifier.fillMaxSize()) { pageIndex ->
-            val resourceId = wallpapers[pageIndex].resourceId
+            val wallpaper = wallpapers[pageIndex]
             
             if (viewModel.isMagicShapeEnabled) {
                 MagicEffectImage(
-                    resourceId = resourceId,
+                    resourceId = wallpaper.resourceId,
                     viewModel = viewModel,
                     modifier = Modifier.fillMaxSize()
                 )
             } else if (isDebugMaskEnabled) {
                 DebugMaskImage(
-                    resourceId = resourceId,
+                    resourceId = wallpaper.resourceId,
                     contentDescription = "Debug",
                     viewModel = viewModel,
                     modifier = Modifier.fillMaxSize()
                 )
             } else {
                 Image(
-                    painter = painterResource(id = resourceId),
+                    painter = painterResource(id = wallpaper.resourceId),
                     contentDescription = "Original",
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize()
@@ -218,6 +226,7 @@ fun WallpaperDetailScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MagicControlsSheet(
     currentWallpaperId: Int,
@@ -371,7 +380,11 @@ fun ShapeIcon(shape: MagicShape, color: Color, modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun MagicEffectImage(resourceId: Int, viewModel: WallpaperViewModel, modifier: Modifier = Modifier) {
+fun MagicEffectImage(
+    resourceId: Int,
+    viewModel: WallpaperViewModel,
+    modifier: Modifier = Modifier
+) {
     val context = LocalContext.current
     var processedBitmap by remember(resourceId, viewModel.currentMagicShape, viewModel.currentBackgroundColor, viewModel.is3DPopEnabled) {
         mutableStateOf<android.graphics.Bitmap?>(null)
@@ -382,7 +395,24 @@ fun MagicEffectImage(resourceId: Int, viewModel: WallpaperViewModel, modifier: M
     }
 
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
-        if (processedBitmap != null) {
+        val isProcessing = processedBitmap == null
+        
+        Image(
+            painter = painterResource(id = resourceId),
+            contentDescription = null,
+            modifier = Modifier
+                .fillMaxSize()
+                .then(
+                    if (isProcessing && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        Modifier.blur(20.dp)
+                    } else {
+                        Modifier
+                    }
+                ),
+            contentScale = ContentScale.Crop
+        )
+
+        if (!isProcessing) {
             Image(
                 bitmap = processedBitmap!!.asImageBitmap(),
                 contentDescription = null,
@@ -390,7 +420,119 @@ fun MagicEffectImage(resourceId: Int, viewModel: WallpaperViewModel, modifier: M
                 contentScale = ContentScale.Crop 
             )
         } else {
-            CircularProgressIndicator(color = Color.White)
+            
+            Spacer(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.3f))
+            )
+            
+            ParticleLoadingOverlay()
+            
+            val infiniteTransition = rememberInfiniteTransition(label = "IconPulse")
+            val scale by infiniteTransition.animateFloat(
+                initialValue = 1f,
+                targetValue = 1.15f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(1200, easing = FastOutSlowInEasing),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "Scale"
+            )
+            val glowAlpha by infiniteTransition.animateFloat(
+                initialValue = 0.3f,
+                targetValue = 0.7f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(1200, easing = LinearEasing),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "Glow"
+            )
+
+            Box(contentAlignment = Alignment.Center) {
+                
+                Canvas(modifier = Modifier.size(100.dp).scale(scale)) {
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(Color.White.copy(alpha = glowAlpha), Color.Transparent),
+                            center = center,
+                            radius = size.width / 2
+                        )
+                    )
+                }
+                
+                Icon(
+                    imageVector = Icons.Default.AutoAwesome,
+                    contentDescription = "Processing",
+                    tint = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.size(48.dp).scale(scale)
+                )
+            }
         }
     }
 }
+
+@Composable
+fun ParticleLoadingOverlay() {
+    val density = LocalDensity.current
+    
+    val particles = remember {
+        List(350) {
+            Particle(
+                initialX = Math.random().toFloat(),
+                initialY = Math.random().toFloat(),
+                radius = (Math.random() * 3 + 1).toFloat(), 
+                speed = (Math.random() * 0.05 + 0.01).toFloat(), 
+                swaySpeed = (Math.random() * 2 + 1).toFloat(), 
+                initialAlpha = (Math.random() * 0.7 + 0.1).toFloat() 
+            )
+        }
+    }
+    
+    var time by remember { mutableFloatStateOf(0f) }
+
+    LaunchedEffect(Unit) {
+        val startTime = withFrameNanos { it }
+        while (true) {
+            withFrameNanos { frameTime ->
+                time = (frameTime - startTime) / 1_000_000_000f 
+            }
+        }
+    }
+
+    Canvas(modifier = Modifier.fillMaxSize()) {
+        val width = size.width
+        val height = size.height
+
+        particles.forEachIndexed { index, p ->
+            var yProgress = (p.initialY - (p.speed * time)) % 1f
+            if (yProgress < 0) yProgress += 1f
+            val currentY = yProgress * height
+            
+            val swayOffset = sin(time * p.swaySpeed + index) * 15.dp.toPx()
+            val currentX = (p.initialX * width) + swayOffset
+            
+            val blinkSpeed = p.swaySpeed * 3f
+            val rawBlink = sin(time * blinkSpeed + index)
+            val blinkFactor = ((rawBlink + 1) / 2f).pow(2)
+            
+            val currentAlpha = (p.initialAlpha * blinkFactor).coerceIn(0f, 1f)
+
+            drawCircle(
+                color = Color.White,
+                radius = p.radius * density.density,
+                center = Offset(currentX, currentY),
+                alpha = currentAlpha
+            )
+        }
+    }
+}
+
+private data class Particle(
+    val initialX: Float,
+    val initialY: Float,
+    val radius: Float,
+    val speed: Float,
+    val swaySpeed: Float,
+    val initialAlpha: Float
+)
