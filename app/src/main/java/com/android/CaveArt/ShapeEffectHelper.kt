@@ -27,7 +27,8 @@ object ShapeEffectHelper {
         originalBitmap: Bitmap,
         shape: MagicShape,
         backgroundColor: Int,
-        enable3DPop: Boolean
+        enable3DPop: Boolean,
+        scaleFactor: Float
     ): Bitmap {
         val width = originalBitmap.width
         val height = originalBitmap.height
@@ -38,20 +39,20 @@ object ShapeEffectHelper {
         val paint = Paint(Paint.ANTI_ALIAS_FLAG)
 
         try {
-            
             val result = segmenter.process(image).await()
-            val rawBounds = Geometric.calculateCircleBounds(result, originalBitmap)
+            val rawBounds = Geometric.calculateCircleBounds(result, originalBitmap, scaleFactor)
 
             val sideLength = max(rawBounds.width(), rawBounds.height())
             val centerX = rawBounds.centerX()
             val centerY = rawBounds.centerY()
             val halfSide = sideLength / 2f
-            
+            val verticalShift = if (enable3DPop) sideLength * 0.1f else 0f
+
             val shapeBounds = RectF(
                 centerX - halfSide,
-                centerY - halfSide,
+                centerY - halfSide + verticalShift,
                 centerX + halfSide,
-                centerY + halfSide
+                centerY + halfSide + verticalShift
             )
             
             canvas.drawColor(backgroundColor)
@@ -96,21 +97,18 @@ object ShapeEffectHelper {
         val newPixels = IntArray(w * h)
         maskBuffer.rewind()
         
-        val lowThreshold = 0.40f
-        val highThreshold = 0.65f 
+        val lowThreshold = 0.45f
+        val highThreshold = 0.7f 
 
         val len = w * h
         for (i in 0 until len) {
             val confidence = maskBuffer.get()
             
             if (confidence < lowThreshold) {
-                
                 newPixels[i] = 0
             } else if (confidence >= highThreshold) {
-                
                 newPixels[i] = origPixels[i]
             } else {
-                
                 val originalPixel = origPixels[i]
                 val t = (confidence - lowThreshold) / (highThreshold - lowThreshold)
                 val alpha = (t * 255).toInt()

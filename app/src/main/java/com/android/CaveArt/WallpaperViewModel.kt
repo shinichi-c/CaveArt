@@ -7,6 +7,7 @@ import android.graphics.BitmapFactory
 import android.util.LruCache
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
@@ -48,9 +49,12 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     
     private val _isMagicShapeEnabled = mutableStateOf(false)
     val isMagicShapeEnabled: Boolean by _isMagicShapeEnabled
+    
     var currentMagicShape by mutableStateOf(MagicShape.SQUIRCLE)
     var currentBackgroundColor by mutableStateOf(AndroidColor.parseColor("#4CAF50"))
     var is3DPopEnabled by mutableStateOf(false)
+    
+    var magicScale by mutableFloatStateOf(1.0f)
     
     fun setMagicShapeEnabled(enabled: Boolean) {
         _isMagicShapeEnabled.value = enabled
@@ -63,6 +67,10 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     }
     
     fun toggle3DPop() { is3DPopEnabled = !is3DPopEnabled }
+    
+    fun updateMagicScale(scale: Float) {
+        magicScale = scale
+    }
 
     private val _isFixedAlignmentEnabled = mutableStateOf(true)
     val isFixedAlignmentEnabled: Boolean by _isFixedAlignmentEnabled
@@ -147,12 +155,11 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     }
     
     suspend fun getOrCreateProcessedBitmap(context: Context, resourceId: Int, allowMagic: Boolean = true): Bitmap? {
-        
         val useMagic = allowMagic && isMagicShapeEnabled
-
+        
         val cacheKey = when {
             isDebugMaskEnabled -> "debug_$resourceId"
-            useMagic -> "shape_${resourceId}_${currentMagicShape.name}_${currentBackgroundColor}_$is3DPopEnabled"
+            useMagic -> "shape_${resourceId}_${currentMagicShape.name}_${currentBackgroundColor}_${is3DPopEnabled}_$magicScale"
             else -> "preview_$resourceId" 
         }
         
@@ -164,7 +171,14 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
                 
                 val resultBitmap = when {
                     isDebugMaskEnabled -> DebugSegmentationHelper.createDebugMaskBitmap(context, originalBitmap)
-                    useMagic -> ShapeEffectHelper.createShapeCropBitmap(context, originalBitmap, currentMagicShape, currentBackgroundColor, is3DPopEnabled)
+                    useMagic -> ShapeEffectHelper.createShapeCropBitmap(
+                        context, 
+                        originalBitmap, 
+                        currentMagicShape, 
+                        currentBackgroundColor, 
+                        is3DPopEnabled,
+                        magicScale
+                    )
                     else -> originalBitmap 
                 }
                 
@@ -195,7 +209,14 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         try {
             val processedBitmap = when {
                 isDebugMaskEnabled -> DebugSegmentationHelper.createDebugMaskBitmap(context, originalBitmap)
-                isMagicShapeEnabled -> ShapeEffectHelper.createShapeCropBitmap(context, originalBitmap, currentMagicShape, currentBackgroundColor, is3DPopEnabled)
+                isMagicShapeEnabled -> ShapeEffectHelper.createShapeCropBitmap(
+                    context, 
+                    originalBitmap, 
+                    currentMagicShape, 
+                    currentBackgroundColor, 
+                    is3DPopEnabled,
+                    magicScale
+                )
                 else -> originalBitmap
             }
 

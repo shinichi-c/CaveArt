@@ -10,11 +10,11 @@ import kotlin.math.min
 object Geometric {
 
     private const val CONFIDENCE_THRESHOLD = 0.5f
-    private const val CIRCLE_PADDING_FACTOR = 1.2f
     
     fun calculateCircleBounds(
         result: SubjectSegmentationResult,
-        originalBitmap: Bitmap
+        originalBitmap: Bitmap,
+        paddingFactor: Float
     ): RectF {
         val foregroundMaskBuffer: FloatBuffer? = result.foregroundConfidenceMask
 
@@ -51,7 +51,7 @@ object Geometric {
             val subjectWidth = (maxX - minX).toFloat()
             val subjectHeight = (maxY - minY).toFloat()
             val maxDim = max(subjectWidth, subjectHeight)
-            val radius = (maxDim * CIRCLE_PADDING_FACTOR) / 2f
+            val radius = (maxDim * paddingFactor) / 2f
             
             return RectF(
                 centerX - radius,
@@ -60,7 +60,6 @@ object Geometric {
                 centerY + radius
             )
         } else {
-            
             return RectF(0f, 0f, maskWidth.toFloat(), maskHeight.toFloat())
         }
     }
