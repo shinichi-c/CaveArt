@@ -4,14 +4,17 @@ import android.app.WallpaperManager
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.RectF
 import android.os.Build
 import android.util.DisplayMetrics
 import android.view.WindowManager
 import android.widget.Toast
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
-import java.io.IOException
 import kotlin.math.max
+import kotlin.math.min
 
 object WallpaperDestinations {
     const val FLAG_HOME_SCREEN = 1
@@ -28,13 +31,6 @@ suspend fun setDeviceWallpaper(
     viewModel: WallpaperViewModel
 ) = withContext(Dispatchers.IO) {
     val wallpaperManager = WallpaperManager.getInstance(context)
-    val destinationText = when (destination) {
-        WallpaperDestinations.FLAG_HOME_SCREEN -> "Home Screen"
-        WallpaperDestinations.FLAG_LOCK_SCREEN -> "Lock Screen"
-        WallpaperDestinations.FLAG_BOTH -> "Home and Lock Screens"
-        else -> "Unknown"
-    }
-    
     val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     val metrics = DisplayMetrics()
     @Suppress("DEPRECATION")
@@ -50,59 +46,60 @@ suspend fun setDeviceWallpaper(
     val screenHeight = metrics.heightPixels
 
     var bitmapToSet: Bitmap? = null
-    var needsRecycle = false
-    
-    if (viewModel.isMagicShapeEnabled || viewModel.isDebugMaskEnabled) {
-    	
-        bitmapToSet = viewModel.generateHighQualityFinalBitmap(context, resourceId)
-        needsRecycle = true
-    } else {
-        
-        val options = BitmapFactory.Options().apply { inPreferredConfig = Bitmap.Config.ARGB_8888 }
-        val rawBitmap = BitmapFactory.decodeResource(context.resources, resourceId, options)
-        
-        if (rawBitmap != null) {
-            if (isFixedAlignmentEnabled) {
-                
-                val aspectRatio = screenWidth.toFloat() / screenHeight.toFloat()
-                val originalRatio = rawBitmap.width.toFloat() / rawBitmap.height.toFloat()
-                
-                val targetWidth: Int
-                val targetHeight: Int
-
-                if (originalRatio > aspectRatio) {
-                    targetHeight = screenHeight
-                    targetWidth = (screenHeight.toFloat() * originalRatio).toInt()
-                } else {
-                    targetWidth = screenWidth
-                    targetHeight = (screenWidth.toFloat() / originalRatio).toInt()
-                }
-
-                val scaledBitmap = Bitmap.createScaledBitmap(rawBitmap, targetWidth, targetHeight, true)
-                if (rawBitmap != scaledBitmap) rawBitmap.recycle()
-                
-                val startX = max(0, (targetWidth - screenWidth) / 2)
-                val startY = max(0, (targetHeight - screenHeight) / 2)
-                
-                bitmapToSet = Bitmap.createBitmap(scaledBitmap, startX, startY, screenWidth, screenHeight)
-                scaledBitmap.recycle() 
-                needsRecycle = true
-            } else {
-                
-                bitmapToSet = rawBitmap
-                needsRecycle = true
-            }
-        }
-    }
-    
-    if (bitmapToSet == null) {
-        android.os.Handler(context.mainLooper).post {
-            Toast.makeText(context, "Error: Could not load image.", Toast.LENGTH_SHORT).show()
-        }
-        return@withContext
-    }
+    var rawBitmap: Bitmap? = null
     
     try {
+        val isMagic = viewModel.isMagicShapeEnabled || viewModel.isDebugMaskEnabled
+        
+        rawBitmap = if (isMagic) {
+             viewModel.generateHighQualityFinalBitmap(context, resourceId)
+        } else {
+             val options = BitmapFactory.Options().apply { inPreferredConfig = Bitmap.Config.ARGB_8888 }
+             BitmapFactory.decodeResource(context.resources, resourceId, options)
+        }
+
+        if (rawBitmap == null) {
+            withContext(Dispatchers.Main) {
+                Toast.makeText(context, "Error: Could not load image.", Toast.LENGTH_SHORT).show()
+            }
+            return@withContext
+        }
+        
+        if (isFixedAlignmentEnabled) {
+            val finalBitmap = Bitmap.createBitmap(screenWidth, screenHeight, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(finalBitmap)
+            
+            canvas.drawColor(viewModel.currentBackgroundColor)
+
+            val imageWidth = rawBitmap.width.toFloat()
+            val imageHeight = rawBitmap.height.toFloat()
+            val scale = if (isMagic) {
+                
+                min(screenWidth.toFloat() / imageWidth, screenHeight.toFloat() / imageHeight)
+            } else {
+                
+                max(screenWidth.toFloat() / imageWidth, screenHeight.toFloat() / imageHeight)
+            }
+
+            val scaledWidth = imageWidth * scale
+            val scaledHeight = imageHeight * scale
+            val left = (screenWidth - scaledWidth) / 2f
+            val top = (screenHeight - scaledHeight) / 2f
+
+            val destRect = RectF(left, top, left + scaledWidth, top + scaledHeight)
+            val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+            
+            canvas.drawBitmap(rawBitmap, null, destRect, paint)
+
+            if (rawBitmap != finalBitmap) {
+                rawBitmap.recycle()
+            }
+            bitmapToSet = finalBitmap
+        } else {
+            
+            bitmapToSet = rawBitmap
+        }
+        
         val allowParallax = !isFixedAlignmentEnabled
         
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
@@ -111,19 +108,16 @@ suspend fun setDeviceWallpaper(
             wallpaperManager.setBitmap(bitmapToSet)
         }
         
-        android.os.Handler(context.mainLooper).post {
+        withContext(Dispatchers.Main) {
             Toast.makeText(context, "Wallpaper '$title' set successfully!", Toast.LENGTH_LONG).show()
         }
+        
     } catch (e: Exception) {
         e.printStackTrace()
-        android.os.Handler(context.mainLooper).post {
+        withContext(Dispatchers.Main) {
             Toast.makeText(context, "Failed to set wallpaper: ${e.message}", Toast.LENGTH_LONG).show()
         }
     } finally {
-        
-        if (needsRecycle && bitmapToSet != null && !bitmapToSet.isRecycled) {
-            bitmapToSet.recycle()
-        }
         System.gc()
     }
 }
