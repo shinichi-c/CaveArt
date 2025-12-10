@@ -238,6 +238,7 @@ fun MagicControlsSheet(
     
     var extractedColors by remember { mutableStateOf(listOf<Int>()) }
     var isPaletteLoading by remember { mutableStateOf(true) }
+    var sliderPosition by remember { mutableFloatStateOf(viewModel.magicScale) }
 
     LaunchedEffect(currentWallpaperId) {
         isPaletteLoading = true
@@ -319,7 +320,39 @@ fun MagicControlsSheet(
                 )
                 Spacer(modifier = Modifier.weight(1f))
             }
-
+            
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        "Shape Size", 
+                        style = MaterialTheme.typography.labelMedium, 
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        if (sliderPosition < 1.0f) "Tight (More Pop)" else "Wide (Less Pop)",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+                
+                Slider(
+                    value = sliderPosition,
+                    onValueChange = { sliderPosition = it },
+                    onValueChangeFinished = {
+                        viewModel.updateMagicScale(sliderPosition)
+                    },
+                    valueRange = 0.8f..1.4f,
+                    steps = 5
+                )
+            }
+            
             Spacer(modifier = Modifier.height(8.dp))
             
             LazyRow(
@@ -386,11 +419,23 @@ fun MagicEffectImage(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    var processedBitmap by remember(resourceId, viewModel.currentMagicShape, viewModel.currentBackgroundColor, viewModel.is3DPopEnabled) {
+    var processedBitmap by remember(
+        resourceId, 
+        viewModel.currentMagicShape, 
+        viewModel.currentBackgroundColor, 
+        viewModel.is3DPopEnabled,
+        viewModel.magicScale
+    ) {
         mutableStateOf<android.graphics.Bitmap?>(null)
     }
 
-    LaunchedEffect(resourceId, viewModel.currentMagicShape, viewModel.currentBackgroundColor, viewModel.is3DPopEnabled) {
+    LaunchedEffect(
+        resourceId, 
+        viewModel.currentMagicShape, 
+        viewModel.currentBackgroundColor, 
+        viewModel.is3DPopEnabled,
+        viewModel.magicScale
+    ) {
         processedBitmap = viewModel.getOrCreateProcessedBitmap(context, resourceId)
     }
 
