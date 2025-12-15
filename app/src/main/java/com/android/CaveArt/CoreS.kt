@@ -4,6 +4,9 @@ import android.app.Activity
 import android.graphics.Bitmap
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
@@ -23,6 +26,7 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Lock
@@ -48,8 +52,8 @@ import kotlin.math.absoluteValue
 import com.google.accompanist.systemuicontroller.rememberSystemUiController
 
 @Composable
-fun AsyncResourceImage(
-    resourceId: Int,
+fun AsyncWallpaperImage(
+    wallpaper: Wallpaper,
     contentDescription: String?,
     viewModel: WallpaperViewModel,
     modifier: Modifier = Modifier,
@@ -57,10 +61,10 @@ fun AsyncResourceImage(
     allowMagic: Boolean = true
 ) {
     val context = LocalContext.current
-    var bitmap by remember(resourceId, allowMagic) { mutableStateOf<Bitmap?>(null) }
+    var bitmap by remember(wallpaper, allowMagic) { mutableStateOf<Bitmap?>(null) }
 
-    LaunchedEffect(resourceId, allowMagic) {
-        bitmap = viewModel.getOrCreateProcessedBitmap(context, resourceId, allowMagic)
+    LaunchedEffect(wallpaper, allowMagic) {
+        bitmap = viewModel.getOrCreateProcessedBitmap(context, wallpaper, allowMagic)
     }
 
     if (bitmap != null) {
@@ -89,6 +93,14 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
     SideEffect {
         systemUiController.setStatusBarColor(systemBarsColor, darkIcons = !darkTheme)
         systemUiController.setNavigationBarColor(systemBarsColor, darkIcons = !darkTheme)
+    }
+    
+    val galleryLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) {
+            viewModel.addGalleryWallpaper(uri)
+        }
     }
 
     var isSettingWallpaper by remember { mutableStateOf(false) }
@@ -148,7 +160,9 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
         }
     }
 
-    Scaffold(containerColor = MaterialTheme.colorScheme.background) { paddingValues ->
+    Scaffold(
+        containerColor = MaterialTheme.colorScheme.background
+    ) { paddingValues ->
         Box(modifier = Modifier.fillMaxSize()) {
             
             AnimatedVisibility(
@@ -243,7 +257,11 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                                 onPageChangeHaptics = onPageChangeHaptics
                             )
                         }
-
+                    } else {
+                        CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+                    }
+                    
+                    if (!isLoading) {
                         Box(
                             modifier = Modifier
                                 .align(Alignment.BottomCenter)
@@ -262,11 +280,14 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                                     }
                                 },
                                 onFilterClick = { showFilterPanel = true },
-                                onSettingsClick = { showSettingsPanel = true }
+                                onSettingsClick = { showSettingsPanel = true },
+                                onAddClick = {
+                                    galleryLauncher.launch(
+                                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                    )
+                                }
                             )
                         }
-                    } else {
-                        CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
                     }
                 }
             }
@@ -324,7 +345,7 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                     val applyAction: (Int) -> Unit = { dest ->
                         isSettingWallpaper = true
                         scope.launch {
-                            setDeviceWallpaper(context, wallpaperToApply.resourceId, wallpaperToApply.title, dest, isFixedAlignmentEnabled, viewModel)
+                            setDeviceWallpaper(context, wallpaperToApply, dest, isFixedAlignmentEnabled, viewModel)
                             showDestinationSheet = false
                             isSettingWallpaper = false
                             wallpaperToApplyState = null
@@ -379,14 +400,14 @@ fun WallpaperPreviewCard(
     ) {
         if (isDebugMaskEnabled) {
             DebugMaskImage(
-                resourceId = wallpaper.resourceId,
+                wallpaper = wallpaper,
                 contentDescription = "Debug: ${wallpaper.title}",
                 viewModel = viewModel,
                 modifier = Modifier.fillMaxSize()
             )
         } else {
-            AsyncResourceImage(
-                resourceId = wallpaper.resourceId,
+            AsyncWallpaperImage(
+                wallpaper = wallpaper,
                 contentDescription = "Preview: ${wallpaper.title}",
                 viewModel = viewModel,
                 modifier = Modifier.fillMaxSize(),
@@ -397,20 +418,58 @@ fun WallpaperPreviewCard(
 }
 
 @Composable
-fun ConnectedWallpaperActions(currentWallpaper: Wallpaper?, onSetWallpaperClick: () -> Unit, onFilterClick: () -> Unit, onSettingsClick: () -> Unit) {
+fun ConnectedWallpaperActions(
+    currentWallpaper: Wallpaper?, 
+    onSetWallpaperClick: () -> Unit, 
+    onFilterClick: () -> Unit, 
+    onSettingsClick: () -> Unit,
+    onAddClick: () -> Unit
+) {
     val enabled = currentWallpaper != null
     val buttonHeight = 48.dp
     val commonColors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primaryContainer, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
+    
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Button(onClick = onSettingsClick, modifier = Modifier.size(buttonHeight), colors = commonColors, shape = RoundedCornerShape(24.dp, 0.dp, 0.dp, 24.dp), contentPadding = PaddingValues(0.dp)) {
+        
+        Button(
+            onClick = onSettingsClick, 
+            modifier = Modifier.size(buttonHeight), 
+            colors = commonColors, 
+            shape = RoundedCornerShape(24.dp, 0.dp, 0.dp, 24.dp), 
+            contentPadding = PaddingValues(0.dp)
+        ) {
             Icon(Icons.Default.Settings, "Settings", Modifier.size(20.dp))
         }
-        Button(onClick = onSetWallpaperClick, enabled = enabled, modifier = Modifier.height(buttonHeight), colors = commonColors, shape = RoundedCornerShape(0.dp)) {
+        
+        Button(
+            onClick = onAddClick,
+            modifier = Modifier.size(buttonHeight),
+            colors = commonColors,
+            shape = RoundedCornerShape(0.dp),
+            contentPadding = PaddingValues(0.dp)
+        ) {
+             Icon(Icons.Default.Add, "Add", Modifier.size(20.dp))
+        }
+        
+        Button(
+            onClick = onSetWallpaperClick, 
+            enabled = enabled, 
+            modifier = Modifier.height(buttonHeight), 
+            colors = commonColors, 
+            shape = RoundedCornerShape(0.dp)
+        ) {
             Icon(Icons.Default.Image, "Set", Modifier.size(20.dp))
             Spacer(Modifier.width(8.dp))
             Text("APPLY", fontWeight = FontWeight.Bold)
         }
-        Button(onClick = onFilterClick, modifier = Modifier.size(buttonHeight), colors = commonColors, shape = RoundedCornerShape(0.dp, 24.dp, 24.dp, 0.dp), contentPadding = PaddingValues(0.dp)) {
+        
+        Button(
+            onClick = onFilterClick, 
+            modifier = Modifier.size(buttonHeight), 
+            colors = commonColors, 
+            shape = RoundedCornerShape(0.dp, 24.dp, 24.dp, 0.dp), 
+            contentPadding = PaddingValues(0.dp)
+        ) {
             Icon(Icons.Default.FilterList, "Filter", Modifier.size(20.dp))
         }
     }

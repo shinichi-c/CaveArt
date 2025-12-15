@@ -21,17 +21,18 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.lifecycle.viewmodel.compose.viewModel
+import coil.compose.rememberAsyncImagePainter
 
 
 @Composable
 fun DebugMaskImage(
-    resourceId: Int,
+    wallpaper: Wallpaper,
     contentDescription: String,
     viewModel: WallpaperViewModel = viewModel(),
     modifier: Modifier = Modifier
 ) {
     ProcessedImageComposable(
-        resourceId = resourceId,
+        wallpaper = wallpaper,
         contentDescription = contentDescription,
         viewModel = viewModel,
         modifier = modifier
@@ -40,20 +41,20 @@ fun DebugMaskImage(
 
 @Composable
 private fun ProcessedImageComposable(
-    resourceId: Int,
+    wallpaper: Wallpaper,
     contentDescription: String,
     viewModel: WallpaperViewModel,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    var processedBitmap by remember(resourceId, viewModel.isDebugMaskEnabled) {
+    var processedBitmap by remember(wallpaper, viewModel.isDebugMaskEnabled) {
         mutableStateOf<Bitmap?>(null)
     }
     var isLoading by remember { mutableStateOf(false) }
 
-    LaunchedEffect(resourceId, viewModel.isDebugMaskEnabled) {
+    LaunchedEffect(wallpaper, viewModel.isDebugMaskEnabled) {
         isLoading = true
-        processedBitmap = viewModel.getOrCreateProcessedBitmap(context, resourceId)
+        processedBitmap = viewModel.getOrCreateProcessedBitmap(context, wallpaper)
         isLoading = false
     }
 
@@ -69,15 +70,24 @@ private fun ProcessedImageComposable(
                 modifier = Modifier.fillMaxSize()
             )
         } else if (!isLoading) {
-            val originalBitmap = remember(resourceId) {
-                BitmapFactory.decodeResource(context.resources, resourceId)
+            if (wallpaper.uri != null) {
+                 Image(
+                    painter = rememberAsyncImagePainter(wallpaper.uri),
+                    contentDescription = "Original: $contentDescription",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else {
+                val originalBitmap = remember(wallpaper.resourceId) {
+                    BitmapFactory.decodeResource(context.resources, wallpaper.resourceId)
+                }
+                Image(
+                    bitmap = originalBitmap.asImageBitmap(),
+                    contentDescription = "Original: $contentDescription",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
             }
-            Image(
-                bitmap = originalBitmap.asImageBitmap(),
-                contentDescription = "Original: $contentDescription",
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize()
-            )
         } else {
             CircularProgressIndicator(
                 color = MaterialTheme.colorScheme.primary,

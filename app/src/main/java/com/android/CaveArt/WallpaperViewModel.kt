@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.net.Uri
 import android.util.LruCache
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -18,12 +19,14 @@ import kotlinx.coroutines.withContext
 import android.graphics.Color as AndroidColor
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
+import java.util.UUID
 
 private const val WALLPAPER_PREFIX = "wp_"
 
 data class Wallpaper(
     val id: String,
-    val resourceId: Int,
+    val resourceId: Int = 0,
+    val uri: Uri? = null,
     val title: String,
     val tag: String,
     var mlTags: List<String> = emptyList()
@@ -101,6 +104,25 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
             scanWallpapersForTags(application.applicationContext)
         }
     }
+    
+    fun addGalleryWallpaper(uri: Uri) {
+        val newWallpaper = Wallpaper(
+            id = UUID.randomUUID().toString(),
+            uri = uri,
+            title = "Gallery Image",
+            tag = "Gallery"
+        )
+        
+        baseWallpapers = listOf(newWallpaper) + baseWallpapers
+        allWallpapers = baseWallpapers
+        
+        updateTags()
+        selectTag("All")
+        
+        viewModelScope.launch {
+            scanSingleWallpaper(getApplication(), newWallpaper)
+        }
+    }
 
     private suspend fun loadBasicWallpaperList(context: Context): List<Wallpaper> = withContext(Dispatchers.IO) {
         val drawableFields = R.drawable::class.java.fields
@@ -125,20 +147,31 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     private suspend fun scanWallpapersForTags(context: Context) = withContext(Dispatchers.IO) {
         val currentList = baseWallpapers.toList()
         currentList.forEach { wallpaper ->
-            val detectedTags = mlProcessingSemaphore.withPermit {
-                try {
-                    val smallBitmap = BitmapHelper.decodeSampledBitmapFromResource(context.resources, wallpaper.resourceId, 500)
-                    val tags = ImageLabelingHelper.getTagsFromBitmap(smallBitmap)
-                    smallBitmap.recycle()
-                    tags
-                } catch (e: Exception) {
-                    emptyList<String>()
+            scanSingleWallpaper(context, wallpaper)
+        }
+    }
+    
+    private suspend fun scanSingleWallpaper(context: Context, wallpaper: Wallpaper) {
+        if (wallpaper.mlTags.isNotEmpty()) return
+        
+        val detectedTags = mlProcessingSemaphore.withPermit {
+            try {
+                val smallBitmap = if (wallpaper.uri != null) {
+                    BitmapHelper.decodeSampledBitmapFromUri(context, wallpaper.uri, 500)
+                } else {
+                    BitmapHelper.decodeSampledBitmapFromResource(context.resources, wallpaper.resourceId, 500)
                 }
+                
+                val tags = ImageLabelingHelper.getTagsFromBitmap(smallBitmap)
+                smallBitmap.recycle()
+                tags
+            } catch (e: Exception) {
+                emptyList<String>()
             }
-            if (detectedTags.isNotEmpty()) {
-                wallpaper.mlTags = detectedTags
-                withContext(Dispatchers.Main) { updateTags() }
-            }
+        }
+        if (detectedTags.isNotEmpty()) {
+            wallpaper.mlTags = detectedTags
+            withContext(Dispatchers.Main) { updateTags() }
         }
     }
 
@@ -154,20 +187,24 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         override fun sizeOf(key: String, bitmap: Bitmap) = bitmap.byteCount / 1024
     }
     
-    suspend fun getOrCreateProcessedBitmap(context: Context, resourceId: Int, allowMagic: Boolean = true): Bitmap? {
+    suspend fun getOrCreateProcessedBitmap(context: Context, wallpaper: Wallpaper, allowMagic: Boolean = true): Bitmap? {
         val useMagic = allowMagic && isMagicShapeEnabled
         
         val cacheKey = when {
-            isDebugMaskEnabled -> "debug_$resourceId"
-            useMagic -> "shape_${resourceId}_${currentMagicShape.name}_${currentBackgroundColor}_${is3DPopEnabled}_$magicScale"
-            else -> "preview_$resourceId" 
+            isDebugMaskEnabled -> "debug_${wallpaper.id}"
+            useMagic -> "shape_${wallpaper.id}_${currentMagicShape.name}_${currentBackgroundColor}_${is3DPopEnabled}_$magicScale"
+            else -> "preview_${wallpaper.id}" 
         }
         
         bitmapCache.get(cacheKey)?.let { return it }
         
         return withContext(Dispatchers.IO) {
             try {
-                val originalBitmap = BitmapHelper.decodeSampledBitmapFromResource(context.resources, resourceId, 1080)
+                val originalBitmap = if (wallpaper.uri != null) {
+                    BitmapHelper.decodeSampledBitmapFromUri(context, wallpaper.uri, 1080)
+                } else {
+                    BitmapHelper.decodeSampledBitmapFromResource(context.resources, wallpaper.resourceId, 1080)
+                }
                 
                 val resultBitmap = when {
                     isDebugMaskEnabled -> DebugSegmentationHelper.createDebugMaskBitmap(context, originalBitmap)
@@ -194,15 +231,26 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    suspend fun generateHighQualityFinalBitmap(context: Context, resourceId: Int): Bitmap? = withContext(Dispatchers.IO) {
+    suspend fun generateHighQualityFinalBitmap(context: Context, wallpaper: Wallpaper): Bitmap? = withContext(Dispatchers.IO) {
         var originalBitmap: Bitmap? = null
         try {
-            val options = BitmapFactory.Options().apply { inPreferredConfig = Bitmap.Config.ARGB_8888; inMutable = true }
-            originalBitmap = BitmapFactory.decodeResource(context.resources, resourceId, options)
+            if (wallpaper.uri != null) {
+                
+                originalBitmap = BitmapHelper.decodeSampledBitmapFromUri(context, wallpaper.uri, 2500)
+            } else {
+                val options = BitmapFactory.Options().apply { inPreferredConfig = Bitmap.Config.ARGB_8888; inMutable = true }
+                originalBitmap = BitmapFactory.decodeResource(context.resources, wallpaper.resourceId, options)
+            }
         } catch (e: OutOfMemoryError) {
             System.gc()
-            try { originalBitmap = BitmapHelper.decodeSampledBitmapFromResource(context.resources, resourceId, 2500) } catch (e2: Exception) { return@withContext null }
-        }
+            try { 
+                if (wallpaper.uri != null) {
+                     originalBitmap = BitmapHelper.decodeSampledBitmapFromUri(context, wallpaper.uri, 1500)
+                } else {
+                    originalBitmap = BitmapHelper.decodeSampledBitmapFromResource(context.resources, wallpaper.resourceId, 2500) 
+                }
+            } catch (e2: Exception) { return@withContext null }
+        } catch (e: Exception) { return@withContext null }
 
         if (originalBitmap == null) return@withContext null
 
