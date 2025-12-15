@@ -24,8 +24,7 @@ object WallpaperDestinations {
 
 suspend fun setDeviceWallpaper(
     context: Context,
-    resourceId: Int,
-    title: String,
+    wallpaper: Wallpaper,
     destination: Int,
     isFixedAlignmentEnabled: Boolean,
     viewModel: WallpaperViewModel
@@ -52,10 +51,14 @@ suspend fun setDeviceWallpaper(
         val isMagic = viewModel.isMagicShapeEnabled || viewModel.isDebugMaskEnabled
         
         rawBitmap = if (isMagic) {
-             viewModel.generateHighQualityFinalBitmap(context, resourceId)
+             viewModel.generateHighQualityFinalBitmap(context, wallpaper)
         } else {
-             val options = BitmapFactory.Options().apply { inPreferredConfig = Bitmap.Config.ARGB_8888 }
-             BitmapFactory.decodeResource(context.resources, resourceId, options)
+             if (wallpaper.uri != null) {
+                 BitmapHelper.decodeSampledBitmapFromUri(context, wallpaper.uri, 2500)
+             } else {
+                 val options = BitmapFactory.Options().apply { inPreferredConfig = Bitmap.Config.ARGB_8888 }
+                 BitmapFactory.decodeResource(context.resources, wallpaper.resourceId, options)
+             }
         }
 
         if (rawBitmap == null) {
@@ -109,7 +112,7 @@ suspend fun setDeviceWallpaper(
         }
         
         withContext(Dispatchers.Main) {
-            Toast.makeText(context, "Wallpaper '$title' set successfully!", Toast.LENGTH_LONG).show()
+            Toast.makeText(context, "Wallpaper '${wallpaper.title}' set successfully!", Toast.LENGTH_LONG).show()
         }
         
     } catch (e: Exception) {

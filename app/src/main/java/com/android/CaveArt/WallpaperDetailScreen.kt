@@ -58,6 +58,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.sin
 import kotlin.math.pow
+import coil.compose.rememberAsyncImagePainter
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -116,24 +117,33 @@ fun WallpaperDetailScreen(
             
             if (viewModel.isMagicShapeEnabled) {
                 MagicEffectImage(
-                    resourceId = wallpaper.resourceId,
+                    wallpaper = wallpaper,
                     viewModel = viewModel,
                     modifier = Modifier.fillMaxSize()
                 )
             } else if (isDebugMaskEnabled) {
                 DebugMaskImage(
-                    resourceId = wallpaper.resourceId,
+                    wallpaper = wallpaper,
                     contentDescription = "Debug",
                     viewModel = viewModel,
                     modifier = Modifier.fillMaxSize()
                 )
             } else {
-                Image(
-                    painter = painterResource(id = wallpaper.resourceId),
-                    contentDescription = "Original",
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
+                if (wallpaper.uri != null) {
+                    Image(
+                        painter = rememberAsyncImagePainter(wallpaper.uri),
+                        contentDescription = "Gallery Image",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    Image(
+                        painter = painterResource(id = wallpaper.resourceId),
+                        contentDescription = "Original",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
             }
         }
         
@@ -216,7 +226,7 @@ fun WallpaperDetailScreen(
                 exit = slideOutVertically { it }
             ) {
                 MagicControlsSheet(
-                    currentWallpaperId = currentWallpaper.resourceId,
+                    wallpaper = currentWallpaper,
                     viewModel = viewModel,
                     onCloseMagic = { viewModel.setMagicShapeEnabled(false) },
                     onApply = { onApplyClick(currentWallpaper) }
@@ -229,7 +239,7 @@ fun WallpaperDetailScreen(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MagicControlsSheet(
-    currentWallpaperId: Int,
+    wallpaper: Wallpaper,
     viewModel: WallpaperViewModel,
     onCloseMagic: () -> Unit,
     onApply: () -> Unit
@@ -240,29 +250,36 @@ fun MagicControlsSheet(
     var isPaletteLoading by remember { mutableStateOf(true) }
     var sliderPosition by remember { mutableFloatStateOf(viewModel.magicScale) }
 
-    LaunchedEffect(currentWallpaperId) {
+    LaunchedEffect(wallpaper) {
         isPaletteLoading = true
         withContext(Dispatchers.IO) {
             try {
-                val bitmap = BitmapFactory.decodeResource(context.resources, currentWallpaperId)
-                val palette = Palette.from(bitmap).generate()
-                val swatches = listOfNotNull(
-                    palette.vibrantSwatch?.rgb, palette.darkVibrantSwatch?.rgb,
-                    palette.dominantSwatch?.rgb, palette.mutedSwatch?.rgb,
-                    palette.lightVibrantSwatch?.rgb
-                ).distinct()
-                val finalColors = if (swatches.isEmpty()) {
-                    listOf(0xFF4CAF50.toInt(), 0xFF000000.toInt(), 0xFFFFFFFF.toInt())
+                val bitmap = if(wallpaper.uri != null) {
+                    BitmapHelper.decodeSampledBitmapFromUri(context, wallpaper.uri, 500)
                 } else {
-                    swatches + listOf(0xFF000000.toInt(), 0xFFFFFFFF.toInt())
+                    BitmapFactory.decodeResource(context.resources, wallpaper.resourceId)
                 }
-                withContext(Dispatchers.Main) {
-                    extractedColors = finalColors
-                    if (finalColors.isNotEmpty()) {
-                         viewModel.updateMagicConfig(viewModel.currentMagicShape, finalColors.first())
+                
+                if (bitmap != null) {
+                    val palette = Palette.from(bitmap).generate()
+                    val swatches = listOfNotNull(
+                        palette.vibrantSwatch?.rgb, palette.darkVibrantSwatch?.rgb,
+                        palette.dominantSwatch?.rgb, palette.mutedSwatch?.rgb,
+                        palette.lightVibrantSwatch?.rgb
+                    ).distinct()
+                    val finalColors = if (swatches.isEmpty()) {
+                        listOf(0xFF4CAF50.toInt(), 0xFF000000.toInt(), 0xFFFFFFFF.toInt())
+                    } else {
+                        swatches + listOf(0xFF000000.toInt(), 0xFFFFFFFF.toInt())
                     }
+                    withContext(Dispatchers.Main) {
+                        extractedColors = finalColors
+                        if (finalColors.isNotEmpty()) {
+                             viewModel.updateMagicConfig(viewModel.currentMagicShape, finalColors.first())
+                        }
+                    }
+                    bitmap.recycle()
                 }
-                bitmap.recycle()
             } catch (e: Exception) { e.printStackTrace() }
         }
         isPaletteLoading = false
@@ -414,13 +431,13 @@ fun ShapeIcon(shape: MagicShape, color: Color, modifier: Modifier = Modifier) {
 
 @Composable
 fun MagicEffectImage(
-    resourceId: Int,
+    wallpaper: Wallpaper,
     viewModel: WallpaperViewModel,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     var processedBitmap by remember(
-        resourceId, 
+        wallpaper, 
         viewModel.currentMagicShape, 
         viewModel.currentBackgroundColor, 
         viewModel.is3DPopEnabled,
@@ -430,32 +447,49 @@ fun MagicEffectImage(
     }
 
     LaunchedEffect(
-        resourceId, 
+        wallpaper, 
         viewModel.currentMagicShape, 
         viewModel.currentBackgroundColor, 
         viewModel.is3DPopEnabled,
         viewModel.magicScale
     ) {
-        processedBitmap = viewModel.getOrCreateProcessedBitmap(context, resourceId)
+        processedBitmap = viewModel.getOrCreateProcessedBitmap(context, wallpaper)
     }
 
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
         val isProcessing = processedBitmap == null
         
-        Image(
-            painter = painterResource(id = resourceId),
-            contentDescription = null,
-            modifier = Modifier
-                .fillMaxSize()
-                .then(
-                    if (isProcessing && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                        Modifier.blur(20.dp)
-                    } else {
-                        Modifier
-                    }
-                ),
-            contentScale = ContentScale.Crop
-        )
+        if (wallpaper.uri != null) {
+            Image(
+                painter = rememberAsyncImagePainter(wallpaper.uri),
+                contentDescription = null,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .then(
+                        if (isProcessing && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                            Modifier.blur(20.dp)
+                        } else {
+                            Modifier
+                        }
+                    ),
+                contentScale = ContentScale.Crop
+            )
+        } else {
+            Image(
+                painter = painterResource(id = wallpaper.resourceId),
+                contentDescription = null,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .then(
+                        if (isProcessing && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                            Modifier.blur(20.dp)
+                        } else {
+                            Modifier
+                        }
+                    ),
+                contentScale = ContentScale.Crop
+            )
+        }
 
         if (!isProcessing) {
             Image(
