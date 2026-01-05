@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -71,6 +72,8 @@ fun WallpaperDetailScreen(
     viewModel: WallpaperViewModel
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    
     val window = (context as? Activity)?.window
     val systemUiController = rememberSystemUiController()
     
@@ -229,7 +232,12 @@ fun WallpaperDetailScreen(
                     wallpaper = currentWallpaper,
                     viewModel = viewModel,
                     onCloseMagic = { viewModel.setMagicShapeEnabled(false) },
-                    onApply = { onApplyClick(currentWallpaper) }
+                    onApplyStatic = { onApplyClick(currentWallpaper) },
+                    onApplyLive = {
+                        scope.launch {
+                            setLiveWallpaper(context, currentWallpaper, viewModel)
+                        }
+                    }
                 )
             }
         }
@@ -242,16 +250,14 @@ fun MagicControlsSheet(
     wallpaper: Wallpaper,
     viewModel: WallpaperViewModel,
     onCloseMagic: () -> Unit,
-    onApply: () -> Unit
+    onApplyStatic: () -> Unit,
+    onApplyLive: () -> Unit
 ) {
     val context = LocalContext.current
-    
     var extractedColors by remember { mutableStateOf(listOf<Int>()) }
-    var isPaletteLoading by remember { mutableStateOf(true) }
     var sliderPosition by remember { mutableFloatStateOf(viewModel.magicScale) }
 
     LaunchedEffect(wallpaper) {
-        isPaletteLoading = true
         withContext(Dispatchers.IO) {
             try {
                 val bitmap = if(wallpaper.uri != null) {
@@ -274,7 +280,7 @@ fun MagicControlsSheet(
                     }
                     withContext(Dispatchers.Main) {
                         extractedColors = finalColors
-                        if (finalColors.isNotEmpty()) {
+                        if (finalColors.isNotEmpty() && viewModel.currentBackgroundColor == 0xFF4CAF50.toInt()) {
                              viewModel.updateMagicConfig(viewModel.currentMagicShape, finalColors.first())
                         }
                     }
@@ -282,7 +288,6 @@ fun MagicControlsSheet(
                 }
             } catch (e: Exception) { e.printStackTrace() }
         }
-        isPaletteLoading = false
     }
     
     Card(
@@ -301,21 +306,37 @@ fun MagicControlsSheet(
         ) {
             
             Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 0.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 TextButton(onClick = onCloseMagic) { Text("Cancel") }
-                Text("Effects", fontWeight = FontWeight.Bold)
-                IconButton(
-                    onClick = onApply,
-                    modifier = Modifier.background(MaterialTheme.colorScheme.primary, CircleShape)
-                ) {
-                    Icon(Icons.Default.Check, null, tint = MaterialTheme.colorScheme.onPrimary)
+                
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    
+                    FilledTonalButton(
+                        onClick = onApplyLive,
+                        colors = ButtonDefaults.filledTonalButtonColors(
+                            containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onTertiaryContainer
+                        )
+                    ) {
+                        Icon(Icons.Default.PlayArrow, null, Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Live")
+                    }
+                    
+                    Spacer(Modifier.width(8.dp))
+                    
+                    Button(onClick = onApplyStatic) {
+                        Icon(Icons.Default.Check, null, Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Static")
+                    }
                 }
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Divider(Modifier.padding(vertical = 12.dp))
             
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
@@ -325,7 +346,7 @@ fun MagicControlsSheet(
                 FilterChip(
                     selected = viewModel.is3DPopEnabled,
                     onClick = { viewModel.toggle3DPop() },
-                    label = { Text("3D Pop") },
+                    label = { Text("3D Pop (Static Only)") },
                     leadingIcon = { 
                         Icon(Icons.Default.Layers, contentDescription = null, modifier = Modifier.size(18.dp)) 
                     },
@@ -365,12 +386,10 @@ fun MagicControlsSheet(
                     onValueChangeFinished = {
                         viewModel.updateMagicScale(sliderPosition)
                     },
-                    valueRange = 0.8f..1.4f,
+                    valueRange = 0.5f..1.5f,
                     steps = 5
                 )
             }
-            
-            Spacer(modifier = Modifier.height(8.dp))
             
             LazyRow(
                 contentPadding = PaddingValues(horizontal = 16.dp),
@@ -529,7 +548,6 @@ fun MagicEffectImage(
             )
 
             Box(contentAlignment = Alignment.Center) {
-                
                 Canvas(modifier = Modifier.size(100.dp).scale(scale)) {
                     drawCircle(
                         brush = Brush.radialGradient(
