@@ -1,23 +1,14 @@
 package com.android.CaveArt
 
 import android.content.Context
-import android.graphics.*
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.RectF
 import kotlin.math.max
-import kotlin.math.min
 
 object ShapeEffectHelper {
-
-    suspend fun createShapeCropBitmap(
-        context: Context,
-        originalBitmap: Bitmap,
-        shape: MagicShape,
-        backgroundColor: Int,
-        enable3DPop: Boolean,
-        scaleFactor: Float
-    ): Bitmap {
-        return originalBitmap
-    }
-
+	
     fun createShapeCropBitmapWithPreCutout(
         context: Context,
         original: Bitmap,
@@ -33,27 +24,21 @@ object ShapeEffectHelper {
         val finalBitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(finalBitmap)
         val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+        val rawBounds = Geometric.calculateCircleBounds(cutout, width, height, scaleFactor)
+
+        val sideLength = max(rawBounds.width(), rawBounds.height())
+        val centerX = rawBounds.centerX()
+        val centerY = rawBounds.centerY()
+        val halfSide = sideLength / 2f
+        val verticalShift = if (enable3DPop) sideLength * 0.1f else 0f
+        val shapeBounds = RectF(
+            centerX - halfSide,
+            centerY - halfSide + verticalShift,
+            centerX + halfSide,
+            centerY + halfSide + verticalShift
+        )
         
         canvas.drawColor(backgroundColor)
-        
-        val subjectBounds = Geometric.getSmartBounds(cutout, width, height)
-        val subjectCenterX = subjectBounds.centerX()
-        val subjectCenterY = subjectBounds.centerY()
-        
-        val minScreenDim = min(width, height).toFloat()
-        val baseSize = minScreenDim * 0.65f 
-        val shapeSize = baseSize * scaleFactor
-        val halfShape = shapeSize / 2f
-        
-        val safeCenterX = subjectCenterX.coerceIn(width * 0.3f, width * 0.7f)
-        val safeCenterY = subjectCenterY.coerceIn(height * 0.3f, height * 0.7f)
-
-        val shapeBounds = RectF(
-            safeCenterX - halfShape,
-            safeCenterY - halfShape,
-            safeCenterX + halfShape,
-            safeCenterY + halfShape
-        )
         
         val saveCount = canvas.save()
         val shapePath = ShapePathProvider.getPathForShape(shape, shapeBounds)
@@ -62,8 +47,12 @@ object ShapeEffectHelper {
         canvas.restoreToCount(saveCount)
         
         if (enable3DPop) {
-            val destRect = Rect(0, 0, width, height)
+            val popSaveCount = canvas.save()
+            canvas.clipRect(0f, 0f, width.toFloat(), shapeBounds.bottom)
+            val destRect = android.graphics.Rect(0, 0, width, height)
             canvas.drawBitmap(cutout, null, destRect, paint)
+            
+            canvas.restoreToCount(popSaveCount)
         }
 
         return finalBitmap
