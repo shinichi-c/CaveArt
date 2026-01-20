@@ -23,7 +23,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.rememberAsyncImagePainter
 
-
 @Composable
 fun DebugMaskImage(
     wallpaper: Wallpaper,
@@ -47,12 +46,12 @@ private fun ProcessedImageComposable(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    var processedBitmap by remember(wallpaper, viewModel.isDebugMaskEnabled) {
+    var processedBitmap by remember(wallpaper) {
         mutableStateOf<Bitmap?>(null)
     }
     var isLoading by remember { mutableStateOf(false) }
-
-    LaunchedEffect(wallpaper, viewModel.isDebugMaskEnabled) {
+    
+    LaunchedEffect(wallpaper) {
         isLoading = true
         processedBitmap = viewModel.getOrCreateProcessedBitmap(context, wallpaper)
         isLoading = false

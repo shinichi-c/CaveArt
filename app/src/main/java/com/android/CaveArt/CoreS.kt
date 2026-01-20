@@ -1,6 +1,5 @@
 package com.android.CaveArt
 
-import android.app.Activity
 import android.graphics.Bitmap
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
@@ -13,7 +12,6 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -24,6 +22,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -79,7 +78,7 @@ fun AsyncWallpaperImage(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
     val context = LocalContext.current
@@ -119,7 +118,6 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
     val filteredWallpapers = viewModel.filteredWallpapers
     val selectedTag = viewModel.selectedTag
     val isLoading = viewModel.isLoading
-    val isDebugMaskEnabled = viewModel.isDebugMaskEnabled
 
     val mainPagerState = rememberPagerState(pageCount = { filteredWallpapers.size })
 
@@ -179,7 +177,7 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                             wallpaperToApplyState = wallpaper
                             showDestinationSheet = true
                         },
-                        isDebugMaskEnabled = isDebugMaskEnabled,
+                        isDebugMaskEnabled = false,
                         viewModel = viewModel
                     )
                 }
@@ -238,7 +236,6 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                                 onClick = { selectedWallpaperIndex = pageIndex },
                                 animationTriggerKey = animateCardKey,
                                 pageIndex = pageIndex,
-                                isDebugMaskEnabled = isDebugMaskEnabled,
                                 viewModel = viewModel
                             )
                         }
@@ -305,7 +302,7 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text("Categories", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
-                    Divider(modifier = Modifier.padding(vertical = 12.dp))
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
                     LazyVerticalGrid(
                         columns = GridCells.Adaptive(minSize = 120.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -327,7 +324,11 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
         }
 
         if (showSettingsPanel) {
-            SettingsSheet(viewModel = viewModel, onDismiss = { showSettingsPanel = false })
+            SettingsSheet(
+                viewModel = viewModel, 
+                currentWallpaper = currentWallpaper,
+                onDismiss = { showSettingsPanel = false }
+            )
         }
 
         if (showDestinationSheet && wallpaperToApplyState != null) {
@@ -353,9 +354,9 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                     }
 
                     DestinationButton(Icons.Default.PhotoLibrary, "Home & Lock Screens", "Set everywhere", isSettingWallpaper) { applyAction(WallpaperDestinations.FLAG_BOTH) }
-                    Divider(Modifier.padding(vertical = 12.dp))
+                    HorizontalDivider(Modifier.padding(vertical = 12.dp))
                     DestinationButton(Icons.Default.PhotoLibrary, "Home Screen Only", "Set on home screen", isSettingWallpaper) { applyAction(WallpaperDestinations.FLAG_HOME_SCREEN) }
-                    Divider(Modifier.padding(vertical = 12.dp))
+                    HorizontalDivider(Modifier.padding(vertical = 12.dp))
                     DestinationButton(Icons.Default.Lock, "Lock Screen Only", "Set on lock screen", isSettingWallpaper) { applyAction(WallpaperDestinations.FLAG_LOCK_SCREEN) }
                     Spacer(Modifier.height(32.dp))
                 }
@@ -377,8 +378,7 @@ fun WallpaperPreviewCard(
     normalPageScale: Float,
     normalPageAlpha: Float,
     animationTriggerKey: Int = -1,
-    pageIndex: Int = -2,
-    isDebugMaskEnabled: Boolean
+    pageIndex: Int = -2
 ) {
     val isAnimated = animationTriggerKey == pageIndex
     val targetScale = if (isAnimated) 1.05f else 1f
@@ -398,22 +398,13 @@ fun WallpaperPreviewCard(
         shape = RoundedCornerShape(32.dp),
         elevation = CardDefaults.cardElevation(0.dp)
     ) {
-        if (isDebugMaskEnabled) {
-            DebugMaskImage(
-                wallpaper = wallpaper,
-                contentDescription = "Debug: ${wallpaper.title}",
-                viewModel = viewModel,
-                modifier = Modifier.fillMaxSize()
-            )
-        } else {
-            AsyncWallpaperImage(
-                wallpaper = wallpaper,
-                contentDescription = "Preview: ${wallpaper.title}",
-                viewModel = viewModel,
-                modifier = Modifier.fillMaxSize(),
-                allowMagic = false
-            )
-        }
+        AsyncWallpaperImage(
+            wallpaper = wallpaper,
+            contentDescription = "Preview: ${wallpaper.title}",
+            viewModel = viewModel,
+            modifier = Modifier.fillMaxSize(),
+            allowMagic = false
+        )
     }
 }
 
@@ -444,7 +435,7 @@ fun ConnectedWallpaperActions(
         Button(
             onClick = onAddClick,
             modifier = Modifier.size(buttonHeight),
-            colors = commonColors,
+            colors = commonColors, 
             shape = RoundedCornerShape(0.dp),
             contentPadding = PaddingValues(0.dp)
         ) {

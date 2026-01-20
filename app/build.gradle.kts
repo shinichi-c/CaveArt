@@ -91,4 +91,12 @@ dependencies {
     implementation("io.coil-kt:coil-compose:2.6.0")
 
     implementation("com.google.code.gson:gson:2.10.1")
+
+    implementation("org.tensorflow:tensorflow-lite:2.14.0")
+
+    implementation("org.tensorflow:tensorflow-lite-gpu:2.14.0")
+
+    implementation("org.tensorflow:tensorflow-lite-gpu-api:2.14.0")
+
+    implementation("org.tensorflow:tensorflow-lite-support:0.4.4")
 }

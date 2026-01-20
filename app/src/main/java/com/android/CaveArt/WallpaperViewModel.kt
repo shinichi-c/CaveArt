@@ -43,37 +43,24 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     val isHapticsEnabled: Boolean by _isHapticsEnabled
     fun setHapticsEnabled(enabled: Boolean) { _isHapticsEnabled.value = enabled }
 
-    private val _isDebugMaskEnabled = mutableStateOf(false)
-    val isDebugMaskEnabled: Boolean by _isDebugMaskEnabled
-    fun setDebugMaskEnabled(enabled: Boolean) { 
-        _isDebugMaskEnabled.value = enabled
-        if(enabled) _isMagicShapeEnabled.value = false
-    }
-    
     private val _isMagicShapeEnabled = mutableStateOf(false)
     val isMagicShapeEnabled: Boolean by _isMagicShapeEnabled
     
     var currentMagicShape by mutableStateOf(MagicShape.SQUIRCLE)
     var currentBackgroundColor by mutableStateOf(AndroidColor.parseColor("#4CAF50"))
-    var is3DPopEnabled by mutableStateOf(false)
-    
+    var is3DPopEnabled by mutableStateOf(true)
     var magicScale by mutableFloatStateOf(1.0f)
     
     fun setMagicShapeEnabled(enabled: Boolean) {
         _isMagicShapeEnabled.value = enabled
-        if(enabled) _isDebugMaskEnabled.value = false
     }
 
     fun updateMagicConfig(shape: MagicShape, color: Int) {
         currentMagicShape = shape
         currentBackgroundColor = color
     }
-    
     fun toggle3DPop() { is3DPopEnabled = !is3DPopEnabled }
-    
-    fun updateMagicScale(scale: Float) {
-        magicScale = scale
-    }
+    fun updateMagicScale(scale: Float) { magicScale = scale }
 
     private val _isFixedAlignmentEnabled = mutableStateOf(true)
     val isFixedAlignmentEnabled: Boolean by _isFixedAlignmentEnabled
@@ -82,9 +69,11 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     var baseWallpapers by mutableStateOf<List<Wallpaper>>(emptyList())
     var allWallpapers by mutableStateOf<List<Wallpaper>>(emptyList())
     var allTags by mutableStateOf<List<String>>(listOf("All"))
-
     var selectedTag by mutableStateOf("All")
         private set
+
+    var debugResults by mutableStateOf<List<DebugResult>>(emptyList())
+    var isRunningDebug by mutableStateOf(false)
 
     fun selectTag(tag: String) { selectedTag = tag }
 
@@ -112,15 +101,101 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
             title = "Gallery Image",
             tag = "Gallery"
         )
-        
         baseWallpapers = listOf(newWallpaper) + baseWallpapers
         allWallpapers = baseWallpapers
-        
         updateTags()
         selectTag("All")
+        viewModelScope.launch { scanSingleWallpaper(getApplication(), newWallpaper) }
+    }
+
+    private val maxMemory = (Runtime.getRuntime().maxMemory() / 1024).toInt()
+    private val cacheSize = maxMemory / 8
+    private val bitmapCache = object : LruCache<String, Bitmap>(cacheSize) {
+        override fun sizeOf(key: String, bitmap: Bitmap) = bitmap.byteCount / 1024
+    }
+    
+    suspend fun getOrCreateProcessedBitmap(context: Context, wallpaper: Wallpaper, allowMagic: Boolean = true): Bitmap? {
+        val useMagic = allowMagic && isMagicShapeEnabled
+        val cacheKey = when {
+            useMagic -> "shape_${wallpaper.id}_${currentMagicShape.name}_${currentBackgroundColor}_${is3DPopEnabled}_$magicScale"
+            else -> "preview_${wallpaper.id}" 
+        }
         
-        viewModelScope.launch {
-            scanSingleWallpaper(getApplication(), newWallpaper)
+        bitmapCache.get(cacheKey)?.let { return it }
+        
+        return withContext(Dispatchers.IO) {
+            try {
+                val originalBitmap = if (wallpaper.uri != null) {
+                    BitmapHelper.decodeSampledBitmapFromUri(context, wallpaper.uri, 1080)
+                } else {
+                    BitmapHelper.decodeSampledBitmapFromResource(context.resources, wallpaper.resourceId, 1080)
+                }
+                
+                val resultBitmap = processBitmap(context, originalBitmap, useMagic)
+                
+                if (resultBitmap != originalBitmap && resultBitmap != null) {
+                    originalBitmap.recycle()
+                }
+
+                if (resultBitmap != null) {
+                    bitmapCache.put(cacheKey, resultBitmap)
+                }
+                resultBitmap
+            } catch (e: Exception) { null }
+        }
+    }
+
+    suspend fun generateHighQualityFinalBitmap(context: Context, wallpaper: Wallpaper): Bitmap? = withContext(Dispatchers.IO) {
+        var originalBitmap: Bitmap? = null
+        try {
+            if (wallpaper.uri != null) {
+                originalBitmap = BitmapHelper.decodeSampledBitmapFromUri(context, wallpaper.uri, 2500)
+            } else {
+                val options = BitmapFactory.Options().apply { inPreferredConfig = Bitmap.Config.ARGB_8888; inMutable = true }
+                originalBitmap = BitmapFactory.decodeResource(context.resources, wallpaper.resourceId, options)
+            }
+        } catch (e: OutOfMemoryError) {
+            System.gc()
+            try { 
+                if (wallpaper.uri != null) {
+                     originalBitmap = BitmapHelper.decodeSampledBitmapFromUri(context, wallpaper.uri, 1500)
+                } else {
+                    originalBitmap = BitmapHelper.decodeSampledBitmapFromResource(context.resources, wallpaper.resourceId, 2500) 
+                }
+            } catch (e2: Exception) { return@withContext null }
+        } catch (e: Exception) { return@withContext null }
+
+        if (originalBitmap == null) return@withContext null
+
+        try {
+            val processedBitmap = processBitmap(context, originalBitmap, isMagicShapeEnabled)
+
+            if (processedBitmap != originalBitmap) originalBitmap.recycle()
+            return@withContext processedBitmap
+        } catch (e: Exception) { return@withContext originalBitmap }
+    }
+
+    private suspend fun processBitmap(context: Context, original: Bitmap, useMagic: Boolean): Bitmap {
+        return if (useMagic) {
+            val coarseMask = PixelLabHelper.generateCoarseMask(context, original)
+            
+            if (coarseMask != null) {
+                val refinedMask = ForegroundEstimationHelper.refineMask(context, original, coarseMask) ?: coarseMask
+                val mattingResult = DeepMattingHelper.runDeepMatting(context, original, refinedMask)
+                
+                val finalCutout = if (mattingResult != null && !isBitmapEmpty(mattingResult)) {
+                    mattingResult
+                } else {
+                    applyMaskToImage(original, refinedMask)
+                }
+
+                ShapeEffectHelper.createShapeCropBitmapWithPreCutout(
+                    context, original, finalCutout, 
+                    currentMagicShape, currentBackgroundColor, is3DPopEnabled, magicScale
+                )
+            } else original
+        } else {
+            original
         }
     }
 
@@ -146,14 +221,11 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
 
     private suspend fun scanWallpapersForTags(context: Context) = withContext(Dispatchers.IO) {
         val currentList = baseWallpapers.toList()
-        currentList.forEach { wallpaper ->
-            scanSingleWallpaper(context, wallpaper)
-        }
+        currentList.forEach { wallpaper -> scanSingleWallpaper(context, wallpaper) }
     }
     
     private suspend fun scanSingleWallpaper(context: Context, wallpaper: Wallpaper) {
         if (wallpaper.mlTags.isNotEmpty()) return
-        
         val detectedTags = mlProcessingSemaphore.withPermit {
             try {
                 val smallBitmap = if (wallpaper.uri != null) {
@@ -161,13 +233,10 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
                 } else {
                     BitmapHelper.decodeSampledBitmapFromResource(context.resources, wallpaper.resourceId, 500)
                 }
-                
                 val tags = ImageLabelingHelper.getTagsFromBitmap(smallBitmap)
                 smallBitmap.recycle()
                 tags
-            } catch (e: Exception) {
-                emptyList<String>()
-            }
+            } catch (e: Exception) { emptyList<String>() }
         }
         if (detectedTags.isNotEmpty()) {
             wallpaper.mlTags = detectedTags
@@ -181,97 +250,66 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         allTags = listOf("All") + (originalTags + mlKitTags).distinct().sorted()
     }
 
-    private val maxMemory = (Runtime.getRuntime().maxMemory() / 1024).toInt()
-    private val cacheSize = maxMemory / 8
-    private val bitmapCache = object : LruCache<String, Bitmap>(cacheSize) {
-        override fun sizeOf(key: String, bitmap: Bitmap) = bitmap.byteCount / 1024
+    private fun isBitmapEmpty(bitmap: Bitmap?): Boolean {
+        if (bitmap == null) return true
+        val w = bitmap.width
+        val h = bitmap.height
+        val pointsToCheck = listOf(
+            android.graphics.Point(w / 2, h / 2),
+            android.graphics.Point(w / 3, h / 3),
+            android.graphics.Point(w - 10, h / 2),
+            android.graphics.Point(w / 2, h - 10)
+        )
+        var totalAlpha = 0
+        try {
+            for (p in pointsToCheck) {
+                if (p.x < w && p.y < h) {
+                    totalAlpha += AndroidColor.alpha(bitmap.getPixel(p.x, p.y))
+                }
+            }
+        } catch (e: Exception) { return true }
+        return totalAlpha < 10
     }
-    
-    suspend fun getOrCreateProcessedBitmap(context: Context, wallpaper: Wallpaper, allowMagic: Boolean = true): Bitmap? {
-        val useMagic = allowMagic && isMagicShapeEnabled
-        
-        val cacheKey = when {
-            isDebugMaskEnabled -> "debug_${wallpaper.id}"
-            useMagic -> "shape_${wallpaper.id}_${currentMagicShape.name}_${currentBackgroundColor}_${is3DPopEnabled}_$magicScale"
-            else -> "preview_${wallpaper.id}" 
+
+    private fun applyMaskToImage(original: Bitmap, mask: Bitmap): Bitmap {
+        val w = original.width
+        val h = original.height
+        val scaledMask = Bitmap.createScaledBitmap(mask, w, h, true)
+        val result = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val pixels = IntArray(w * h)
+        val maskPixels = IntArray(w * h)
+        original.getPixels(pixels, 0, w, 0, 0, w, h)
+        scaledMask.getPixels(maskPixels, 0, w, 0, 0, w, h)
+        for (i in pixels.indices) {
+            val maskVal = (maskPixels[i] shr 16) and 0xFF
+            if (maskVal > 100) { pixels[i] = pixels[i] } else { pixels[i] = 0 }
         }
-        
-        bitmapCache.get(cacheKey)?.let { return it }
-        
-        return withContext(Dispatchers.IO) {
+        result.setPixels(pixels, 0, w, 0, 0, w, h)
+        return result
+    }
+
+    fun runModelDiagnostics(context: Context, targetWallpaper: Wallpaper?) {
+        if (targetWallpaper == null) return
+        viewModelScope.launch(Dispatchers.IO) {
+            isRunningDebug = true
             try {
-                val originalBitmap = if (wallpaper.uri != null) {
-                    BitmapHelper.decodeSampledBitmapFromUri(context, wallpaper.uri, 1080)
+                val original = if (targetWallpaper.uri != null) {
+                    BitmapHelper.decodeSampledBitmapFromUri(context, targetWallpaper.uri, 512)
                 } else {
-                    BitmapHelper.decodeSampledBitmapFromResource(context.resources, wallpaper.resourceId, 1080)
+                    BitmapFactory.decodeResource(context.resources, targetWallpaper.resourceId)
                 }
-                
-                val resultBitmap = when {
-                    isDebugMaskEnabled -> DebugSegmentationHelper.createDebugMaskBitmap(context, originalBitmap)
-                    useMagic -> ShapeEffectHelper.createShapeCropBitmap(
-                        context, 
-                        originalBitmap, 
-                        currentMagicShape, 
-                        currentBackgroundColor, 
-                        is3DPopEnabled,
-                        magicScale
-                    )
-                    else -> originalBitmap 
+                if (original != null) {
+                    val res = PixelDebugHelper.runFullPipelineDiagnostic(context, original)
+                    withContext(Dispatchers.Main) { 
+                        debugResults = res
+                        isRunningDebug = false 
+                    }
                 }
-                
-                if (resultBitmap != originalBitmap && resultBitmap != null) {
-                    originalBitmap.recycle()
-                }
-
-                if (resultBitmap != null) {
-                    bitmapCache.put(cacheKey, resultBitmap)
-                }
-                resultBitmap
-            } catch (e: Exception) { null }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) { isRunningDebug = false }
+            }
         }
     }
 
-    suspend fun generateHighQualityFinalBitmap(context: Context, wallpaper: Wallpaper): Bitmap? = withContext(Dispatchers.IO) {
-        var originalBitmap: Bitmap? = null
-        try {
-            if (wallpaper.uri != null) {
-                
-                originalBitmap = BitmapHelper.decodeSampledBitmapFromUri(context, wallpaper.uri, 2500)
-            } else {
-                val options = BitmapFactory.Options().apply { inPreferredConfig = Bitmap.Config.ARGB_8888; inMutable = true }
-                originalBitmap = BitmapFactory.decodeResource(context.resources, wallpaper.resourceId, options)
-            }
-        } catch (e: OutOfMemoryError) {
-            System.gc()
-            try { 
-                if (wallpaper.uri != null) {
-                     originalBitmap = BitmapHelper.decodeSampledBitmapFromUri(context, wallpaper.uri, 1500)
-                } else {
-                    originalBitmap = BitmapHelper.decodeSampledBitmapFromResource(context.resources, wallpaper.resourceId, 2500) 
-                }
-            } catch (e2: Exception) { return@withContext null }
-        } catch (e: Exception) { return@withContext null }
-
-        if (originalBitmap == null) return@withContext null
-
-        try {
-            val processedBitmap = when {
-                isDebugMaskEnabled -> DebugSegmentationHelper.createDebugMaskBitmap(context, originalBitmap)
-                isMagicShapeEnabled -> ShapeEffectHelper.createShapeCropBitmap(
-                    context, 
-                    originalBitmap, 
-                    currentMagicShape, 
-                    currentBackgroundColor, 
-                    is3DPopEnabled,
-                    magicScale
-                )
-                else -> originalBitmap
-            }
-
-            if (processedBitmap != originalBitmap) originalBitmap.recycle()
-            return@withContext processedBitmap
-        } catch (e: Exception) { return@withContext originalBitmap }
-    }
-    
     override fun onCleared() { super.onCleared(); bitmapCache.evictAll() }
 }

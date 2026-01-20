@@ -160,8 +160,7 @@ suspend fun setDeviceWallpaper(
         if (isFixedAlignmentEnabled) {
             val finalBitmap = Bitmap.createBitmap(screenWidth, screenHeight, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(finalBitmap)
-            
-            if (viewModel.isMagicShapeEnabled || viewModel.isDebugMaskEnabled) {
+            if (viewModel.isMagicShapeEnabled) {
                 canvas.drawColor(viewModel.currentBackgroundColor)
             }
 

@@ -1,26 +1,11 @@
 package com.android.CaveArt
 
 import android.content.Context
-import android.graphics.Bitmap
-import android.graphics.Canvas
-import android.graphics.Paint
-import android.graphics.RectF
-import com.google.mlkit.vision.common.InputImage
-import com.google.mlkit.vision.segmentation.subject.SubjectSegmentation
-import com.google.mlkit.vision.segmentation.subject.SubjectSegmenter
-import com.google.mlkit.vision.segmentation.subject.SubjectSegmenterOptions
-import kotlinx.coroutines.tasks.await
-import java.nio.FloatBuffer
+import android.graphics.*
 import kotlin.math.max
+import kotlin.math.min
 
 object ShapeEffectHelper {
-
-    private val segmenter: SubjectSegmenter by lazy {
-        val options = SubjectSegmenterOptions.Builder()
-            .enableForegroundConfidenceMask()
-            .build()
-        SubjectSegmentation.getClient(options)
-    }
 
     suspend fun createShapeCropBitmap(
         context: Context,
@@ -30,93 +15,57 @@ object ShapeEffectHelper {
         enable3DPop: Boolean,
         scaleFactor: Float
     ): Bitmap {
-        val width = originalBitmap.width
-        val height = originalBitmap.height
-        val image = InputImage.fromBitmap(originalBitmap, 0)
+        return originalBitmap
+    }
+
+    fun createShapeCropBitmapWithPreCutout(
+        context: Context,
+        original: Bitmap,
+        cutout: Bitmap, 
+        shape: MagicShape,
+        backgroundColor: Int,
+        enable3DPop: Boolean,
+        scaleFactor: Float
+    ): Bitmap {
+        val width = original.width
+        val height = original.height
         
         val finalBitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(finalBitmap)
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+        
+        canvas.drawColor(backgroundColor)
+        
+        val subjectBounds = Geometric.getSmartBounds(cutout, width, height)
+        val subjectCenterX = subjectBounds.centerX()
+        val subjectCenterY = subjectBounds.centerY()
+        
+        val minScreenDim = min(width, height).toFloat()
+        val baseSize = minScreenDim * 0.65f 
+        val shapeSize = baseSize * scaleFactor
+        val halfShape = shapeSize / 2f
+        
+        val safeCenterX = subjectCenterX.coerceIn(width * 0.3f, width * 0.7f)
+        val safeCenterY = subjectCenterY.coerceIn(height * 0.3f, height * 0.7f)
 
-        try {
-            val result = segmenter.process(image).await()
-            val rawBounds = Geometric.calculateCircleBounds(result, originalBitmap, scaleFactor)
-
-            val sideLength = max(rawBounds.width(), rawBounds.height())
-            val centerX = rawBounds.centerX()
-            val centerY = rawBounds.centerY()
-            val halfSide = sideLength / 2f
-            val verticalShift = if (enable3DPop) sideLength * 0.1f else 0f
-
-            val shapeBounds = RectF(
-                centerX - halfSide,
-                centerY - halfSide + verticalShift,
-                centerX + halfSide,
-                centerY + halfSide + verticalShift
-            )
-            
-            canvas.drawColor(backgroundColor)
-            
-            val shapePath = ShapePathProvider.getPathForShape(shape, shapeBounds)
-            val saveCount = canvas.save()
-            canvas.clipPath(shapePath)
-            canvas.drawBitmap(originalBitmap, 0f, 0f, paint)
-            canvas.restoreToCount(saveCount)
-            
-            if (enable3DPop) {
-                val maskBuffer = result.foregroundConfidenceMask
-                if (maskBuffer != null) {
-                    val subjectBitmap = createSubjectCutout(originalBitmap, maskBuffer)
-                    
-                    val popSaveCount = canvas.save()
-                    
-                    canvas.clipRect(0f, 0f, width.toFloat(), shapeBounds.bottom)
-                    canvas.drawBitmap(subjectBitmap, 0f, 0f, paint)
-                    canvas.restoreToCount(popSaveCount)
-                    
-                    subjectBitmap.recycle()
-                }
-            }
-
-            return finalBitmap
-
-        } catch (e: Exception) {
-            e.printStackTrace()
-            return originalBitmap
+        val shapeBounds = RectF(
+            safeCenterX - halfShape,
+            safeCenterY - halfShape,
+            safeCenterX + halfShape,
+            safeCenterY + halfShape
+        )
+        
+        val saveCount = canvas.save()
+        val shapePath = ShapePathProvider.getPathForShape(shape, shapeBounds)
+        canvas.clipPath(shapePath)
+        canvas.drawBitmap(original, 0f, 0f, paint)
+        canvas.restoreToCount(saveCount)
+        
+        if (enable3DPop) {
+            val destRect = Rect(0, 0, width, height)
+            canvas.drawBitmap(cutout, null, destRect, paint)
         }
-    }
-    
-    private fun createSubjectCutout(original: Bitmap, maskBuffer: FloatBuffer): Bitmap {
-        val w = original.width
-        val h = original.height
-        val cutout = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        
-        val origPixels = IntArray(w * h)
-        original.getPixels(origPixels, 0, w, 0, 0, w, h)
-        
-        val newPixels = IntArray(w * h)
-        maskBuffer.rewind()
-        
-        val lowThreshold = 0.45f
-        val highThreshold = 0.7f 
 
-        val len = w * h
-        for (i in 0 until len) {
-            val confidence = maskBuffer.get()
-            
-            if (confidence < lowThreshold) {
-                newPixels[i] = 0
-            } else if (confidence >= highThreshold) {
-                newPixels[i] = origPixels[i]
-            } else {
-                val originalPixel = origPixels[i]
-                val t = (confidence - lowThreshold) / (highThreshold - lowThreshold)
-                val alpha = (t * 255).toInt()
-                newPixels[i] = (alpha shl 24) or (originalPixel and 0x00FFFFFF)
-            }
-        }
-        
-        cutout.setPixels(newPixels, 0, w, 0, 0, w, h)
-        return cutout
+        return finalBitmap
     }
 }
