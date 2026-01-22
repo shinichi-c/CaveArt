@@ -218,9 +218,10 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         val mattingResult = DeepMattingHelper.runDeepMatting(context, original, refinedMask)
         
         return if (mattingResult != null && !isBitmapEmpty(mattingResult)) {
-            mattingResult
+            applyHighQualityCutout(original, mattingResult, isAlphaMask = true)
         } else {
-            applyMaskToImage(original, refinedMask)
+            
+            applyHighQualityCutout(original, refinedMask, isAlphaMask = false)
         }
     }
     
@@ -311,21 +312,42 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         } catch (e: Exception) { return true }
         return totalAlpha < 10
     }
-
-    private fun applyMaskToImage(original: Bitmap, mask: Bitmap): Bitmap {
+    
+    private fun applyHighQualityCutout(original: Bitmap, maskOrCutout: Bitmap, isAlphaMask: Boolean): Bitmap {
         val w = original.width
         val h = original.height
-        val scaledMask = Bitmap.createScaledBitmap(mask, w, h, true)
+        val upscaledMask = Bitmap.createScaledBitmap(maskOrCutout, w, h, true)
+
         val result = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        val pixels = IntArray(w * h)
+        val origPixels = IntArray(w * h)
         val maskPixels = IntArray(w * h)
-        original.getPixels(pixels, 0, w, 0, 0, w, h)
-        scaledMask.getPixels(maskPixels, 0, w, 0, 0, w, h)
-        for (i in pixels.indices) {
-            val maskVal = (maskPixels[i] shr 16) and 0xFF
-            if (maskVal > 100) { pixels[i] = pixels[i] } else { pixels[i] = 0 }
+        val resultPixels = IntArray(w * h)
+
+        original.getPixels(origPixels, 0, w, 0, 0, w, h)
+        upscaledMask.getPixels(maskPixels, 0, w, 0, 0, w, h)
+
+        for (i in origPixels.indices) {
+            val alpha = if (isAlphaMask) {
+                
+                (maskPixels[i] shr 24) and 0xFF
+            } else {
+                
+                (maskPixels[i] shr 16) and 0xFF
+            }
+            
+            val r = (origPixels[i] shr 16) and 0xFF
+            val g = (origPixels[i] shr 8) and 0xFF
+            val b = origPixels[i] and 0xFF
+            
+            resultPixels[i] = (alpha shl 24) or (r shl 16) or (g shl 8) or b
         }
-        result.setPixels(pixels, 0, w, 0, 0, w, h)
+
+        result.setPixels(resultPixels, 0, w, 0, 0, w, h)
+        
+        if (upscaledMask != maskOrCutout) {
+            upscaledMask.recycle()
+        }
+
         return result
     }
 
