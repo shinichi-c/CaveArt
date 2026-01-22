@@ -110,10 +110,13 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
 
     private val maxMemory = (Runtime.getRuntime().maxMemory() / 1024).toInt()
     private val cacheSize = maxMemory / 8
+    
     private val bitmapCache = object : LruCache<String, Bitmap>(cacheSize) {
         override fun sizeOf(key: String, bitmap: Bitmap) = bitmap.byteCount / 1024
     }
     
+    private var cachedCutout: Pair<String, Bitmap>? = null
+
     suspend fun getOrCreateProcessedBitmap(context: Context, wallpaper: Wallpaper, allowMagic: Boolean = true): Bitmap? {
         val useMagic = allowMagic && isMagicShapeEnabled
         val cacheKey = when {
@@ -125,13 +128,35 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         
         return withContext(Dispatchers.IO) {
             try {
+                
                 val originalBitmap = if (wallpaper.uri != null) {
                     BitmapHelper.decodeSampledBitmapFromUri(context, wallpaper.uri, 1080)
                 } else {
                     BitmapHelper.decodeSampledBitmapFromResource(context.resources, wallpaper.resourceId, 1080)
                 }
                 
-                val resultBitmap = processBitmap(context, originalBitmap, useMagic)
+                var cutout: Bitmap? = null
+                
+                if (useMagic) {
+                    
+                    if (cachedCutout?.first == wallpaper.id && cachedCutout?.second != null) {
+                        cutout = cachedCutout!!.second
+                        
+                        if (cutout!!.width != originalBitmap.width || cutout!!.height != originalBitmap.height) {
+                             cutout = Bitmap.createScaledBitmap(cutout!!, originalBitmap.width, originalBitmap.height, true)
+                        }
+                    } else {
+                        
+                        cutout = generateCutout(context, originalBitmap)
+                        
+                        if (cutout != null) {
+                            cachedCutout = Pair(wallpaper.id, cutout)
+                        }
+                    }
+                }
+
+                
+                val resultBitmap = composeFinalImage(context, originalBitmap, cutout, useMagic)
                 
                 if (resultBitmap != originalBitmap && resultBitmap != null) {
                     originalBitmap.recycle()
@@ -141,13 +166,17 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
                     bitmapCache.put(cacheKey, resultBitmap)
                 }
                 resultBitmap
-            } catch (e: Exception) { null }
+            } catch (e: Exception) { 
+                e.printStackTrace()
+                null 
+            }
         }
     }
 
     suspend fun generateHighQualityFinalBitmap(context: Context, wallpaper: Wallpaper): Bitmap? = withContext(Dispatchers.IO) {
         var originalBitmap: Bitmap? = null
         try {
+            
             if (wallpaper.uri != null) {
                 originalBitmap = BitmapHelper.decodeSampledBitmapFromUri(context, wallpaper.uri, 2500)
             } else {
@@ -168,32 +197,44 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         if (originalBitmap == null) return@withContext null
 
         try {
-            val processedBitmap = processBitmap(context, originalBitmap, isMagicShapeEnabled)
+            
+            val useMagic = isMagicShapeEnabled
+            
+            val cutout = if(useMagic) generateCutout(context, originalBitmap) else null
+            
+            val processedBitmap = composeFinalImage(context, originalBitmap, cutout, useMagic)
 
             if (processedBitmap != originalBitmap) originalBitmap.recycle()
+            
+            if (cutout != null && cutout != originalBitmap) cutout.recycle()
+            
             return@withContext processedBitmap
         } catch (e: Exception) { return@withContext originalBitmap }
     }
-
-    private suspend fun processBitmap(context: Context, original: Bitmap, useMagic: Boolean): Bitmap {
-        return if (useMagic) {
-            val coarseMask = PixelLabHelper.generateCoarseMask(context, original)
-            
-            if (coarseMask != null) {
-                val refinedMask = ForegroundEstimationHelper.refineMask(context, original, coarseMask) ?: coarseMask
-                val mattingResult = DeepMattingHelper.runDeepMatting(context, original, refinedMask)
-                
-                val finalCutout = if (mattingResult != null && !isBitmapEmpty(mattingResult)) {
-                    mattingResult
-                } else {
-                    applyMaskToImage(original, refinedMask)
-                }
-
-                ShapeEffectHelper.createShapeCropBitmapWithPreCutout(
-                    context, original, finalCutout, 
-                    currentMagicShape, currentBackgroundColor, is3DPopEnabled, magicScale
-                )
-            } else original
+    
+    private suspend fun generateCutout(context: Context, original: Bitmap): Bitmap? {
+        val coarseMask = PixelLabHelper.generateCoarseMask(context, original) ?: return null
+        val refinedMask = ForegroundEstimationHelper.refineMask(context, original, coarseMask) ?: coarseMask
+        val mattingResult = DeepMattingHelper.runDeepMatting(context, original, refinedMask)
+        
+        return if (mattingResult != null && !isBitmapEmpty(mattingResult)) {
+            mattingResult
+        } else {
+            applyMaskToImage(original, refinedMask)
+        }
+    }
+    
+    private fun composeFinalImage(
+        context: Context, 
+        original: Bitmap, 
+        cutout: Bitmap?, 
+        useMagic: Boolean
+    ): Bitmap {
+        return if (useMagic && cutout != null) {
+            ShapeEffectHelper.createShapeCropBitmapWithPreCutout(
+                context, original, cutout, 
+                currentMagicShape, currentBackgroundColor, is3DPopEnabled, magicScale
+            )
         } else {
             original
         }
@@ -311,5 +352,10 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    override fun onCleared() { super.onCleared(); bitmapCache.evictAll() }
+    override fun onCleared() { 
+        super.onCleared()
+        bitmapCache.evictAll()
+        cachedCutout?.second?.recycle()
+        cachedCutout = null
+    }
 }
