@@ -14,8 +14,8 @@ android {
         applicationId = "com.android.CaveArt"
         minSdk = 35
         targetSdk = 36
-        versionCode = 6
-        versionName = "2.2.1-otters"
+        versionCode = 7
+        versionName = "2.4-otters"
 
       
   testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
