@@ -18,18 +18,20 @@ data class DebugResult(
 
 object PixelDebugHelper {
 	
-    fun runFullPipelineDiagnostic(context: Context, original: Bitmap): List<DebugResult> {
+    suspend fun runFullPipelineDiagnostic(context: Context, original: Bitmap): List<DebugResult> {
         val results = mutableListOf<DebugResult>()
         var coarseMask: Bitmap? = null
+        val segHelper = SegmentationHelper(context)
+        
         try {
             val start = System.currentTimeMillis()
-            coarseMask = PixelLabHelper.generateCoarseMask(context, original)
+            coarseMask = segHelper.generateSoftMask(original)
             val duration = System.currentTimeMillis() - start
 
             if (coarseMask != null) {
                 val stats = analyzeBitmapStats(coarseMask)
                 results.add(DebugResult(
-                    testName = "1. Coarse (PixelLabHelper)",
+                    testName = "1. Segmentation (Soft)",
                     inputType = "Original Bitmap (${original.width}x${original.height})",
                     outputShape = "${coarseMask.width}x${coarseMask.height} (${duration}ms)",
                     minOutput = stats.first,
@@ -37,26 +39,31 @@ object PixelDebugHelper {
                     previewBitmap = coarseMask
                 ))
             } else {
-                results.add(createErrorResult("1. Coarse Mask", "PixelLabHelper returned null"))
+                results.add(createErrorResult("1. Segmentation", "Helper returned null"))
             }
         } catch (e: Exception) {
-            results.add(createErrorResult("1. Coarse Mask", e.message))
+            results.add(createErrorResult("1. Segmentation", e.message))
+        } finally {
+            segHelper.close()
         }
         
         if (coarseMask == null) return results
         
         var fgMask: Bitmap? = null
+        val refineHelper = ForegroundEstimationHelper(context)
+
         try {
             val start = System.currentTimeMillis()
-            fgMask = ForegroundEstimationHelper.refineMask(context, original, coarseMask)
+            fgMask = refineHelper.refineMask(original, coarseMask)
             val duration = System.currentTimeMillis() - start
 
             if (fgMask != null) {
                 val stats = analyzeBitmapStats(fgMask)
+                
                 val tintedPreview = tintBitmapGreen(fgMask)
 
                 results.add(DebugResult(
-                    testName = "2. Foreground Est (Helper)",
+                    testName = "2. Foreground Est (Refine)",
                     inputType = "Original + Coarse Mask",
                     outputShape = "${fgMask.width}x${fgMask.height} (${duration}ms)",
                     minOutput = stats.first,
@@ -64,24 +71,27 @@ object PixelDebugHelper {
                     previewBitmap = tintedPreview
                 ))
             } else {
-                
-                results.add(createErrorResult("2. Foreground Est", "Helper returned null, falling back"))
+                results.add(createErrorResult("2. Foreground Est", "Helper returned null"))
             }
         } catch (e: Exception) {
             results.add(createErrorResult("2. Foreground Est", e.message))
+        } finally {
+            refineHelper.close()
         }
         
         val maskForMatting = fgMask ?: coarseMask
         
+        val mattingHelper = DeepMattingHelper(context)
+
         try {
             val start = System.currentTimeMillis()
-            val finalResult = DeepMattingHelper.runDeepMatting(context, original, maskForMatting)
+            val finalResult = mattingHelper.run(original, maskForMatting)
             val duration = System.currentTimeMillis() - start
 
             if (finalResult != null) {
                 val stats = analyzeBitmapStats(finalResult)
                 results.add(DebugResult(
-                    testName = "3. Deep Matting (Helper)",
+                    testName = "3. Deep Matting",
                     inputType = "Original + Refined Mask",
                     outputShape = "${finalResult.width}x${finalResult.height} (${duration}ms)",
                     minOutput = stats.first,
@@ -93,6 +103,8 @@ object PixelDebugHelper {
             }
         } catch (e: Exception) {
             results.add(createErrorResult("3. Deep Matting", e.message))
+        } finally {
+            mattingHelper.close()
         }
 
         return results
@@ -108,14 +120,13 @@ object PixelDebugHelper {
         var maxVal = 0.0f
 
         for (pixel in pixels) {
-            
             val alpha = (pixel shr 24) and 0xFF
             val r = (pixel shr 16) and 0xFF
+            
             val normalized: Float
             if (alpha < 255) {
                 normalized = alpha / 255f
             } else {
-                
                 val g = (pixel shr 8) and 0xFF
                 val b = pixel and 0xFF
                 val brightness = (r + g + b) / 3f
@@ -127,7 +138,6 @@ object PixelDebugHelper {
         }
         
         if (minVal > maxVal) return Pair(0f, 0f)
-        
         return Pair(minVal, maxVal)
     }
 
@@ -146,7 +156,10 @@ object PixelDebugHelper {
         
         for (i in srcPixels.indices) {
             val p = srcPixels[i]
-            val brightness = (p shr 8) and 0xFF
+            val r = (p shr 16) and 0xFF
+            val g = (p shr 8) and 0xFF
+            val b = p and 0xFF
+            val brightness = (r + g + b) / 3
             
             destPixels[i] = Color.rgb(0, brightness, 0)
         }
