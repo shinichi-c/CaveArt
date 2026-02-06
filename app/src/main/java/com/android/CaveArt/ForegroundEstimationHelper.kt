@@ -3,7 +3,7 @@ package com.android.CaveArt
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Color
-import org.tensorflow.lite.DataType
+import kotlinx.coroutines.withContext
 import org.tensorflow.lite.Interpreter
 import org.tensorflow.lite.gpu.CompatibilityList
 import org.tensorflow.lite.gpu.GpuDelegate
@@ -11,112 +11,106 @@ import org.tensorflow.lite.support.common.FileUtil
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
-object ForegroundEstimationHelper {
+class ForegroundEstimationHelper(private val context: Context) {
 
-    private const val MODEL_NAME = "foreground_estimator_5680_512_512.tflite"
+    private var interpreter: Interpreter? = null
+    private var gpuDelegate: GpuDelegate? = null
+    private val MODEL_NAME = "foreground_estimator_5680_512_512.tflite"
 
-    fun refineMask(context: Context, original: Bitmap, coarseMask: Bitmap): Bitmap? {
-        var interpreter: Interpreter? = null
+    suspend fun refineMask(original: Bitmap, coarseMask: Bitmap): Bitmap? = withContext(MLThread.dispatcher) {
         try {
-            val options = Interpreter.Options()
-            val compatList = CompatibilityList()
-            if (compatList.isDelegateSupportedOnThisDevice) {
-                options.addDelegate(GpuDelegate(compatList.bestOptionsForThisDevice))
-            } else {
-                options.setNumThreads(4)
-            }
+            ensureInitialized()
+            val tflite = interpreter ?: return@withContext coarseMask
 
-            val file = FileUtil.loadMappedFile(context, MODEL_NAME)
-            interpreter = Interpreter(file, options)
-            
-            val imgTensorIndex = 0
-            val maskTensorIndex = 1
-            
-            val imgShape = interpreter.getInputTensor(imgTensorIndex).shape()
-            val height = imgShape[1]
-            val width = imgShape[2]
+            val inputShape = tflite.getInputTensor(0).shape()
+            val h = inputShape[1]
+            val w = inputShape[2]
 
-            val imgDataType = interpreter.getInputTensor(imgTensorIndex).dataType()
-            val maskDataType = interpreter.getInputTensor(maskTensorIndex).dataType()
+            val scaledImg = Bitmap.createScaledBitmap(original, w, h, true)
+            val scaledMask = Bitmap.createScaledBitmap(coarseMask, w, h, true)
 
-            val imgBuffer = ByteBuffer.allocateDirect(1 * height * width * 3 * getTypeSize(imgDataType))
-            imgBuffer.order(ByteOrder.nativeOrder())
-            
-            val maskBuffer = ByteBuffer.allocateDirect(1 * height * width * 1 * getTypeSize(maskDataType))
-            maskBuffer.order(ByteOrder.nativeOrder())
+            val imgBuffer = ByteBuffer.allocateDirect(1 * h * w * 3 * 4).apply { order(ByteOrder.nativeOrder()) }
+            val maskBuffer = ByteBuffer.allocateDirect(1 * h * w * 1 * 4).apply { order(ByteOrder.nativeOrder()) }
 
-            val scaledImg = Bitmap.createScaledBitmap(original, width, height, true)
-            val scaledMask = Bitmap.createScaledBitmap(coarseMask, width, height, true)
+            val imgPixels = IntArray(w * h)
+            val maskPixels = IntArray(w * h)
+            scaledImg.getPixels(imgPixels, 0, w, 0, 0, w, h)
+            scaledMask.getPixels(maskPixels, 0, w, 0, 0, w, h)
 
-            val imgPixels = IntArray(width * height)
-            val maskPixels = IntArray(width * height)
-            scaledImg.getPixels(imgPixels, 0, width, 0, 0, width, height)
-            scaledMask.getPixels(maskPixels, 0, width, 0, 0, width, height)
-            
-            for (pixel in imgPixels) {
-                val r = (pixel shr 16) and 0xFF
-                val g = (pixel shr 8) and 0xFF
-                val b = pixel and 0xFF
-
-                if (imgDataType == DataType.FLOAT32) {
-                    imgBuffer.putFloat(r / 255.0f)
-                    imgBuffer.putFloat(g / 255.0f)
-                    imgBuffer.putFloat(b / 255.0f)
-                } else {
-                    imgBuffer.put(r.toByte())
-                    imgBuffer.put(g.toByte())
-                    imgBuffer.put(b.toByte())
-                }
+            for (p in imgPixels) {
+                imgBuffer.putFloat(((p shr 16) and 0xFF) / 255.0f)
+                imgBuffer.putFloat(((p shr 8) and 0xFF) / 255.0f)
+                imgBuffer.putFloat((p and 0xFF) / 255.0f)
             }
             
-            for (pixel in maskPixels) {
-                val m = (pixel shr 16) and 0xFF
-                if (maskDataType == DataType.FLOAT32) {
-                    maskBuffer.putFloat(m / 255.0f)
-                } else {
-                    maskBuffer.put(m.toByte())
-                }
+            for (p in maskPixels) {
+                val alpha = (p shr 24) and 0xFF
+                maskBuffer.putFloat(alpha / 255.0f)
             }
-            
-            val outputTensorIndex = if (interpreter.getOutputTensor(0).shape()[3] == 1) 0 else 1
-            val outputDataType = interpreter.getOutputTensor(outputTensorIndex).dataType()
-            
-            val outBuffer = ByteBuffer.allocateDirect(1 * height * width * 1 * getTypeSize(outputDataType))
-            outBuffer.order(ByteOrder.nativeOrder())
-            
-            val inputs = arrayOf<Any>(imgBuffer, maskBuffer)
-            
+
+            val outputBuffer = ByteBuffer.allocateDirect(1 * h * w * 1 * 4).apply { order(ByteOrder.nativeOrder()) }
             val outputs = mutableMapOf<Int, Any>()
-            outputs[outputTensorIndex] = outBuffer
-
-            interpreter.runForMultipleInputsOutputs(inputs, outputs)
             
-            outBuffer.rewind()
-            val resultBitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-            val resultPixels = IntArray(width * height)
+            var outputIndex = 0
+            if (tflite.outputTensorCount > 0) {
+                 val outShape = tflite.getOutputTensor(0).shape()
+                 if (outShape.size == 4 && outShape[3] == 1) outputIndex = 0 
+                 else if (tflite.outputTensorCount > 1) outputIndex = 1
+            }
+            outputs[outputIndex] = outputBuffer
+
+            tflite.runForMultipleInputsOutputs(arrayOf(imgBuffer, maskBuffer), outputs)
+
+            outputBuffer.rewind()
+            val resultBitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            val resultPixels = IntArray(w * h)
 
             for (i in resultPixels.indices) {
-                val prob = if (outputDataType == DataType.FLOAT32) {
-                    outBuffer.float
-                } else {
-                    (outBuffer.get().toInt() and 0xFF) / 255.0f
-                }
-                
+                val prob = outputBuffer.float
                 val valInt = (prob * 255).toInt().coerceIn(0, 255)
-                resultPixels[i] = Color.rgb(valInt, valInt, valInt)
+                
+                resultPixels[i] = Color.argb(255, valInt, valInt, valInt)
             }
-            resultBitmap.setPixels(resultPixels, 0, width, 0, 0, width, height)
-            return resultBitmap
+            resultBitmap.setPixels(resultPixels, 0, w, 0, 0, w, h)
+
+            scaledImg.recycle()
+            scaledMask.recycle()
+            
+            return@withContext resultBitmap
 
         } catch (e: Exception) {
             e.printStackTrace()
-            return null
-        } finally {
-            interpreter?.close()
+            return@withContext null
         }
     }
 
-    private fun getTypeSize(type: DataType): Int {
-        return if (type == DataType.FLOAT32) 4 else 1
+    private fun ensureInitialized() {
+        if (interpreter != null) return
+        val options = Interpreter.Options()
+        val compatList = CompatibilityList()
+
+        try {
+            if (compatList.isDelegateSupportedOnThisDevice) {
+                gpuDelegate = GpuDelegate(compatList.bestOptionsForThisDevice)
+                options.addDelegate(gpuDelegate)
+            } else {
+                options.setNumThreads(4)
+            }
+            val file = FileUtil.loadMappedFile(context, MODEL_NAME)
+            interpreter = Interpreter(file, options)
+        } catch (e: Exception) {
+            options.setNumThreads(4)
+            try {
+                val file = FileUtil.loadMappedFile(context, MODEL_NAME)
+                interpreter = Interpreter(file, options)
+            } catch (e2: Exception) {}
+        }
+    }
+
+    fun close() {
+        interpreter?.close()
+        gpuDelegate?.close()
+        interpreter = null
+        gpuDelegate = null
     }
 }
