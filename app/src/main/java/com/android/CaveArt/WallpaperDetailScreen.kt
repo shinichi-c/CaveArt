@@ -34,6 +34,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.FilterCenterFocus
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.PlayArrow
@@ -373,6 +374,21 @@ fun MagicControlsSheet(
                     ),
                     border = FilterChipDefaults.filterChipBorder(enabled = true, selected = viewModel.is3DPopEnabled, borderColor = Color.Transparent)
                 )
+                
+                FilterChip(
+                    selected = viewModel.isCentered,
+                    onClick = { viewModel.toggleCentered() },
+                    label = { Text("Center") },
+                    leadingIcon = {
+                        Icon(Icons.Default.FilterCenterFocus, contentDescription = null, modifier = Modifier.size(18.dp))
+                    },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                        selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                    ),
+                    border = FilterChipDefaults.filterChipBorder(enabled = true, selected = viewModel.isCentered, borderColor = Color.Transparent)
+                )
+                
                 Spacer(modifier = Modifier.weight(1f))
             }
             
@@ -486,7 +502,8 @@ fun MagicEffectImage(
         viewModel.currentMagicShape, 
         viewModel.currentBackgroundColor, 
         viewModel.is3DPopEnabled,
-        viewModel.magicScale
+        viewModel.magicScale,
+        viewModel.isCentered
     ) {
         val newBitmap = viewModel.getOrCreateProcessedBitmap(context, wallpaper)
         if (newBitmap != null) {

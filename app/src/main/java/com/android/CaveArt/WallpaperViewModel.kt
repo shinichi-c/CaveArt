@@ -54,6 +54,8 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     var currentBackgroundColor by mutableStateOf(AndroidColor.parseColor("#4CAF50"))
     var is3DPopEnabled by mutableStateOf(true)
     var magicScale by mutableFloatStateOf(1.0f)
+    var isCentered by mutableStateOf(false)
+    fun toggleCentered() { isCentered = !isCentered }
     
     fun setMagicShapeEnabled(enabled: Boolean) {
         _isMagicShapeEnabled.value = enabled
@@ -125,9 +127,8 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
 
     suspend fun getOrCreateProcessedBitmap(context: Context, wallpaper: Wallpaper, allowMagic: Boolean = true): Bitmap? {
         val useMagic = allowMagic && isMagicShapeEnabled
-        
         val cacheKey = if(useMagic) {
-            "final_${wallpaper.id}_${currentMagicShape}_${currentBackgroundColor}_${is3DPopEnabled}_$magicScale"
+            "final_${wallpaper.id}_${currentMagicShape}_${currentBackgroundColor}_${is3DPopEnabled}_${magicScale}_${isCentered}"
         } else {
             "preview_${wallpaper.id}"
         }
@@ -234,9 +235,11 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         useMagic: Boolean
     ): Bitmap {
         return if (useMagic && cutout != null) {
+            
             ShapeEffectHelper.createShapeCropBitmapWithPreCutout(
                 context, original, cutout, 
-                currentMagicShape, currentBackgroundColor, is3DPopEnabled, magicScale
+                currentMagicShape, currentBackgroundColor, 
+                is3DPopEnabled, magicScale, isCentered
             )
         } else {
             original
