@@ -278,6 +278,7 @@ fun MagicControlsSheet(
     LaunchedEffect(wallpaper) {
         withContext(Dispatchers.IO) {
             try {
+                
                 val bitmap = if(wallpaper.uri != null) {
                     BitmapHelper.decodeSampledBitmapFromUri(context, wallpaper.uri, 500)
                 } else {
@@ -285,20 +286,36 @@ fun MagicControlsSheet(
                 }
                 
                 if (bitmap != null) {
+                	
                     val palette = Palette.from(bitmap).generate()
-                    val swatches = listOfNotNull(
-                        palette.vibrantSwatch?.rgb, palette.darkVibrantSwatch?.rgb,
-                        palette.dominantSwatch?.rgb, palette.mutedSwatch?.rgb,
-                        palette.lightVibrantSwatch?.rgb
-                    ).distinct()
-                    val finalColors = if (swatches.isEmpty()) {
-                        listOf(0xFF4CAF50.toInt(), 0xFF000000.toInt(), 0xFFFFFFFF.toInt())
-                    } else {
-                        swatches + listOf(0xFF000000.toInt(), 0xFFFFFFFF.toInt())
-                    }
+                    
+                    val targetSwatches = listOfNotNull(
+                        palette.vibrantSwatch,
+                        palette.darkVibrantSwatch,
+                        palette.lightVibrantSwatch,
+                        palette.mutedSwatch,
+                        palette.darkMutedSwatch,
+                        palette.lightMutedSwatch,
+                        palette.dominantSwatch
+                    )
+                    
+                    val extraSwatches = palette.swatches
+                        .sortedByDescending { it.population }
+                        .take(8)
+                        
+                    val allColorInts = (targetSwatches + extraSwatches)
+                        .map { it.rgb }
+                        .distinct()
+                        
+                    val finalColors = (allColorInts + listOf(
+                        android.graphics.Color.BLACK, 
+                        android.graphics.Color.WHITE
+                    )).distinct()
+
                     withContext(Dispatchers.Main) {
                         extractedColors = finalColors
-                        if (finalColors.isNotEmpty() && viewModel.currentBackgroundColor == 0xFF4CAF50.toInt()) {
+                        
+                        if (finalColors.isNotEmpty()) {
                              viewModel.updateMagicConfig(viewModel.currentMagicShape, finalColors.first())
                         }
                     }
