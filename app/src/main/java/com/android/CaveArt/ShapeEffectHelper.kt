@@ -1,103 +1,101 @@
 package com.android.CaveArt
 
-import android.content.Context
-import android.graphics.Bitmap
-import android.graphics.Canvas
-import android.graphics.Paint
-import android.graphics.PorterDuff
-import android.graphics.PorterDuffXfermode
-import android.graphics.Rect
-import android.graphics.RectF
+import android.graphics.*
 import kotlin.math.max
+import kotlin.math.min
+
+data class UnifiedGeometry(
+    val baseScale: Float,
+    val shiftX: Float,
+    val shiftY: Float,
+    val subjectCenterX: Float,
+    val subjectCenterY: Float,
+    val shapeBoundsRel: RectF 
+)
 
 object ShapeEffectHelper {
-	
-    fun calculateShapeBounds(
-        originalWidth: Int,
-        originalHeight: Int,
-        cutout: Bitmap?,
-        scaleFactor: Float,
-        isCentered: Boolean
-    ): RectF {
-        val rawBounds = if (cutout != null) {
-            Geometric.calculateCircleBounds(cutout, originalWidth, originalHeight, scaleFactor)
+
+    fun getUnifiedGeometry(
+        imgW: Int,
+        imgH: Int,
+        screenW: Float,
+        screenH: Float,
+        mask: Bitmap?,
+        config: LiveWallpaperConfig
+    ): UnifiedGeometry {
+    	
+        val rawSubject = if (mask != null) {
+            Geometric.calculateCircleBounds(mask, imgW, imgH, config.scale)
         } else {
-            val cx = originalWidth / 2f
-            val cy = originalHeight / 2f
-            val r = kotlin.math.min(originalWidth, originalHeight) / 2f * scaleFactor
-            RectF(cx - r, cy - r, cx + r, cy + r)
+            val r = min(imgW, imgH) / 2f * config.scale
+            RectF(imgW/2f - r, imgH/2f - r, imgW/2f + r, imgH/2f + r)
         }
-
-        var centerX = rawBounds.centerX()
-        var centerY = rawBounds.centerY()
-
-        if (isCentered) {
-            centerX = originalWidth / 2f
-            centerY = originalHeight / 2f
-        }
-
-        val sideLength = max(rawBounds.width(), rawBounds.height())
-        val safeSide = if (sideLength < 50f) originalWidth * 0.5f else sideLength
-        val halfSide = safeSide / 2f
         
-        return RectF(
-            centerX - halfSide,
-            centerY - halfSide,
-            centerX + halfSide,
-            centerY + halfSide
+        val shiftX = if (config.isCentered) (imgW / 2f) - rawSubject.centerX() else 0f
+        val shiftY = if (config.isCentered) (imgH / 2f) - rawSubject.centerY() else 0f
+
+        val baseScale = max(screenW / imgW, screenH / imgH)
+        
+        val side = max(rawSubject.width(), rawSubject.height())
+        val halfSide = (if (side < 50f) imgW * 0.5f else side) / 2f
+        
+        val shapeBoundsRel = RectF(
+            rawSubject.centerX() - halfSide,
+            rawSubject.centerY() - halfSide,
+            rawSubject.centerX() + halfSide,
+            rawSubject.centerY() + halfSide
         )
+
+        return UnifiedGeometry(baseScale, shiftX, shiftY, rawSubject.centerX(), rawSubject.centerY(), shapeBoundsRel)
     }
-    
+
     fun createShapeCropBitmapWithPreCutout(
-        context: Context,
         original: Bitmap,
         cutout: Bitmap, 
-        shape: MagicShape,
-        backgroundColor: Int,
-        enable3DPop: Boolean,
-        scaleFactor: Float,
-        isCentered: Boolean
+        config: LiveWallpaperConfig
     ): Bitmap {
-        val width = original.width
-        val height = original.height
+        val w = original.width
+        val h = original.height
+        val geo = getUnifiedGeometry(w, h, w.toFloat(), h.toFloat(), cutout, config)
         
-        val finalBitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(finalBitmap)
+        val result = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(result)
         val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
-        
-        val shapeBounds = calculateShapeBounds(width, height, cutout, scaleFactor, isCentered)
-        
-        val originalCenterBounds = Geometric.calculateCircleBounds(cutout, width, height, scaleFactor)
-        val shiftX = if (isCentered) (width / 2f) - originalCenterBounds.centerX() else 0f
-        val shiftY = if (isCentered) (height / 2f) - originalCenterBounds.centerY() else 0f
-        
-        val verticalShift = if (enable3DPop) shapeBounds.height() * 0.1f else 0f
-        val shiftedBounds = RectF(shapeBounds)
-        shiftedBounds.offset(0f, verticalShift)
 
-        canvas.drawColor(backgroundColor)
+        canvas.drawColor(config.backgroundColor)
         
-        val saveCount = canvas.save()
-        val shapePath = ShapePathProvider.getPathForShape(shape, shiftedBounds)
-        canvas.clipPath(shapePath)
+        val canvasShapeCenterX = if (config.isCentered) w / 2f else geo.subjectCenterX
+        val canvasShapeCenterY = if (config.isCentered) h / 2f else geo.subjectCenterY
         
-        canvas.translate(shiftX, shiftY)
+        val halfW = geo.shapeBoundsRel.width() / 2f
+        val halfH = geo.shapeBoundsRel.height() / 2f
+        
+        val vShift = if (config.is3DPopEnabled) geo.shapeBoundsRel.height() * 0.1f else 0f
+        
+        val finalShapeRect = RectF(
+            canvasShapeCenterX - halfW,
+            canvasShapeCenterY - halfH + vShift,
+            canvasShapeCenterX + halfW,
+            canvasShapeCenterY + halfH + vShift
+        )
+        
+        canvas.save()
+        val shapeEnum = try { MagicShape.valueOf(config.shapeName) } catch(e:Exception) { MagicShape.SQUIRCLE }
+        val path = ShapePathProvider.getPathForShape(shapeEnum, finalShapeRect)
+        canvas.clipPath(path)
+        canvas.translate(geo.shiftX, geo.shiftY)
         canvas.drawBitmap(original, 0f, 0f, paint)
-        canvas.restoreToCount(saveCount)
+        canvas.restore()
         
-        if (enable3DPop) {
-            val layerId = canvas.saveLayer(0f, 0f, width.toFloat(), height.toFloat(), null)
-            
-            canvas.translate(shiftX, shiftY)
+        if (config.is3DPopEnabled) {
+            val layerId = canvas.saveLayer(0f, 0f, w.toFloat(), h.toFloat(), null)
+            canvas.translate(geo.shiftX, geo.shiftY)
             canvas.drawBitmap(cutout, 0f, 0f, paint)
-            
             paint.xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_IN)
             canvas.drawBitmap(original, 0f, 0f, paint)
             paint.xfermode = null
-            
             canvas.restoreToCount(layerId)
         }
-
-        return finalBitmap
+        return result
     }
 }
