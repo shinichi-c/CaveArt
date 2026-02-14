@@ -1,6 +1,5 @@
 package com.android.CaveArt
 
-import android.animation.ValueAnimator
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -14,7 +13,6 @@ import android.view.animation.DecelerateInterpolator
 import kotlinx.coroutines.*
 import kotlin.math.sin
 import kotlin.math.max
-import kotlin.math.min
 
 class CaveArtWallpaperService : WallpaperService() {
 
@@ -27,117 +25,92 @@ class CaveArtWallpaperService : WallpaperService() {
         private val scope = CoroutineScope(Dispatchers.IO + Job())
         
         private var config = LiveWallpaperConfig()
+        
         private var originalBitmap: Bitmap? = null
+        private var cutoutBitmap: Bitmap? = null
         
         private val bgPaint = Paint().apply { style = Paint.Style.FILL }
         private val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
         
-        private var transitionProgress = 0f
         private var isVisible = false
-        
-        private var floatAnimator: ValueAnimator? = null
         private var floatOffset = 0f
-        private var transitionAnimator: ValueAnimator? = null
-
-        private val receiver = object : BroadcastReceiver() {
-            override fun onReceive(context: Context?, intent: Intent?) {
-                when (intent?.action) {
-                    Intent.ACTION_USER_PRESENT -> animateToHome()
-                    Intent.ACTION_SCREEN_OFF -> resetToLock()
-                }
-            }
-        }
+        private var breatheScale = 1.0f
+        
+        private var timeSeconds = 0f
+        private var lastFrameTime = 0L
 
         override fun onCreate(surfaceHolder: SurfaceHolder?) {
             super.onCreate(surfaceHolder)
-            
-            val filter = IntentFilter().apply {
-                addAction(Intent.ACTION_USER_PRESENT)
-                addAction(Intent.ACTION_SCREEN_OFF)
-            }
-            registerReceiver(receiver, filter)
-            
             reloadConfig()
-            startFloatAnimation()
         }
 
         override fun onVisibilityChanged(visible: Boolean) {
             isVisible = visible
-            if (visible) draw() else handler.removeCallbacks(drawRunner)
+            if (visible) {
+                lastFrameTime = System.nanoTime()
+                handler.post(drawRunner)
+            } else {
+                handler.removeCallbacks(drawRunner)
+            }
         }
 
         fun reloadConfig() {
             scope.launch {
-                
                 config = WallpaperConfigManager.loadConfig(applicationContext)
                 
-                val loadedBitmap = try {
-                    
+                val loadedOriginal = try {
                     if (!config.imagePath.isNullOrEmpty()) {
                         BitmapFactory.decodeFile(config.imagePath)
-                    } 
-                    
-                    else if (config.resourceId != 0) {
+                    } else if (config.resourceId != 0) {
                         BitmapHelper.decodeSampledBitmapFromResource(resources, config.resourceId, 2500)
-                    } else {
-                        null
-                    }
+                    } else null
+                } catch (e: Exception) { null }
+                
+                val loadedCutout = try {
+                    if (!config.cutoutPath.isNullOrEmpty()) {
+                        BitmapFactory.decodeFile(config.cutoutPath)
+                    } else null
                 } catch (e: Exception) { null }
 
                 withContext(Dispatchers.Main) {
-                    if (loadedBitmap != null) {
-                        originalBitmap?.recycle()
-                        originalBitmap = loadedBitmap
-                    }
+                    originalBitmap?.recycle()
+                    cutoutBitmap?.recycle()
+                    
+                    if (loadedOriginal != null) originalBitmap = loadedOriginal
+                    if (loadedCutout != null) cutoutBitmap = loadedCutout
+                    
                     bgPaint.color = config.backgroundColor
-                    transitionProgress = 0f 
-                    draw()
+                    
+                    if (isVisible) draw()
                 }
             }
         }
 
-        private fun animateToHome() {
-            transitionAnimator?.cancel()
-            transitionAnimator = ValueAnimator.ofFloat(transitionProgress, 1f).apply {
-                duration = 800
-                interpolator = DecelerateInterpolator()
-                addUpdateListener { 
-                    transitionProgress = it.animatedValue as Float
-                    draw()
-                }
-                start()
+        private val drawRunner = object : Runnable {
+            override fun run() {
+                draw()
+                if (isVisible) handler.postDelayed(this, 16)
             }
         }
-
-        private fun resetToLock() {
-            transitionAnimator?.cancel()
-            transitionProgress = 0f
-            draw()
-        }
-        
-        private fun startFloatAnimation() {
-            floatAnimator = ValueAnimator.ofFloat(0f, 2 * Math.PI.toFloat()).apply {
-                duration = 6000
-                repeatCount = ValueAnimator.INFINITE
-                addUpdateListener {
-                    floatOffset = sin(it.animatedValue as Float)
-                    if (isVisible && transitionProgress > 0.05f) draw()
-                }
-                start()
-            }
-        }
-
-        private val drawRunner = Runnable { draw() }
 
         private fun draw() {
             if (!isVisible) return
             val holder = surfaceHolder ?: return
             
+            val now = System.nanoTime()
+            val dt = (now - lastFrameTime) / 1_000_000_000f
+            lastFrameTime = now
+            timeSeconds += dt
+            
+            floatOffset = sin(timeSeconds * 0.5f)
+            
+            breatheScale = 1.0f + (sin(timeSeconds * 0.2f) * 0.02f)
+
             var canvas: Canvas? = null
             try {
                 canvas = holder.lockCanvas()
                 if (canvas != null) {
-                    drawContent(canvas)
+                    drawUnifiedFrame(canvas)
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -148,74 +121,72 @@ class CaveArtWallpaperService : WallpaperService() {
             }
         }
 
-        private fun drawContent(canvas: Canvas) {
+        private fun drawUnifiedFrame(canvas: Canvas) {
             val bmp = originalBitmap ?: return
             if (bmp.isRecycled) return
-
+            
             val w = canvas.width.toFloat()
             val h = canvas.height.toFloat()
             val iw = bmp.width.toFloat()
             val ih = bmp.height.toFloat()
-
             
-            canvas.drawColor(Color.BLACK)
-            if (transitionProgress > 0) {
-                bgPaint.alpha = (transitionProgress * 255).toInt()
-                canvas.drawRect(0f, 0f, w, h, bgPaint)
-            }
-
+            canvas.drawColor(config.backgroundColor)
             
             val scaleFull = max(w / iw, h / ih)
-            val baseScale = min(w / iw, h / ih)
-            val safeScale = config.scale.coerceIn(0.5f, 1.5f)
-            val scaleShape = baseScale * safeScale
-            val floatY = floatOffset * 30f 
+            val scaleFit = kotlin.math.min(w / iw, h / ih)
             
-            val currentScale = lerp(scaleFull, scaleShape, transitionProgress)
-            val dx = (w - iw * currentScale) / 2f
-            val dy = (h - ih * currentScale) / 2f + (floatY * transitionProgress)
-
+            val shapeBoundsRelToImage = ShapeEffectHelper.calculateShapeBounds(
+                bmp.width, bmp.height, cutoutBitmap, config.scale, config.isCentered
+            )
+            
+            var shiftX = 0f
+            var shiftY = 0f
+            if (config.isCentered) {
+              
+                val cutBounds = if(cutoutBitmap != null) Geometric.calculateCircleBounds(cutoutBitmap!!, bmp.width, bmp.height, config.scale) else RectF(0f,0f,0f,0f)
+                shiftX = (iw / 2f) - cutBounds.centerX()
+                shiftY = (ih / 2f) - cutBounds.centerY()
+            }
+               
+            val centerX = w / 2f
+            val centerY = h / 2f
+            
+            val screenShapeBounds = RectF(
+                centerX - (shapeBoundsRelToImage.width() / 2f * finalScale),
+                centerY - (shapeBoundsRelToImage.height() / 2f * finalScale) + (floatOffset * 20f),
+                centerX + (shapeBoundsRelToImage.width() / 2f * finalScale),
+                centerY + (shapeBoundsRelToImage.height() / 2f * finalScale) + (floatOffset * 20f)
+            )
+            
             val saveCount = canvas.save()
             
-            if (transitionProgress > 0.01f) {
-                val shapeEnum = try { MagicShape.valueOf(config.shapeName) } catch(e:Exception) { MagicShape.SQUIRCLE }
-                val cx = w / 2f
-                val cy = h / 2f + (floatY * transitionProgress)
-                val shapeSize = min(iw * currentScale, ih * currentScale)
-                val halfShape = shapeSize / 2f
-                val fullSize = max(w, h) * 1.5f
-                val currentHalf = lerp(fullSize, halfShape, transitionProgress)
-                
-                val bounds = RectF(
-                    cx - currentHalf,
-                    cy - currentHalf,
-                    cx + currentHalf,
-                    cy + currentHalf
-                )
-                
-                val path = ShapePathProvider.getPathForShape(shapeEnum, bounds)
-                canvas.clipPath(path)
-            }
-
+            val shapeEnum = try { MagicShape.valueOf(config.shapeName) } catch(e:Exception) { MagicShape.SQUIRCLE }
+            val path = ShapePathProvider.getPathForShape(shapeEnum, screenShapeBounds)
+            canvas.clipPath(path)
             
             val matrix = Matrix()
-            matrix.setScale(currentScale, currentScale)
-            matrix.postTranslate(dx, dy)
-            canvas.drawBitmap(bmp, matrix, bitmapPaint)
+            matrix.postTranslate(-shapeBoundsRelToImage.centerX() + shiftX, -shapeBoundsRelToImage.centerY() + shiftY)
+            matrix.postScale(finalScale, finalScale)
+            matrix.postTranslate(screenShapeBounds.centerX(), screenShapeBounds.centerY())
             
+            canvas.drawBitmap(bmp, matrix, bitmapPaint)
             canvas.restoreToCount(saveCount)
+            
+            if (config.is3DPopEnabled && cutoutBitmap != null && !cutoutBitmap!!.isRecycled) {
+      
+                val parallaxX = floatOffset * 5f
+                matrix.postTranslate(parallaxX, 0f) 
+                
+                canvas.drawBitmap(cutoutBitmap!!, matrix, bitmapPaint)
+            }
         }
-        
-        private fun lerp(a: Float, b: Float, t: Float): Float = a + (b - a) * t
 
         override fun onDestroy() {
             super.onDestroy()
-            unregisterReceiver(receiver)
-            floatAnimator?.cancel()
-            transitionAnimator?.cancel()
             handler.removeCallbacks(drawRunner)
             scope.cancel()
             originalBitmap?.recycle()
+            cutoutBitmap?.recycle()
         }
     }
 }

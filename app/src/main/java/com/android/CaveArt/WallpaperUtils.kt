@@ -31,84 +31,76 @@ suspend fun setLiveWallpaper(
     wallpaper: Wallpaper,
     viewModel: WallpaperViewModel
 ) = withContext(Dispatchers.IO) {
-	
+    
     val deviceProtectedContext = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
         context.createDeviceProtectedStorageContext()
     } else {
         context
     }
     
-    var savedPath: String? = null
+    var savedOriginalPath: String? = null
+    var savedCutoutPath: String? = null
     
-    if (wallpaper.uri != null) {
+    val components = viewModel.getHighQualityComponents(context, wallpaper)
+    val originalBitmap = components.first
+    val cutoutBitmap = components.second
+    
+    if (originalBitmap != null) {
         try {
             
-            val bitmap = viewModel.generateHighQualityFinalBitmap(context, wallpaper)
+            val origFile = File(deviceProtectedContext.noBackupFilesDir, "boot_original.png")
+            val origStream = FileOutputStream(origFile)
+            originalBitmap.compress(Bitmap.CompressFormat.PNG, 100, origStream)
+            origStream.flush()
+            origStream.close()
+            savedOriginalPath = origFile.absolutePath
             
-            if (bitmap != null) {
-                
-                val file = File(deviceProtectedContext.noBackupFilesDir, "boot_wallpaper.png")
-                val stream = FileOutputStream(file)
-                bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)
-                stream.flush()
-                stream.close()
-                
-                savedPath = file.absolutePath
-                
+            if (cutoutBitmap != null && viewModel.isMagicShapeEnabled) {
+                val cutFile = File(deviceProtectedContext.noBackupFilesDir, "boot_cutout.png")
+                val cutStream = FileOutputStream(cutFile)
+                cutoutBitmap.compress(Bitmap.CompressFormat.PNG, 100, cutStream)
+                cutStream.flush()
+                cutStream.close()
+                savedCutoutPath = cutFile.absolutePath
             }
+            
         } catch (e: Exception) {
-            e.printStackTrace()
-            Log.e("CaveArt", "Failed to save boot image: ${e.message}")
+            Log.e("CaveArt", "Failed to save wallpaper assets: ${e.message}")
         }
     }
     
     val config = LiveWallpaperConfig(
-        imagePath = savedPath,
+        imagePath = savedOriginalPath,
+        cutoutPath = savedCutoutPath,
         resourceId = wallpaper.resourceId,
         shapeName = viewModel.currentMagicShape.name,
         backgroundColor = viewModel.currentBackgroundColor,
         is3DPopEnabled = viewModel.is3DPopEnabled,
-        scale = viewModel.magicScale
+        scale = viewModel.magicScale,
+        isCentered = viewModel.isCentered
     )
+    
     WallpaperConfigManager.saveConfig(context, config)
+    
+    originalBitmap?.recycle()
+    cutoutBitmap?.recycle()
     
     val isRoot = RootUtils.isRootAvailable()
     
     if (isRoot) {
-        withContext(Dispatchers.Main) {
+         withContext(Dispatchers.Main) {
             Toast.makeText(context, "Attempting System Injection...", Toast.LENGTH_SHORT).show()
         }
-
         val resultLog = RootUtils.bruteForceSetWallpaper(context, CaveArtWallpaperService::class.java)
-
         if (resultLog.contains("SUCCESS")) {
-        	
-            try {
-                val wm = WallpaperManager.getInstance(context)
-                wm.clear(WallpaperManager.FLAG_LOCK)
-            } catch (e: Exception) {
-                try {
-                    Runtime.getRuntime().exec(arrayOf("su", "-c", "cmd wallpaper clear 2")).waitFor()
-                } catch (ex: Exception) { ex.printStackTrace() }
-            }
-
-            withContext(Dispatchers.Main) {
-                Toast.makeText(context, "Injection Successful!", Toast.LENGTH_SHORT).show()
-            }
-            return@withContext
-        } else {
-            Log.e("CaveArt", "Injection failed.")
-            RootUtils.saveLogToSdCard(resultLog)
-            withContext(Dispatchers.Main) {
-                Toast.makeText(context, "Injection Failed. Log saved.", Toast.LENGTH_LONG).show()
-            }
+            
+             try { WallpaperManager.getInstance(context).clear(WallpaperManager.FLAG_LOCK) } catch (e: Exception) {}
+             withContext(Dispatchers.Main) { Toast.makeText(context, "Injection Successful!", Toast.LENGTH_SHORT).show() }
+             return@withContext
         }
     }
     
     withContext(Dispatchers.Main) {
-        if (!isRoot) {
-            Toast.makeText(context, "Root not found. Opening picker.", Toast.LENGTH_SHORT).show()
-        }
         try {
             val intent = Intent(WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER)
             intent.putExtra(
@@ -133,7 +125,6 @@ suspend fun setDeviceWallpaper(
     val wallpaperManager = WallpaperManager.getInstance(context)
     val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     val metrics = DisplayMetrics()
-    @Suppress("DEPRECATION")
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
         windowManager.currentWindowMetrics.bounds.let {
             metrics.widthPixels = it.width()
@@ -142,72 +133,40 @@ suspend fun setDeviceWallpaper(
     } else {
         windowManager.defaultDisplay.getMetrics(metrics)
     }
-    val screenWidth = metrics.widthPixels
-    val screenHeight = metrics.heightPixels
-
-    val rawBitmap = viewModel.generateHighQualityFinalBitmap(context, wallpaper)
-
-    if (rawBitmap == null) {
-        withContext(Dispatchers.Main) {
-            Toast.makeText(context, "Error: Could not load image.", Toast.LENGTH_SHORT).show()
-        }
-        return@withContext
-    }
     
-    var bitmapToSet: Bitmap? = null
+    val rawBitmap = viewModel.getOrCreateProcessedBitmap(context, wallpaper)
+
+    if (rawBitmap == null) return@withContext
 
     try {
         if (isFixedAlignmentEnabled) {
-            val finalBitmap = Bitmap.createBitmap(screenWidth, screenHeight, Bitmap.Config.ARGB_8888)
+            val finalBitmap = Bitmap.createBitmap(metrics.widthPixels, metrics.heightPixels, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(finalBitmap)
             if (viewModel.isMagicShapeEnabled) {
                 canvas.drawColor(viewModel.currentBackgroundColor)
             }
-
-            val imageWidth = rawBitmap.width.toFloat()
-            val imageHeight = rawBitmap.height.toFloat()
             
-            val isMagic = viewModel.isMagicShapeEnabled
-            val scale = if (isMagic) {
-                min(screenWidth.toFloat() / imageWidth, screenHeight.toFloat() / imageHeight)
+            val scale = max(metrics.widthPixels.toFloat() / rawBitmap.width, metrics.heightPixels.toFloat() / rawBitmap.height)
+            val w = rawBitmap.width * scale
+            val h = rawBitmap.height * scale
+            val left = (metrics.widthPixels - w) / 2f
+            val top = (metrics.heightPixels - h) / 2f
+            
+            canvas.drawBitmap(rawBitmap, null, RectF(left, top, left+w, top+h), null)
+            
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                wallpaperManager.setBitmap(finalBitmap, null, false, destination)
             } else {
-                max(screenWidth.toFloat() / imageWidth, screenHeight.toFloat() / imageHeight)
+                wallpaperManager.setBitmap(finalBitmap)
             }
-
-            val scaledWidth = imageWidth * scale
-            val scaledHeight = imageHeight * scale
-            val left = (screenWidth - scaledWidth) / 2f
-            val top = (screenHeight - scaledHeight) / 2f
-
-            val destRect = RectF(left, top, left + scaledWidth, top + scaledHeight)
-            val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
-            
-            canvas.drawBitmap(rawBitmap, null, destRect, paint)
-
-            if (rawBitmap != finalBitmap) rawBitmap.recycle()
-            bitmapToSet = finalBitmap
         } else {
-            bitmapToSet = rawBitmap
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                wallpaperManager.setBitmap(rawBitmap, null, true, destination)
+            } else {
+                wallpaperManager.setBitmap(rawBitmap)
+            }
         }
-        
-        val allowParallax = !isFixedAlignmentEnabled
-        
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            wallpaperManager.setBitmap(bitmapToSet, null, allowParallax, destination)
-        } else {
-            wallpaperManager.setBitmap(bitmapToSet)
-        }
-        
-        withContext(Dispatchers.Main) {
-            Toast.makeText(context, "Wallpaper set successfully!", Toast.LENGTH_SHORT).show()
-        }
-        
     } catch (e: Exception) {
         e.printStackTrace()
-        withContext(Dispatchers.Main) {
-            Toast.makeText(context, "Failed to set wallpaper: ${e.message}", Toast.LENGTH_LONG).show()
-        }
-    } finally {
-        System.gc()
     }
 }

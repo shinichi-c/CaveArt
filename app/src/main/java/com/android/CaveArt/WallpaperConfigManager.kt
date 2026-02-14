@@ -5,18 +5,21 @@ import android.os.Build
 import com.google.gson.Gson
 
 data class LiveWallpaperConfig(
-    val imagePath: String? = null, 
+    val imagePath: String? = null,
+    val cutoutPath: String? = null,
     val resourceId: Int = 0,
     val shapeName: String = "SQUIRCLE",
     val backgroundColor: Int = 0xFF4CAF50.toInt(),
     val is3DPopEnabled: Boolean = false,
-    val scale: Float = 1.0f
+    val scale: Float = 1.0f,
+    val isCentered: Boolean = false
 )
 
 object WallpaperConfigManager {
     private const val PREF_NAME = "cave_art_live_prefs"
     private const val KEY_CONFIG = "live_config"
     private val gson = Gson()
+
     private fun getStorageContext(context: Context): Context {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             context.createDeviceProtectedStorageContext()

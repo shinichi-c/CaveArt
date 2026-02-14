@@ -42,11 +42,15 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         private set
 
     private val mlProcessingSemaphore = Semaphore(2)
-
+    
     private val _isHapticsEnabled = mutableStateOf(true)
     val isHapticsEnabled: Boolean by _isHapticsEnabled
     fun setHapticsEnabled(enabled: Boolean) { _isHapticsEnabled.value = enabled }
 
+    private val _isFixedAlignmentEnabled = mutableStateOf(true)
+    val isFixedAlignmentEnabled: Boolean by _isFixedAlignmentEnabled
+    fun setFixedAlignmentEnabled(enabled: Boolean) { _isFixedAlignmentEnabled.value = enabled }
+    
     private val _isMagicShapeEnabled = mutableStateOf(false)
     val isMagicShapeEnabled: Boolean by _isMagicShapeEnabled
     
@@ -55,29 +59,22 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     var is3DPopEnabled by mutableStateOf(true)
     var magicScale by mutableFloatStateOf(1.0f)
     var isCentered by mutableStateOf(false)
-    fun toggleCentered() { isCentered = !isCentered }
-    
-    fun setMagicShapeEnabled(enabled: Boolean) {
-        _isMagicShapeEnabled.value = enabled
-    }
 
+    fun setMagicShapeEnabled(enabled: Boolean) { _isMagicShapeEnabled.value = enabled }
     fun updateMagicConfig(shape: MagicShape, color: Int) {
         currentMagicShape = shape
         currentBackgroundColor = color
     }
     fun toggle3DPop() { is3DPopEnabled = !is3DPopEnabled }
     fun updateMagicScale(scale: Float) { magicScale = scale }
-
-    private val _isFixedAlignmentEnabled = mutableStateOf(true)
-    val isFixedAlignmentEnabled: Boolean by _isFixedAlignmentEnabled
-    fun setFixedAlignmentEnabled(enabled: Boolean) { _isFixedAlignmentEnabled.value = enabled }
-
+    fun toggleCentered() { isCentered = !isCentered }
+    
     var baseWallpapers by mutableStateOf<List<Wallpaper>>(emptyList())
     var allWallpapers by mutableStateOf<List<Wallpaper>>(emptyList())
     var allTags by mutableStateOf<List<String>>(listOf("All"))
     var selectedTag by mutableStateOf("All")
         private set
-
+        
     var debugResults by mutableStateOf<List<DebugResult>>(emptyList())
     var isRunningDebug by mutableStateOf(false)
 
@@ -113,7 +110,7 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         selectTag("All")
         viewModelScope.launch { scanSingleWallpaper(getApplication(), newWallpaper) }
     }
-
+    
     private val maxMemory = (Runtime.getRuntime().maxMemory() / 1024).toInt()
     private val cacheSize = maxMemory / 8
     
@@ -124,7 +121,25 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     private val cutoutCache = object : LruCache<String, Bitmap>(cacheSize / 4) {
         override fun sizeOf(key: String, bitmap: Bitmap) = bitmap.byteCount / 1024
     }
-
+    
+    private suspend fun generateCutoutInternal(originalBitmap: Bitmap): Bitmap? {
+        val coarse = segmentationHelper.generateSoftMask(originalBitmap) ?: return null
+        
+        val refined = refineHelper.refineMask(originalBitmap, coarse)
+        var finalCutout = mattingHelper.run(originalBitmap, refined ?: coarse) ?: coarse
+        
+        if (refined != null && refined != coarse) refined.recycle()
+        if (coarse != finalCutout) coarse.recycle()
+        
+        if (finalCutout.width != originalBitmap.width || finalCutout.height != originalBitmap.height) {
+            val scaled = Bitmap.createScaledBitmap(finalCutout, originalBitmap.width, originalBitmap.height, true)
+            if (scaled != finalCutout) finalCutout.recycle()
+            finalCutout = scaled
+        }
+        
+        return finalCutout
+    }
+    
     suspend fun getOrCreateProcessedBitmap(context: Context, wallpaper: Wallpaper, allowMagic: Boolean = true): Bitmap? {
         val useMagic = allowMagic && isMagicShapeEnabled
         val cacheKey = if(useMagic) {
@@ -137,6 +152,7 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         
         return withContext(Dispatchers.Default) {
             try {
+                
                 val originalBitmap = if (wallpaper.uri != null) {
                     BitmapHelper.decodeSampledBitmapFromUri(context, wallpaper.uri, 1024)
                 } else {
@@ -146,25 +162,20 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
                 var cutout: Bitmap? = null
                 
                 if (useMagic) {
+                	
                     cutout = cutoutCache.get(wallpaper.id)
                     
                     if (cutout == null) {
-                        val coarse = segmentationHelper.generateSoftMask(originalBitmap)
-                        if (coarse != null) {
-                            val refined = refineHelper.refineMask(originalBitmap, coarse)
-                            cutout = mattingHelper.run(originalBitmap, refined ?: coarse) ?: coarse
-                            if (cutout != null) cutoutCache.put(wallpaper.id, cutout)
-                            if (refined != null && refined != coarse) refined.recycle()
-                            if (coarse != cutout) coarse.recycle()
-                        }
+                        cutout = generateCutoutInternal(originalBitmap)
+                        if (cutout != null) cutoutCache.put(wallpaper.id, cutout)
                     }
                     
-                    if (cutout != null && (cutout.width != originalBitmap.width || cutout.height != originalBitmap.height)) {
-                        val scaled = Bitmap.createScaledBitmap(cutout, originalBitmap.width, originalBitmap.height, true)
-                        cutout = scaled
+                    else if (cutout.width != originalBitmap.width) {
+                         val scaled = Bitmap.createScaledBitmap(cutout, originalBitmap.width, originalBitmap.height, true)
+                         cutout = scaled
                     }
                 }
-
+                
                 val resultBitmap = composeFinalImage(context, originalBitmap, cutout, useMagic)
                 
                 if (resultBitmap != null) {
@@ -181,6 +192,7 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     suspend fun generateHighQualityFinalBitmap(context: Context, wallpaper: Wallpaper): Bitmap? = withContext(Dispatchers.IO) {
         var originalBitmap: Bitmap? = null
         try {
+        	
             if (wallpaper.uri != null) {
                 originalBitmap = BitmapHelper.decodeSampledBitmapFromUri(context, wallpaper.uri, 2500)
             } else {
@@ -189,6 +201,7 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
             }
         } catch (e: OutOfMemoryError) {
             System.gc()
+            
             try { 
                 if (wallpaper.uri != null) {
                      originalBitmap = BitmapHelper.decodeSampledBitmapFromUri(context, wallpaper.uri, 1500)
@@ -205,27 +218,36 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
             var finalCutout: Bitmap? = null
             
             if (useMagic) {
-                 val coarse = segmentationHelper.generateSoftMask(originalBitmap)
-                 if (coarse != null) {
-                     val refined = refineHelper.refineMask(originalBitmap, coarse)
-                     finalCutout = mattingHelper.run(originalBitmap, refined ?: coarse) ?: coarse
-                     if (refined != null && refined != coarse) refined.recycle()
-                 }
-                 
-                 if (finalCutout != null && (finalCutout.width != originalBitmap.width || finalCutout.height != originalBitmap.height)) {
-                     val scaled = Bitmap.createScaledBitmap(finalCutout, originalBitmap.width, originalBitmap.height, true)
-                     if (scaled != finalCutout) finalCutout.recycle()
-                     finalCutout = scaled
-                 }
+                 finalCutout = generateCutoutInternal(originalBitmap)
             }
 
             val processedBitmap = composeFinalImage(context, originalBitmap, finalCutout, useMagic)
-
+            
             if (processedBitmap != originalBitmap) originalBitmap.recycle()
             if (finalCutout != null && finalCutout != originalBitmap) finalCutout.recycle()
             
             return@withContext processedBitmap
         } catch (e: Exception) { return@withContext originalBitmap }
+    }
+    
+    suspend fun getHighQualityComponents(context: Context, wallpaper: Wallpaper): Pair<Bitmap?, Bitmap?> = withContext(Dispatchers.IO) {
+        var originalBitmap: Bitmap? = null
+        try {
+            if (wallpaper.uri != null) {
+                originalBitmap = BitmapHelper.decodeSampledBitmapFromUri(context, wallpaper.uri, 2500)
+            } else {
+                originalBitmap = BitmapHelper.decodeSampledBitmapFromResource(context.resources, wallpaper.resourceId, 2500)
+            }
+        } catch (e: Exception) { return@withContext Pair(null, null) }
+
+        if (originalBitmap == null) return@withContext Pair(null, null)
+        
+        var finalCutout: Bitmap? = null
+        if (isMagicShapeEnabled) {
+             finalCutout = generateCutoutInternal(originalBitmap)
+        }
+        
+        return@withContext Pair(originalBitmap, finalCutout)
     }
     
     private fun composeFinalImage(
@@ -235,7 +257,6 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         useMagic: Boolean
     ): Bitmap {
         return if (useMagic && cutout != null) {
-            
             ShapeEffectHelper.createShapeCropBitmapWithPreCutout(
                 context, original, cutout, 
                 currentMagicShape, currentBackgroundColor, 
@@ -245,7 +266,7 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
             original
         }
     }
-    
+
     private suspend fun loadBasicWallpaperList(context: Context): List<Wallpaper> = withContext(Dispatchers.IO) {
         val drawableFields = R.drawable::class.java.fields
         val list = mutableListOf<Wallpaper>()
