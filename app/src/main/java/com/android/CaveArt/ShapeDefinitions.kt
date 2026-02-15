@@ -15,10 +15,9 @@ enum class MagicShape(val label: String) {
 }
 
 object ShapePathProvider {
-    fun getPathForShape(shape: MagicShape, bounds: RectF): Path {
-        val path = Path()
+	
+    fun updatePathForShape(path: Path, shape: MagicShape, bounds: RectF) {
         val width = bounds.width()
-        val height = bounds.height()
         val centerX = bounds.centerX()
         val centerY = bounds.centerY()
 
@@ -55,7 +54,6 @@ object ShapePathProvider {
             }
             
             MagicShape.BADGE -> {
-                
                 val points = 360
                 val outerRadius = width / 2f
                 val amplitude = width * 0.06f 
@@ -78,6 +76,11 @@ object ShapePathProvider {
                 path.close()
             }
         }
+    }
+    
+    fun getPathForShape(shape: MagicShape, bounds: RectF): Path {
+        val path = Path()
+        updatePathForShape(path, shape, bounds)
         return path
     }
 }
