@@ -1,3 +1,6 @@
+
+# Join https://t.me/Cosmic_Creatures for wallpaper and devbuild updates
+
 # CaveArt: Dynamic Wallpaper Collection
 
 ​CaveArt is a modern, sleek Android application designed to display and set high-quality wallpapers. Built using Jetpack Compose, the app emphasizes a beautiful, swipable UI and features a powerful dynamic loading system that allows you to add new content without writing a single line of Kotlin code.
