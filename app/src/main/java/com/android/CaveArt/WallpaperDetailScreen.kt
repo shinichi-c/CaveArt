@@ -381,7 +381,7 @@ fun MagicControlsSheet(
                 FilterChip(
                     selected = viewModel.is3DPopEnabled,
                     onClick = { viewModel.toggle3DPop() },
-                    label = { Text("3D Pop (Static Only)") },
+                    label = { Text("3D Pop") },
                     leadingIcon = { 
                         Icon(Icons.Default.Layers, contentDescription = null, modifier = Modifier.size(18.dp)) 
                     },
