@@ -2,6 +2,7 @@ package com.android.CaveArt
 
 import android.content.Context
 import android.os.Build
+import com.android.CaveArt.animations.AnimationStyle
 import com.google.gson.Gson
 
 data class LiveWallpaperConfig(
@@ -12,7 +13,8 @@ data class LiveWallpaperConfig(
     val backgroundColor: Int = 0xFF4CAF50.toInt(),
     val is3DPopEnabled: Boolean = false,
     val scale: Float = 1.0f,
-    val isCentered: Boolean = false
+    val isCentered: Boolean = false,
+    val animationStyle: String = AnimationStyle.NANO_ASSEMBLY.name
 )
 
 object WallpaperConfigManager {

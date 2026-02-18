@@ -1,5 +1,6 @@
 package com.android.CaveArt
 
+import android.app.KeyguardManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -9,7 +10,8 @@ import android.os.Build
 import android.service.wallpaper.WallpaperService
 import android.view.Choreographer
 import android.view.SurfaceHolder
-import com.android.CaveArt.animations.MorphAnimation
+import com.android.CaveArt.animations.AnimationFactory
+import com.android.CaveArt.animations.AnimationStyle
 import com.android.CaveArt.animations.WallpaperAnimation
 import kotlinx.coroutines.*
 
@@ -23,7 +25,8 @@ class CaveArtWallpaperService : WallpaperService() {
         private var originalBitmap: Bitmap? = null
         private var maskBitmap: Bitmap? = null 
         
-        private val currentAnimation: WallpaperAnimation = MorphAnimation()
+        private var currentAnimation: WallpaperAnimation = AnimationFactory.getAnimation(AnimationStyle.NANO_ASSEMBLY)
+        private var currentAnimationStyle: String? = null
         
         private val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
         private val maskXferPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -39,8 +42,10 @@ class CaveArtWallpaperService : WallpaperService() {
 
         private val receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
-                if (intent?.action == Intent.ACTION_USER_PRESENT) currentAnimation.onUnlock()
-                else if (intent?.action == Intent.ACTION_SCREEN_OFF) currentAnimation.onLock()
+                when (intent?.action) {
+                    Intent.ACTION_USER_PRESENT -> currentAnimation.onUnlock()
+                    Intent.ACTION_SCREEN_OFF -> currentAnimation.onLock()
+                }
             }
         }
 
@@ -57,11 +62,13 @@ class CaveArtWallpaperService : WallpaperService() {
         override fun onVisibilityChanged(visible: Boolean) {
             isVisible = visible
             if (visible) {
+                val km = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
+                if (km.isKeyguardLocked) currentAnimation.onLock() else currentAnimation.onUnlock()
+
                 lastFrameTimeNanos = System.nanoTime()
                 choreographer.postFrameCallback(this)
             } else {
                 choreographer.removeFrameCallback(this)
-                currentAnimation.onLock()
             }
         }
 
@@ -89,22 +96,14 @@ class CaveArtWallpaperService : WallpaperService() {
 
             var canvas: Canvas? = null
             try {
-                canvas = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    holder.lockHardwareCanvas()
-                } else {
-                    holder.lockCanvas()
-                }
+                canvas = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) holder.lockHardwareCanvas() else holder.lockCanvas()
 
                 if (canvas != null) {
-                    val screenW = canvas.width.toFloat()
-                    val screenH = canvas.height.toFloat()
-                    
                     val state = currentAnimation.calculateState(
-                        geo, screenW, screenH, bmp.width, bmp.height, config.is3DPopEnabled
+                        geo, canvas.width.toFloat(), canvas.height.toFloat(), bmp.width, bmp.height, config.is3DPopEnabled
                     )
 
                     canvas.drawColor(config.backgroundColor)
-                    
                     screenShapeRect.set(geo.shapeBoundsRel)
                     state.shapeMatrix.mapRect(screenShapeRect)
                     screenShapeRect.offset(0f, state.vShift)
@@ -119,7 +118,7 @@ class CaveArtWallpaperService : WallpaperService() {
                     canvas.restore()
 
                     if (config.is3DPopEnabled && maskBitmap != null && state.popAlpha > 0) {
-                        val id = canvas.saveLayer(0f, 0f, screenW, screenH, null)
+                        val id = canvas.saveLayer(0f, 0f, canvas.width.toFloat(), canvas.height.toFloat(), null)
                         bitmapPaint.alpha = state.popAlpha
                         canvas.drawBitmap(maskBitmap!!, state.popMatrix, bitmapPaint)
                         canvas.drawBitmap(bmp, state.popMatrix, maskXferPaint)
@@ -127,12 +126,8 @@ class CaveArtWallpaperService : WallpaperService() {
                         canvas.restoreToCount(id)
                     }
                 }
-            } catch (e: Exception) {
-                e.printStackTrace()
-            } finally {
-                if (canvas != null) {
-                    try { holder.unlockCanvasAndPost(canvas) } catch (e: Exception) {}
-                }
+            } catch (e: Exception) { e.printStackTrace() } finally {
+                if (canvas != null) try { holder.unlockCanvasAndPost(canvas) } catch (e: Exception) {}
             }
         }
 
@@ -150,8 +145,17 @@ class CaveArtWallpaperService : WallpaperService() {
 
         fun reloadConfig() {
             scope.launch {
-                config = WallpaperConfigManager.loadConfig(applicationContext)
+                val newConfig = WallpaperConfigManager.loadConfig(applicationContext)
                 
+                withContext(Dispatchers.Main) {
+                    if (currentAnimationStyle != newConfig.animationStyle) {
+                        currentAnimationStyle = newConfig.animationStyle
+                        val style = try { AnimationStyle.valueOf(newConfig.animationStyle) } catch(e:Exception) { AnimationStyle.NANO_ASSEMBLY }
+                        currentAnimation = AnimationFactory.getAnimation(style)
+                    }
+                    config = newConfig
+                }
+
                 val loadedOriginal = try {
                     if (!config.imagePath.isNullOrEmpty()) BitmapFactory.decodeFile(config.imagePath)
                     else if (config.resourceId != 0) BitmapHelper.decodeSampledBitmapFromResource(resources, config.resourceId, 2500)
@@ -168,7 +172,6 @@ class CaveArtWallpaperService : WallpaperService() {
                     maskBitmap?.recycle()
                     originalBitmap = loadedOriginal
                     maskBitmap = loadedMask
-                    
                     updateGeometry()
                     if (isVisible) draw()
                 }
