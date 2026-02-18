@@ -13,6 +13,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.android.CaveArt.animations.AnimationStyle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -59,6 +60,8 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     var is3DPopEnabled by mutableStateOf(true)
     var magicScale by mutableFloatStateOf(1.0f)
     var isCentered by mutableStateOf(false)
+    
+    var currentAnimationStyle by mutableStateOf(AnimationStyle.NANO_ASSEMBLY)
 
     fun setMagicShapeEnabled(enabled: Boolean) { _isMagicShapeEnabled.value = enabled }
     fun updateMagicConfig(shape: MagicShape, color: Int) {
@@ -68,6 +71,7 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     fun toggle3DPop() { is3DPopEnabled = !is3DPopEnabled }
     fun updateMagicScale(scale: Float) { magicScale = scale }
     fun toggleCentered() { isCentered = !isCentered }
+    fun updateAnimationStyle(style: AnimationStyle) { currentAnimationStyle = style }
     
     var baseWallpapers by mutableStateOf<List<Wallpaper>>(emptyList())
     var allWallpapers by mutableStateOf<List<Wallpaper>>(emptyList())
@@ -171,33 +175,6 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    /**
-     * Static High-Res Rendering.
-     */
-    suspend fun generateHighQualityFinalBitmap(context: Context, wallpaper: Wallpaper): Bitmap? = withContext(Dispatchers.IO) {
-        var originalBitmap: Bitmap? = null
-        try {
-            originalBitmap = if (wallpaper.uri != null) {
-                BitmapHelper.decodeSampledBitmapFromUri(context, wallpaper.uri, 2500)
-            } else {
-                BitmapFactory.decodeResource(context.resources, wallpaper.resourceId, BitmapFactory.Options().apply { inPreferredConfig = Bitmap.Config.ARGB_8888 })
-            }
-        } catch (e: Exception) { return@withContext null }
-
-        if (originalBitmap == null) return@withContext null
-
-        val cutout = if (isMagicShapeEnabled) generateCutoutInternal(originalBitmap) else null
-        val processed = composeFinalImage(context, originalBitmap, cutout, isMagicShapeEnabled)
-
-        if (processed != originalBitmap) originalBitmap.recycle()
-        cutout?.recycle()
-        
-        return@withContext processed
-    }
-
-    /**
-     * Live Wallpaper Components Export.
-     */
     suspend fun getHighQualityComponents(context: Context, wallpaper: Wallpaper): Pair<Bitmap?, Bitmap?> = withContext(Dispatchers.IO) {
         val original = if (wallpaper.uri != null) {
             BitmapHelper.decodeSampledBitmapFromUri(context, wallpaper.uri, 2500)
@@ -223,7 +200,6 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
             original
         }
     }
-    
 
     private suspend fun loadBasicWallpaperList(context: Context): List<Wallpaper> = withContext(Dispatchers.IO) {
         val drawableFields = R.drawable::class.java.fields
