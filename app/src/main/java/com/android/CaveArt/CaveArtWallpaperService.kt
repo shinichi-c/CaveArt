@@ -1,6 +1,7 @@
 package com.android.CaveArt
 
 import android.app.KeyguardManager
+import android.app.WallpaperColors
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -46,6 +47,22 @@ class CaveArtWallpaperService : WallpaperService() {
                     Intent.ACTION_USER_PRESENT -> currentAnimation.onUnlock()
                     Intent.ACTION_SCREEN_OFF -> currentAnimation.onLock()
                 }
+            }
+        }
+        
+        override fun onComputeColors(): WallpaperColors? {
+            return try {
+                if (config.backgroundColor != 0) {
+                    
+                    val primary = Color.valueOf(config.backgroundColor)
+                    WallpaperColors(primary, null, null)
+                } else if (originalBitmap != null) {
+                    WallpaperColors.fromBitmap(originalBitmap!!)
+                } else {
+                    null
+                }
+            } catch (e: Exception) {
+                null
             }
         }
 
@@ -102,7 +119,7 @@ class CaveArtWallpaperService : WallpaperService() {
                     val state = currentAnimation.calculateState(
                         geo, canvas.width.toFloat(), canvas.height.toFloat(), bmp.width, bmp.height, config.is3DPopEnabled
                     )
-                    
+
                     val isUsingShader = currentAnimation.applyShader(
                         bitmapPaint, bmp, state, canvas.width.toFloat(), canvas.height.toFloat()
                     )
@@ -121,14 +138,12 @@ class CaveArtWallpaperService : WallpaperService() {
                     canvas.clipPath(clipPath)
                     
                     if (isUsingShader) {
-                        
                         canvas.drawRect(0f, 0f, canvas.width.toFloat(), canvas.height.toFloat(), bitmapPaint)
                     } else {
-                        
                         canvas.drawBitmap(bmp, state.bodyMatrix, bitmapPaint)
                     }
                     canvas.restore()
-                    
+
                     bitmapPaint.shader = null 
 
                     if (config.is3DPopEnabled && maskBitmap != null && state.popAlpha > 0) {
@@ -186,6 +201,9 @@ class CaveArtWallpaperService : WallpaperService() {
                     maskBitmap?.recycle()
                     originalBitmap = loadedOriginal
                     maskBitmap = loadedMask
+                    
+                    notifyColorsChanged()
+                    
                     updateGeometry()
                     if (isVisible) draw()
                 }
