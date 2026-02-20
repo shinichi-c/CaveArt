@@ -102,8 +102,13 @@ class CaveArtWallpaperService : WallpaperService() {
                     val state = currentAnimation.calculateState(
                         geo, canvas.width.toFloat(), canvas.height.toFloat(), bmp.width, bmp.height, config.is3DPopEnabled
                     )
+                    
+                    val isUsingShader = currentAnimation.applyShader(
+                        bitmapPaint, bmp, state, canvas.width.toFloat(), canvas.height.toFloat()
+                    )
 
                     canvas.drawColor(config.backgroundColor)
+                    
                     screenShapeRect.set(geo.shapeBoundsRel)
                     state.shapeMatrix.mapRect(screenShapeRect)
                     screenShapeRect.offset(0f, state.vShift)
@@ -114,8 +119,17 @@ class CaveArtWallpaperService : WallpaperService() {
 
                     canvas.save()
                     canvas.clipPath(clipPath)
-                    canvas.drawBitmap(bmp, state.bodyMatrix, bitmapPaint)
+                    
+                    if (isUsingShader) {
+                        
+                        canvas.drawRect(0f, 0f, canvas.width.toFloat(), canvas.height.toFloat(), bitmapPaint)
+                    } else {
+                        
+                        canvas.drawBitmap(bmp, state.bodyMatrix, bitmapPaint)
+                    }
                     canvas.restore()
+                    
+                    bitmapPaint.shader = null 
 
                     if (config.is3DPopEnabled && maskBitmap != null && state.popAlpha > 0) {
                         val id = canvas.saveLayer(0f, 0f, canvas.width.toFloat(), canvas.height.toFloat(), null)
