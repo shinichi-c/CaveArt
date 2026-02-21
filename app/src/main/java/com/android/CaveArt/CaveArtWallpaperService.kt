@@ -15,6 +15,7 @@ import com.android.CaveArt.animations.AnimationFactory
 import com.android.CaveArt.animations.AnimationStyle
 import com.android.CaveArt.animations.WallpaperAnimation
 import kotlinx.coroutines.*
+import kotlin.math.max
 
 class CaveArtWallpaperService : WallpaperService() {
     override fun onCreateEngine(): Engine = CaveArtEngine()
@@ -184,15 +185,44 @@ class CaveArtWallpaperService : WallpaperService() {
                     }
                     config = newConfig
                 }
-
+                
                 val loadedOriginal = try {
-                    if (!config.imagePath.isNullOrEmpty()) BitmapFactory.decodeFile(config.imagePath)
+                    if (!config.imagePath.isNullOrEmpty()) {
+                        val metrics = resources.displayMetrics
+                        val maxDim = max(metrics.widthPixels, metrics.heightPixels)
+                        
+                        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                        BitmapFactory.decodeFile(config.imagePath, options)
+                        
+                        var sampleSize = 1
+                        val halfH = options.outHeight / 2
+                        val halfW = options.outWidth / 2
+                        while ((halfH / sampleSize) >= maxDim && (halfW / sampleSize) >= maxDim) {
+                            sampleSize *= 2
+                        }
+                        
+                        options.inSampleSize = sampleSize
+                        options.inJustDecodeBounds = false
+                        options.inPreferredConfig = Bitmap.Config.ARGB_8888
+                        
+                        BitmapFactory.decodeFile(config.imagePath, options)
+                    }
                     else if (config.resourceId != 0) BitmapHelper.decodeSampledBitmapFromResource(resources, config.resourceId, 2500)
                     else null
                 } catch (e: Exception) { null }
 
                 val loadedMask = try {
-                    if (!config.cutoutPath.isNullOrEmpty()) BitmapFactory.decodeFile(config.cutoutPath)
+                    if (!config.cutoutPath.isNullOrEmpty()) {
+                        
+                        val options = BitmapFactory.Options()
+                        if (loadedOriginal != null) {
+                            options.inJustDecodeBounds = true
+                            BitmapFactory.decodeFile(config.cutoutPath, options)
+                            options.inSampleSize = loadedOriginal.width / options.outWidth.coerceAtLeast(1)
+                            options.inJustDecodeBounds = false
+                        }
+                        BitmapFactory.decodeFile(config.cutoutPath, options)
+                    }
                     else null
                 } catch (e: Exception) { null }
 

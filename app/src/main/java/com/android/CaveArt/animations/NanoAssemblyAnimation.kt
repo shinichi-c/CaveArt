@@ -83,12 +83,18 @@ class NanoAssemblyAnimation : WallpaperAnimation {
 
     override fun update(deltaTime: Float) {
         timeSeconds += deltaTime
-        val displacement = currentProgress - targetProgress
-        val force = -SPRING_TENSION * displacement - SPRING_FRICTION * velocity
-        velocity += force * deltaTime
-        currentProgress += velocity * deltaTime
-
-        if (abs(displacement) < 0.0001f && abs(velocity) < 0.0001f) {
+        
+        val steps = 4
+        val dt = deltaTime / steps
+        
+        for (i in 0 until steps) {
+            val displacement = currentProgress - targetProgress
+            val force = -SPRING_TENSION * displacement - SPRING_FRICTION * velocity
+            velocity += force * dt
+            currentProgress += velocity * dt
+        }
+        
+        if (abs(currentProgress - targetProgress) < 0.001f && abs(velocity) < 0.001f) {
             currentProgress = targetProgress
             velocity = 0f
         }
@@ -100,15 +106,17 @@ class NanoAssemblyAnimation : WallpaperAnimation {
     override fun calculateState(geo: UnifiedGeometry, screenW: Float, screenH: Float, imgW: Int, imgH: Int, is3DPopEnabled: Boolean): AnimationState {
         val fillScale = max(screenW / imgW, screenH / imgH)
         
-        val currentImgScale = lerp(fillScale * 0.45f, geo.baseScale, currentProgress.coerceIn(0f, 1f))
-
-        val anchorX = if (currentProgress > 0.05f) geo.subjectCenterX else imgW / 2f
-        val anchorY = if (currentProgress > 0.05f) geo.subjectCenterY else imgH / 2f
+        val safeProgress = currentProgress.coerceIn(0f, 1f)
         
-        val finalAnchorX = lerp(imgW / 2f, anchorX, currentProgress.coerceIn(0f, 1f))
-        val finalAnchorY = lerp(imgH / 2f, anchorY, currentProgress.coerceIn(0f, 1f))
+        val currentImgScale = lerp(fillScale * 0.45f, geo.baseScale, safeProgress)
 
-        val idleY = sin(timeSeconds * LEVITATION_SPEED) * LEVITATION_AMP * (1f - currentProgress.coerceIn(0f, 1f))
+        val anchorX = if (safeProgress > 0.05f) geo.subjectCenterX else imgW / 2f
+        val anchorY = if (safeProgress > 0.05f) geo.subjectCenterY else imgH / 2f
+        
+        val finalAnchorX = lerp(imgW / 2f, anchorX, safeProgress)
+        val finalAnchorY = lerp(imgH / 2f, anchorY, safeProgress)
+
+        val idleY = sin(timeSeconds * LEVITATION_SPEED) * LEVITATION_AMP * (1f - safeProgress)
         currentRotation = (1f - currentProgress) * 5f 
 
         _bodyMatrix.reset()
@@ -119,22 +127,21 @@ class NanoAssemblyAnimation : WallpaperAnimation {
 
         _popMatrix.set(_bodyMatrix)
         if (is3DPopEnabled) {
-           
             val popLag = (1f - currentProgress.coerceIn(0f, 1.2f)) * 180f 
             _popMatrix.postTranslate(0f, -popLag)
         }
 
         _shapeMatrix.set(_bodyMatrix)
-        val expansion = lerp(6.0f, 1.0f, currentProgress.coerceIn(0f, 1f))
+        val expansion = lerp(6.0f, 1.0f, safeProgress)
         _shapeMatrix.postScale(expansion, expansion, screenW / 2f, (screenH / 2f) + idleY)
 
         return AnimationState(
             bodyMatrix = _bodyMatrix,
             shapeMatrix = _shapeMatrix,
             popMatrix = _popMatrix,
-            popAlpha = (currentProgress * 255).toInt().coerceIn(0, 255),
-            vShift = if (is3DPopEnabled) geo.shapeBoundsRel.height() * geo.baseScale * 0.1f * currentProgress else 0f,
-            progress = currentProgress.coerceIn(0f, 1f),
+            popAlpha = (safeProgress * 255).toInt().coerceIn(0, 255),
+            vShift = if (is3DPopEnabled) geo.shapeBoundsRel.height() * geo.baseScale * 0.1f * safeProgress else 0f,
+            progress = safeProgress,
             time = timeSeconds
         )
     }
