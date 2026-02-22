@@ -92,6 +92,17 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     init {
         viewModelScope.launch {
             isLoading = true
+            
+            launch(MLThread.dispatcher) {
+                try {
+                    segmentationHelper.warmUp()
+                    refineHelper.warmUp()
+                    mattingHelper.warmUp()
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+
             val initialList = loadBasicWallpaperList(application.applicationContext)
             baseWallpapers = initialList
             allWallpapers = initialList

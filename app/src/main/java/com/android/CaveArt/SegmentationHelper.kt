@@ -96,6 +96,10 @@ class SegmentationHelper(private val context: Context) {
             } catch (e2: Exception) {}
         }
     }
+    
+    fun warmUp() {
+        ensureInitialized()
+    }
 
     fun close() {
         interpreter?.close()
