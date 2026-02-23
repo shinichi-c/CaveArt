@@ -17,25 +17,31 @@ object RootUtils {
 
         sb.append("=== START ROOT INJECTION ===\n")
         sb.append("Target: $pkg/$cls\n")
-        sb.append("Strategy: Brute Force Binder Transaction (IDs 1-100)\n")
+        sb.append("Strategy: Fast Batch Binder Transaction (IDs 1-100)\n")
         
         val argString = "i32 1 s16 \"$pkg\" s16 \"$cls\""
 
-        var foundCandidate = false
-        
-        for (i in 1..100) {
-            val cmd = "service call wallpaper $i $argString"
+        try {
             
-            val output = runSimpleCommand(cmd)
+            val process = Runtime.getRuntime().exec("su")
+            val os = DataOutputStream(process.outputStream)
             
-            if (output.contains("Parcel") && !output.contains("exception", true)) {
-                
+            for (i in 1..100) {
+                os.writeBytes("service call wallpaper $i $argString\n")
             }
+            
+            os.writeBytes("exit\n")
+            os.flush()
+            
+            process.waitFor()
+            
+        } catch (e: Exception) {
+            sb.append("Execution error: ${e.message}\n")
         }
 
         sb.append("Injection loop complete. Verifying...\n")
         
-        try { Thread.sleep(1500) } catch (e: Exception) {}
+        try { Thread.sleep(500) } catch (e: Exception) {}
         
         val dump = runSimpleCommand("dumpsys wallpaper | grep mWallpaperComponent")
         sb.append("Current Wallpaper: $dump\n")
