@@ -34,20 +34,21 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
-import androidx.palette.graphics.Palette
 import com.android.CaveArt.animations.AnimationStyle
-import com.google.accompanist.systemuicontroller.rememberSystemUiController
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.sin
 import kotlin.math.pow
-import coil.compose.rememberAsyncImagePainter
+import coil3.compose.rememberAsyncImagePainter
 import kotlin.random.Random
+import com.materialkolor.quantize.QuantizerCelebi
+import com.materialkolor.score.Score
 
 private data class Particle(
     val initialX: Float,
@@ -70,13 +71,14 @@ fun WallpaperDetailScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val window = (context as? Activity)?.window
-    val systemUiController = rememberSystemUiController()
+    val view = LocalView.current
     
-    SideEffect {
-        if (window != null) WindowCompat.setDecorFitsSystemWindows(window, false)
-        systemUiController.setStatusBarColor(Color.Transparent, darkIcons = false)
-        systemUiController.setNavigationBarColor(Color.Transparent, darkIcons = false)
+    if (!view.isInEditMode) {
+        SideEffect {
+            val window = (view.context as Activity).window
+            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = false 
+            WindowCompat.getInsetsController(window, view).isAppearanceLightNavigationBars = false 
+        }
     }
 
     val detailPagerState = rememberPagerState(initialPage = initialPageIndex, pageCount = { wallpapers.size })
@@ -173,16 +175,26 @@ fun MagicControlsSheet(
     LaunchedEffect(wallpaper) {
         withContext(Dispatchers.IO) {
             val bitmap = if(wallpaper.uri != null) BitmapHelper.decodeSampledBitmapFromUri(context, wallpaper.uri, 500) else BitmapFactory.decodeResource(context.resources, wallpaper.resourceId)
+            
             if (bitmap != null) {
-                val palette = Palette.from(bitmap).generate()
-                val targetSwatches = listOfNotNull(palette.vibrantSwatch, palette.darkVibrantSwatch, palette.lightVibrantSwatch, palette.mutedSwatch, palette.darkMutedSwatch, palette.lightMutedSwatch, palette.dominantSwatch)
-                val extraSwatches = palette.swatches.sortedByDescending { it.population }.take(8)
-                val finalColors = (targetSwatches + extraSwatches).map { it.rgb }.distinct() + listOf(android.graphics.Color.BLACK, android.graphics.Color.WHITE)
+                
+                val scaledBitmap = Bitmap.createScaledBitmap(bitmap, 112, 112, true)
+                
+                val pixels = IntArray(scaledBitmap.width * scaledBitmap.height)
+                scaledBitmap.getPixels(pixels, 0, scaledBitmap.width, 0, 0, scaledBitmap.width, scaledBitmap.height)
+                
+                val quantizerResult = QuantizerCelebi.quantize(pixels, 128)
+                
+                val rankedColors: List<Int> = Score.score(quantizerResult)
+                
+                val finalColors = rankedColors.take(8).distinct() + listOf(android.graphics.Color.BLACK, android.graphics.Color.WHITE)
                 
                 withContext(Dispatchers.Main) {
                     extractedColors = finalColors.distinct()
                     if (finalColors.isNotEmpty()) viewModel.updateMagicConfig(viewModel.currentMagicShape, finalColors.first())
                 }
+                
+                scaledBitmap.recycle()
                 bitmap.recycle()
             }
         }

@@ -1,5 +1,6 @@
 package com.android.CaveArt
 
+import android.app.Activity
 import android.graphics.Bitmap
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
@@ -45,10 +46,10 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.lerp
+import androidx.core.view.WindowCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.launch
 import kotlin.math.absoluteValue
-import com.google.accompanist.systemuicontroller.rememberSystemUiController
 
 @Composable
 fun AsyncWallpaperImage(
@@ -85,13 +86,14 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
     val scope = rememberCoroutineScope()
     val view = LocalView.current
     val darkTheme = isSystemInDarkTheme()
-
-    val systemBarsColor = MaterialTheme.colorScheme.background
-    val systemUiController = rememberSystemUiController()
-
-    SideEffect {
-        systemUiController.setStatusBarColor(systemBarsColor, darkIcons = !darkTheme)
-        systemUiController.setNavigationBarColor(systemBarsColor, darkIcons = !darkTheme)
+    
+    if (!view.isInEditMode) {
+        SideEffect {
+            val window = (view.context as Activity).window
+            
+            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !darkTheme
+            WindowCompat.getInsetsController(window, view).isAppearanceLightNavigationBars = !darkTheme
+        }
     }
     
     val galleryLauncher = rememberLauncherForActivityResult(
@@ -159,7 +161,8 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
     }
 
     Scaffold(
-        containerColor = MaterialTheme.colorScheme.background
+        containerColor = MaterialTheme.colorScheme.background,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { paddingValues ->
         Box(modifier = Modifier.fillMaxSize()) {
             
@@ -188,10 +191,11 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                 enter = fadeIn(),
                 exit = fadeOut()
             ) {
+                
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(paddingValues)
+                        .padding(paddingValues) 
                 ) {
                     val wallpaper = currentWallpaper
 
