@@ -91,6 +91,7 @@ dependencies {
     implementation(libs.coil.network)
 
     implementation(libs.material.color.utilities)
-    
     implementation(libs.kotlinx.serialization.json)
+
+    implementation(libs.androidx.datastore.preferences)
 }
