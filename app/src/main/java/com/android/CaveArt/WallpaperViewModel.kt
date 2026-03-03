@@ -38,19 +38,32 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     private val segmentationHelper = SegmentationHelper(application)
     private val refineHelper = ForegroundEstimationHelper(application)
     private val mattingHelper = DeepMattingHelper(application)
+    private val prefs = application.getSharedPreferences("cave_art_settings", Context.MODE_PRIVATE)
 
     var isLoading by mutableStateOf(true)
         private set
 
     private val mlProcessingSemaphore = Semaphore(2)
-    
-    private val _isHapticsEnabled = mutableStateOf(true)
+    private val _isHapticsEnabled = mutableStateOf(prefs.getBoolean("haptics_enabled", true))
     val isHapticsEnabled: Boolean by _isHapticsEnabled
-    fun setHapticsEnabled(enabled: Boolean) { _isHapticsEnabled.value = enabled }
+    fun setHapticsEnabled(enabled: Boolean) { 
+        _isHapticsEnabled.value = enabled 
+        prefs.edit().putBoolean("haptics_enabled", enabled).apply()
+    }
 
-    private val _isFixedAlignmentEnabled = mutableStateOf(true)
+    private val _isFixedAlignmentEnabled = mutableStateOf(prefs.getBoolean("fixed_alignment", true))
     val isFixedAlignmentEnabled: Boolean by _isFixedAlignmentEnabled
-    fun setFixedAlignmentEnabled(enabled: Boolean) { _isFixedAlignmentEnabled.value = enabled }
+    fun setFixedAlignmentEnabled(enabled: Boolean) { 
+        _isFixedAlignmentEnabled.value = enabled 
+        prefs.edit().putBoolean("fixed_alignment", enabled).apply()
+    }
+    
+    private val _isAmbientBlurEnabled = mutableStateOf(prefs.getBoolean("ambient_blur", true))
+    val isAmbientBlurEnabled: Boolean by _isAmbientBlurEnabled
+    fun setAmbientBlurEnabled(enabled: Boolean) { 
+        _isAmbientBlurEnabled.value = enabled 
+        prefs.edit().putBoolean("ambient_blur", enabled).apply()
+    }
     
     private val _isMagicShapeEnabled = mutableStateOf(false)
     val isMagicShapeEnabled: Boolean by _isMagicShapeEnabled
@@ -60,7 +73,6 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     var is3DPopEnabled by mutableStateOf(true)
     var magicScale by mutableFloatStateOf(1.0f)
     var isCentered by mutableStateOf(false)
-    
     var currentAnimationStyle by mutableStateOf(AnimationStyle.NANO_ASSEMBLY)
 
     fun setMagicShapeEnabled(enabled: Boolean) { _isMagicShapeEnabled.value = enabled }
