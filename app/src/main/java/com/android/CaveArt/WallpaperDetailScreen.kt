@@ -12,8 +12,6 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -30,6 +28,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asComposePath
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -59,212 +58,172 @@ private data class Particle(
     val initialAlpha: Float
 )
 
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-fun WallpaperDetailScreen(
-    wallpapers: List<Wallpaper>,
-    initialPageIndex: Int,
-    onClose: () -> Unit,
-    onApplyClick: (Wallpaper) -> Unit,
-    isDebugMaskEnabled: Boolean,
-    viewModel: WallpaperViewModel
-) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val view = LocalView.current
-    
-    if (!view.isInEditMode) {
-        SideEffect {
-            val window = (view.context as Activity).window
-            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = false 
-            WindowCompat.getInsetsController(window, view).isAppearanceLightNavigationBars = false 
-        }
-    }
-
-    val detailPagerState = rememberPagerState(initialPage = initialPageIndex, pageCount = { wallpapers.size })
-    val currentWallpaper = wallpapers.getOrNull(detailPagerState.currentPage) ?: return run { onClose() }
-    val isMagicMode = viewModel.isMagicShapeEnabled
-
-    BackHandler(enabled = isMagicMode) { viewModel.setMagicShapeEnabled(false) }
-
-    var areControlsVisible by remember { mutableStateOf(true) }
-
-    LaunchedEffect(isMagicMode, detailPagerState.currentPage) { areControlsVisible = true }
-    
-    val backgroundColor = MaterialTheme.colorScheme.background
-
-    Box(modifier = Modifier.fillMaxSize().background(backgroundColor).pointerInput(isMagicMode) {
-        detectTapGestures(onTap = { if (isMagicMode) areControlsVisible = !areControlsVisible })
-    }) {
-        HorizontalPager(state = detailPagerState, modifier = Modifier.fillMaxSize()) { pageIndex ->
-            val wallpaper = wallpapers[pageIndex]
-            if (viewModel.isMagicShapeEnabled) {
-                MagicEffectImage(wallpaper = wallpaper, viewModel = viewModel, modifier = Modifier.fillMaxSize())
-            } else if (isDebugMaskEnabled) {
-                DebugMaskImage(wallpaper = wallpaper, contentDescription = "Debug", viewModel = viewModel, modifier = Modifier.fillMaxSize())
-            } else {
-                if (wallpaper.uri != null) {
-                    Image(painter = rememberAsyncImagePainter(wallpaper.uri), contentDescription = "Gallery", contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                } else {
-                    Image(painter = painterResource(id = wallpaper.resourceId), contentDescription = "Original", contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                }
-            }
-        }
-        
-        AnimatedVisibility(
-            visible = !isMagicMode || areControlsVisible,
-            enter = fadeIn() + slideInVertically { -it },
-            exit = fadeOut() + slideOutVertically { -it },
-            modifier = Modifier.align(Alignment.TopCenter)
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.6f), Color.Transparent)))
-                    .statusBarsPadding()
-                    .padding(horizontal = 24.dp, vertical = 16.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                 IconButton(onClick = onClose) { Icon(Icons.Default.Close, "Close", tint = Color.White) }
-                 Column(horizontalAlignment = Alignment.End) {
-                    Text(currentWallpaper.title, color = Color.White, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    Text(currentWallpaper.tag.uppercase(), color = Color.White.copy(alpha = 0.7f), style = MaterialTheme.typography.labelSmall)
-                }
-            }
-        }
-        
-        Box(modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
-            AnimatedVisibility(visible = !isMagicMode, enter = slideInVertically { it }, exit = slideOutVertically { it }) {
-                Row(modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(24.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                    Button(onClick = { viewModel.setMagicShapeEnabled(true) }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondaryContainer, contentColor = MaterialTheme.colorScheme.onSecondaryContainer), shape = CircleShape, modifier = Modifier.size(56.dp), contentPadding = PaddingValues(0.dp)) {
-                        Icon(Icons.Default.AutoAwesome, "Magic")
-                    }
-                    Button(onClick = { onApplyClick(currentWallpaper) }, modifier = Modifier.height(56.dp).widthIn(min = 140.dp), colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primaryContainer, contentColor = MaterialTheme.colorScheme.onPrimaryContainer), shape = RoundedCornerShape(28.dp)) {
-                        Icon(Icons.Default.Image, null, modifier = Modifier.size(20.dp)); Spacer(Modifier.width(8.dp)); Text("APPLY", fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-            
-            AnimatedVisibility(visible = isMagicMode && areControlsVisible, enter = slideInVertically { it }, exit = slideOutVertically { it }) {
-                MagicControlsSheet(
-                    wallpaper = currentWallpaper,
-                    viewModel = viewModel,
-                    onCloseMagic = { viewModel.setMagicShapeEnabled(false) },
-                    onApplyStatic = { onApplyClick(currentWallpaper) },
-                    onApplyLive = { scope.launch { setLiveWallpaper(context, currentWallpaper, viewModel) } }
-                )
-            }
-        }
-    }
-}
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MagicControlsSheet(
     wallpaper: Wallpaper,
-    viewModel: WallpaperViewModel,
-    onCloseMagic: () -> Unit,
-    onApplyStatic: () -> Unit,
-    onApplyLive: () -> Unit
+    viewModel: WallpaperViewModel
 ) {
     val context = LocalContext.current
     var extractedColors by remember { mutableStateOf(listOf<Int>()) }
     var sliderPosition by remember { mutableFloatStateOf(viewModel.magicScale) }
-
+    
+    var selectedTab by remember { mutableStateOf("Shape") }
+    val tabs = listOf("Shape", "Animation", "Style")
+    
     LaunchedEffect(wallpaper) {
         withContext(Dispatchers.IO) {
             val bitmap = if(wallpaper.uri != null) BitmapHelper.decodeSampledBitmapFromUri(context, wallpaper.uri, 500) else BitmapFactory.decodeResource(context.resources, wallpaper.resourceId)
-            
             if (bitmap != null) {
-                
                 val scaledBitmap = Bitmap.createScaledBitmap(bitmap, 112, 112, true)
-                
                 val pixels = IntArray(scaledBitmap.width * scaledBitmap.height)
                 scaledBitmap.getPixels(pixels, 0, scaledBitmap.width, 0, 0, scaledBitmap.width, scaledBitmap.height)
-                
                 val quantizerResult = QuantizerCelebi.quantize(pixels, 128)
-                
                 val rankedColors: List<Int> = Score.score(quantizerResult)
-                
                 val finalColors = rankedColors.take(8).distinct() + listOf(android.graphics.Color.BLACK, android.graphics.Color.WHITE)
-                
                 withContext(Dispatchers.Main) {
                     extractedColors = finalColors.distinct()
                     if (finalColors.isNotEmpty()) viewModel.updateMagicConfig(viewModel.currentMagicShape, finalColors.first())
                 }
-                
                 scaledBitmap.recycle()
                 bitmap.recycle()
             }
         }
     }
     
-    Card(
-        modifier = Modifier.navigationBarsPadding().padding(16.dp).fillMaxWidth(),
-        shape = RoundedCornerShape(32.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(0.dp)
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Column(modifier = Modifier.padding(vertical = 16.dp)) {
-            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = onCloseMagic) { Text("Cancel") }
-                Row {
-                    FilledTonalButton(onClick = onApplyLive, colors = ButtonDefaults.filledTonalButtonColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer, contentColor = MaterialTheme.colorScheme.onTertiaryContainer)) {
-                        Icon(Icons.Default.PlayArrow, null, Modifier.size(16.dp)); Spacer(Modifier.width(4.dp)); Text("Live")
+        
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(48.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.background), 
+            elevation = CardDefaults.cardElevation(0.dp)
+        ) {
+            Box(modifier = Modifier.padding(24.dp).animateContentSize()) {
+                when (selectedTab) {
+                    "Shape" -> {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            LazyRow(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally)
+                            ) {
+                                items(MagicShape.values()) { shape ->
+                                    val isSelected = viewModel.currentMagicShape == shape
+                                    Box(
+                                        modifier = Modifier
+                                            .size(64.dp)
+                                            .background(if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(20.dp))
+                                            .clickable { viewModel.updateMagicConfig(shape, viewModel.currentBackgroundColor) },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        ShapeIcon(shape = shape, color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(32.dp))
+                                    }
+                                }
+                            }
+                            Spacer(Modifier.height(24.dp))
+                            LazyRow(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally)
+                            ) {
+                                items(extractedColors) { colorInt ->
+                                    val isSelected = viewModel.currentBackgroundColor == colorInt
+                                    Box(
+                                        modifier = Modifier
+                                            .size(56.dp) 
+                                            .background(Color(colorInt), CircleShape)
+                                            .clickable { viewModel.updateMagicConfig(viewModel.currentMagicShape, colorInt) }
+                                            .border(4.dp, if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent, CircleShape)
+                                    )
+                                }
+                            }
+                        }
                     }
-                    Spacer(Modifier.width(8.dp))
-                    Button(onClick = onApplyStatic) {
-                        Icon(Icons.Default.Check, null, Modifier.size(16.dp)); Spacer(Modifier.width(4.dp)); Text("Static")
+                    "Animation" -> {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text("Animation Style", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Spacer(Modifier.height(16.dp))
+                            LazyRow(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally)
+                            ) {
+                                items(AnimationStyle.values()) { style ->
+                                    val isSelected = viewModel.currentAnimationStyle == style
+                                    FilterChip(
+                                        selected = isSelected,
+                                        onClick = { viewModel.updateAnimationStyle(style) },
+                                        label = { Text(style.label, fontWeight = FontWeight.Bold) },
+                                        shape = RoundedCornerShape(16.dp),
+                                        colors = FilterChipDefaults.filterChipColors(selectedContainerColor = MaterialTheme.colorScheme.primaryContainer, selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer),
+                                        border = FilterChipDefaults.filterChipBorder(enabled = true, selected = isSelected, borderColor = Color.Transparent)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    "Style" -> {
+                        Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                FilterChip(
+                                    selected = viewModel.is3DPopEnabled, 
+                                    onClick = { viewModel.toggle3DPop() }, 
+                                    label = { Text("3D Pop", fontWeight = FontWeight.Bold) }, 
+                                    leadingIcon = { Icon(Icons.Default.Layers, null, Modifier.size(18.dp)) }, 
+                                    shape = RoundedCornerShape(16.dp), border = null
+                                )
+                                FilterChip(
+                                    selected = viewModel.isCentered, 
+                                    onClick = { viewModel.toggleCentered() }, 
+                                    label = { Text("Center", fontWeight = FontWeight.Bold) }, 
+                                    leadingIcon = { Icon(Icons.Default.FilterCenterFocus, null, Modifier.size(18.dp)) }, 
+                                    shape = RoundedCornerShape(16.dp), border = null
+                                )
+                            }
+                            Spacer(Modifier.height(24.dp))
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Shape Size", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(if (sliderPosition < 1.0f) "Tight" else "Wide", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                            }
+                            Slider(value = sliderPosition, onValueChange = { sliderPosition = it }, onValueChangeFinished = { viewModel.updateMagicScale(sliderPosition) }, valueRange = 0.5f..1.5f, steps = 5)
+                        }
                     }
                 }
             }
-            HorizontalDivider(Modifier.padding(vertical = 12.dp))
-            
-            Text("Animation Style", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 16.dp))
-            LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(vertical = 8.dp)) {
-                items(AnimationStyle.values()) { style ->
+        }
+
+        Spacer(Modifier.height(16.dp))
+        
+        Surface(
+            modifier = Modifier.navigationBarsPadding().padding(bottom = 12.dp).height(64.dp),
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            shadowElevation = 0.dp
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                tabs.forEach { tab ->
+                    val isSelected = selectedTab == tab
                     FilterChip(
-                        selected = viewModel.currentAnimationStyle == style,
-                        onClick = { viewModel.updateAnimationStyle(style) },
-                        label = { Text(style.label) },
-                        colors = FilterChipDefaults.filterChipColors(selectedContainerColor = MaterialTheme.colorScheme.primaryContainer, selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer),
-                        border = FilterChipDefaults.filterChipBorder(enabled = true, selected = viewModel.currentAnimationStyle == style, borderColor = Color.Transparent)
+                        selected = isSelected,
+                        onClick = { selectedTab = tab },
+                        label = { Text(tab, fontWeight = FontWeight.Bold) },
+                        shape = CircleShape,
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = MaterialTheme.colorScheme.secondaryContainer,
+                            selectedLabelColor = MaterialTheme.colorScheme.onSecondaryContainer
+                        ),
+                        border = null
                     )
                 }
             }
-            HorizontalDivider(Modifier.padding(vertical = 8.dp))
-            
-            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                FilterChip(selected = viewModel.is3DPopEnabled, onClick = { viewModel.toggle3DPop() }, label = { Text("3D Pop") }, leadingIcon = { Icon(Icons.Default.Layers, null, Modifier.size(18.dp)) }, border = FilterChipDefaults.filterChipBorder(enabled = true, selected = viewModel.is3DPopEnabled, borderColor = Color.Transparent))
-                Spacer(Modifier.width(8.dp))
-                FilterChip(selected = viewModel.isCentered, onClick = { viewModel.toggleCentered() }, label = { Text("Center") }, leadingIcon = { Icon(Icons.Default.FilterCenterFocus, null, Modifier.size(18.dp)) }, border = FilterChipDefaults.filterChipBorder(enabled = true, selected = viewModel.isCentered, borderColor = Color.Transparent))
-            }
-            
-            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("Shape Size", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(if (sliderPosition < 1.0f) "Tight" else "Wide", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                }
-                Slider(value = sliderPosition, onValueChange = { sliderPosition = it }, onValueChangeFinished = { viewModel.updateMagicScale(sliderPosition) }, valueRange = 0.5f..1.5f, steps = 5)
-            }
-            
-            LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                items(MagicShape.values()) { shape ->
-                    val isSelected = viewModel.currentMagicShape == shape
-                    Box(modifier = Modifier.size(56.dp).clip(RoundedCornerShape(16.dp)).background(if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant).clickable { viewModel.updateMagicConfig(shape, viewModel.currentBackgroundColor) }, contentAlignment = Alignment.Center) {
-                        ShapeIcon(shape = shape, color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(28.dp))
-                    }
-                }
-            }
-            Spacer(Modifier.height(16.dp))
-            LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                items(extractedColors) { colorInt ->
-                    val isSelected = viewModel.currentBackgroundColor == colorInt
-                    Box(modifier = Modifier.size(48.dp).clip(CircleShape).background(Color(colorInt)).clickable { viewModel.updateMagicConfig(viewModel.currentMagicShape, colorInt) }.border(3.dp, if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent, CircleShape))
-                }
-            }
-            Spacer(Modifier.height(8.dp))
         }
     }
 }
@@ -304,6 +263,7 @@ fun MagicEffectImage(
     val iconColor = if (isDarkTheme) Color.White else Color.Black
 
     Box(modifier = modifier.background(backgroundColor), contentAlignment = Alignment.Center) {
+        
         if (currentBitmap == null) {
             if (wallpaper.uri != null) {
                 Image(painter = rememberAsyncImagePainter(wallpaper.uri), contentDescription = null, modifier = Modifier.fillMaxSize().blur(25.dp), contentScale = ContentScale.Crop)
@@ -320,7 +280,37 @@ fun MagicEffectImage(
                 Icon(Icons.Default.AutoAwesome, "Processing", tint = iconColor, modifier = Modifier.size(48.dp).scale(scale))
             }
         }
+        
         if (currentBitmap != null) {
+            val styleName = viewModel.currentAnimationStyle.name
+            val isBigBang = styleName.contains("BIG", true) || styleName.contains("BANG", true)
+            val isMorph = styleName.contains("MORPH", true) || styleName.contains("ORGANIC", true)
+            
+            val infiniteTransition = rememberInfiniteTransition(label = "LivePreview")
+            
+            val targetScale = if (isBigBang) 1.25f else 1.05f
+            val scaleDuration = if (isBigBang) 800 else 3000
+            
+            val scaleAnim by infiniteTransition.animateFloat(
+                initialValue = 1f,
+                targetValue = targetScale,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(scaleDuration, easing = FastOutSlowInEasing),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "scale"
+            )
+            
+            val rotationAnim by infiniteTransition.animateFloat(
+                initialValue = if (isMorph) -3f else 0f,
+                targetValue = if (isMorph) 3f else 0f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(4000, easing = LinearOutSlowInEasing),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "rotation"
+            )
+
             AnimatedContent(
                 targetState = currentBitmap, 
                 label = "MagicDepthAnim", 
@@ -329,7 +319,21 @@ fun MagicEffectImage(
                     .togetherWith(fadeOut(animationSpec = tween(300)) + scaleOut(targetScale = 1.15f, animationSpec = tween(400, easing = FastOutSlowInEasing))) 
                 }
             ) { bitmap ->
-                if (bitmap != null) Image(bitmap = bitmap.asImageBitmap(), contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                if (bitmap != null) {
+                    Image(
+                        bitmap = bitmap.asImageBitmap(), 
+                        contentDescription = null, 
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer {
+                                
+                                scaleX = scaleAnim
+                                scaleY = scaleAnim
+                                rotationZ = rotationAnim
+                            }, 
+                        contentScale = ContentScale.Crop
+                    )
+                }
             }
         }
     }
