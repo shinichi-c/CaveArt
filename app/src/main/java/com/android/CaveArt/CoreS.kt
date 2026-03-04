@@ -1,3 +1,4 @@
+@file:OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalMaterial3Api::class)
 package com.android.CaveArt
 
 import android.app.Activity
@@ -92,7 +93,6 @@ fun AsyncWallpaperImage(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
     val context = LocalContext.current
@@ -115,10 +115,12 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
     var isSettingWallpaper by remember { mutableStateOf(false) }
     var showDestinationSheet by remember { mutableStateOf(false) }
     var wallpaperToApplyState by remember { mutableStateOf<Wallpaper?>(null) }
-    
+    var selectedWallpaperIndex by remember { mutableIntStateOf(-1) }
     var showFilterPanel by remember { mutableStateOf(false) }
     var showSettingsPanel by remember { mutableStateOf(false) }
-    var isImmersiveMode by remember { mutableStateOf(false) }
+
+    val isDetailViewActive = selectedWallpaperIndex != -1
+    BackHandler(enabled = isDetailViewActive) { selectedWallpaperIndex = -1 }
 
     val filteredWallpapers = viewModel.filteredWallpapers
     val selectedTag = viewModel.selectedTag
@@ -127,6 +129,7 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
     val mainPagerState = rememberPagerState(pageCount = { filteredWallpapers.size })
     val carouselState = rememberCarouselState { filteredWallpapers.size }
 
+    var isImmersiveMode by remember { mutableStateOf(false) }
     val onHaptics = { if (viewModel.isHapticsEnabled) view.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY) }
 
     BackHandler(enabled = isImmersiveMode) { isImmersiveMode = false }
@@ -183,7 +186,7 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                         contentAlignment = Alignment.Center
                     ) {
                         if (viewModel.isMagicShapeEnabled) {
-                            
+                        	
                             IconButton(
                                 onClick = { viewModel.setMagicShapeEnabled(false) },
                                 modifier = Modifier.align(Alignment.CenterStart)
@@ -429,7 +432,7 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                             showDestinationSheet = false
                             isSettingWallpaper = false
                             wallpaperToApplyState = null
-                            viewModel.setMagicShapeEnabled(false)
+                            viewModel.setMagicShapeEnabled(false) 
                         }
                     }
 
@@ -495,7 +498,6 @@ fun WallpaperPreviewCard(
             elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
         ) {
             if (isMagicActive) {
-                
                 MagicEffectImage(
                     wallpaper = wallpaper,
                     viewModel = viewModel,
@@ -523,33 +525,26 @@ fun ConnectedWallpaperActions(
 ) {
     val enabled = currentWallpaper != null
     
-    Surface(
-        modifier = Modifier
-            .wrapContentWidth()
-            .height(64.dp), 
-        shape = CircleShape, 
-        color = MaterialTheme.colorScheme.primaryContainer,
-        shadowElevation = 0.dp
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(onClick = onAddClick) { 
-                Icon(Icons.Default.AddPhotoAlternate, "Add", tint = MaterialTheme.colorScheme.onPrimaryContainer) 
-            }
-            
-            IconButton(onClick = onMagicClick) {
-                Icon(Icons.Default.AutoAwesome, "Magic Shape", tint = MaterialTheme.colorScheme.onPrimaryContainer)
-            }
-            
-            IconButton(
-                onClick = onSetWallpaperClick,
-                enabled = enabled
+    HorizontalFloatingToolbar(
+        expanded = true,
+        floatingActionButton = {
+            FloatingActionButton(
+                onClick = { if (enabled) onSetWallpaperClick() },
+                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                elevation = FloatingActionButtonDefaults.elevation(0.dp, 0.dp, 0.dp, 0.dp)
             ) {
-                Icon(Icons.Default.Wallpaper, "Apply", tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                Icon(Icons.Default.Wallpaper, contentDescription = "Apply")
             }
+        },
+        modifier = Modifier.wrapContentWidth()
+    ) {
+        
+        IconButton(onClick = onAddClick) { 
+            Icon(Icons.Default.AddPhotoAlternate, "Add", tint = MaterialTheme.colorScheme.onSurfaceVariant) 
+        }
+        IconButton(onClick = onMagicClick) {
+            Icon(Icons.Default.AutoAwesome, "Magic Shape", tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
