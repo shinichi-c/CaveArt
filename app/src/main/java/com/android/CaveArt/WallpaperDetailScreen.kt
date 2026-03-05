@@ -48,6 +48,7 @@ import coil3.compose.rememberAsyncImagePainter
 import kotlin.random.Random
 import com.materialkolor.quantize.QuantizerCelebi
 import com.materialkolor.score.Score
+import com.materialkolor.hct.Hct
 
 private data class Particle(
     val initialX: Float,
@@ -70,7 +71,7 @@ fun MagicControlsSheet(
     
     var selectedTab by remember { mutableStateOf("Shape") }
     val tabs = listOf("Shape", "Animation", "Style")
-    
+
     LaunchedEffect(wallpaper) {
         withContext(Dispatchers.IO) {
             val bitmap = if(wallpaper.uri != null) BitmapHelper.decodeSampledBitmapFromUri(context, wallpaper.uri, 500) else BitmapFactory.decodeResource(context.resources, wallpaper.resourceId)
@@ -78,12 +79,40 @@ fun MagicControlsSheet(
                 val scaledBitmap = Bitmap.createScaledBitmap(bitmap, 112, 112, true)
                 val pixels = IntArray(scaledBitmap.width * scaledBitmap.height)
                 scaledBitmap.getPixels(pixels, 0, scaledBitmap.width, 0, 0, scaledBitmap.width, scaledBitmap.height)
+                
                 val quantizerResult = QuantizerCelebi.quantize(pixels, 128)
                 val rankedColors: List<Int> = Score.score(quantizerResult)
-                val finalColors = rankedColors.take(8).distinct() + listOf(android.graphics.Color.BLACK, android.graphics.Color.WHITE)
+                
+                var finalColors = rankedColors.distinct().take(5)
+                
+                if (finalColors.size < 5 && finalColors.isNotEmpty()) {
+                    val seed = finalColors.first()
+                    val hct = Hct.fromInt(seed)
+                    
+                    val generated = listOf(
+                        Hct.from(hct.hue + 60.0, hct.chroma, hct.tone).toInt(),
+                        Hct.from(hct.hue - 60.0, hct.chroma, hct.tone).toInt(),
+                        Hct.from(hct.hue + 180.0, hct.chroma, hct.tone).toInt(),
+                        Hct.from(hct.hue, hct.chroma, 30.0).toInt(),
+                        Hct.from(hct.hue, hct.chroma, 80.0).toInt()
+                    )
+                    finalColors = (finalColors + generated).distinct().take(5)
+                } else if (finalColors.isEmpty()) {
+                    
+                    finalColors = listOf(
+                        android.graphics.Color.parseColor("#4CAF50"),
+                        android.graphics.Color.parseColor("#2196F3"),
+                        android.graphics.Color.parseColor("#FF9800"),
+                        android.graphics.Color.parseColor("#E91E63"),
+                        android.graphics.Color.parseColor("#9C27B0")
+                    )
+                }
+                
                 withContext(Dispatchers.Main) {
-                    extractedColors = finalColors.distinct()
-                    if (finalColors.isNotEmpty()) viewModel.updateMagicConfig(viewModel.currentMagicShape, finalColors.first())
+                    extractedColors = finalColors
+                    if (finalColors.isNotEmpty() && !finalColors.contains(viewModel.currentBackgroundColor)) {
+                        viewModel.updateMagicConfig(viewModel.currentMagicShape, finalColors.first())
+                    }
                 }
                 scaledBitmap.recycle()
                 bitmap.recycle()
@@ -102,41 +131,66 @@ fun MagicControlsSheet(
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.background), 
             elevation = CardDefaults.cardElevation(0.dp)
         ) {
-            Box(modifier = Modifier.padding(24.dp).animateContentSize()) {
+            Box(modifier = Modifier.padding(vertical = 28.dp).animateContentSize()) {
                 when (selectedTab) {
                     "Shape" -> {
                         Column(modifier = Modifier.fillMaxWidth()) {
-                            LazyRow(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally)
+                        	
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally)
                             ) {
-                                items(MagicShape.values()) { shape ->
+                                MagicShape.values().take(5).forEach { shape ->
                                     val isSelected = viewModel.currentMagicShape == shape
                                     Box(
                                         modifier = Modifier
-                                            .size(64.dp)
-                                            .background(if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(20.dp))
+                                            .weight(1f) 
+                                            .aspectRatio(1f) 
+                                            .clip(RoundedCornerShape(16.dp))
+                                            .background(if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant)
                                             .clickable { viewModel.updateMagicConfig(shape, viewModel.currentBackgroundColor) },
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        ShapeIcon(shape = shape, color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(32.dp))
+                                        ShapeIcon(
+                                            shape = shape, 
+                                            color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant, 
+                                            modifier = Modifier.fillMaxSize(0.45f)
+                                        )
                                     }
                                 }
                             }
-                            Spacer(Modifier.height(24.dp))
-                            LazyRow(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally)
+                            
+                            Spacer(Modifier.height(28.dp))
+                            
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally)
                             ) {
-                                items(extractedColors) { colorInt ->
+                                extractedColors.forEach { colorInt ->
                                     val isSelected = viewModel.currentBackgroundColor == colorInt
                                     Box(
                                         modifier = Modifier
-                                            .size(56.dp) 
-                                            .background(Color(colorInt), CircleShape)
-                                            .clickable { viewModel.updateMagicConfig(viewModel.currentMagicShape, colorInt) }
-                                            .border(4.dp, if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent, CircleShape)
-                                    )
+                                            .weight(1f)
+                                            .aspectRatio(1f),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        
+                                        if (isSelected) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .border(3.dp, Color(colorInt), CircleShape)
+                                            )
+                                        }
+                                        
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxSize(if (isSelected) 0.65f else 1f) 
+                                                .clip(CircleShape)
+                                                .background(Color(colorInt))
+                                                .clickable { viewModel.updateMagicConfig(viewModel.currentMagicShape, colorInt) }
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -148,11 +202,11 @@ fun MagicControlsSheet(
                         ) {
                             Text("Animation Style", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Spacer(Modifier.height(16.dp))
-                            LazyRow(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally)
+                            Row(
+                                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 24.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
-                                items(AnimationStyle.values()) { style ->
+                                AnimationStyle.values().forEach { style ->
                                     val isSelected = viewModel.currentAnimationStyle == style
                                     FilterChip(
                                         selected = isSelected,
@@ -167,8 +221,8 @@ fun MagicControlsSheet(
                         }
                     }
                     "Style" -> {
-                        Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                 FilterChip(
                                     selected = viewModel.is3DPopEnabled, 
                                     onClick = { viewModel.toggle3DPop() }, 
@@ -201,27 +255,51 @@ fun MagicControlsSheet(
         Surface(
             modifier = Modifier.navigationBarsPadding().padding(bottom = 12.dp).height(64.dp),
             shape = CircleShape,
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            color = MaterialTheme.colorScheme.background,
             shadowElevation = 0.dp
         ) {
             Row(
                 modifier = Modifier.padding(horizontal = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 tabs.forEach { tab ->
                     val isSelected = selectedTab == tab
-                    FilterChip(
-                        selected = isSelected,
-                        onClick = { selectedTab = tab },
-                        label = { Text(tab, fontWeight = FontWeight.Bold) },
-                        shape = CircleShape,
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = MaterialTheme.colorScheme.secondaryContainer,
-                            selectedLabelColor = MaterialTheme.colorScheme.onSecondaryContainer
-                        ),
-                        border = null
-                    )
+                    val tabIcon = when (tab) {
+                        "Shape" -> Icons.Default.Category
+                        "Animation" -> Icons.Default.Animation
+                        else -> Icons.Default.Palette
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .height(48.dp)
+                            .clip(CircleShape)
+                            .background(if (isSelected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
+                            .clickable { selectedTab = tab }
+                            .padding(horizontal = if (isSelected) 20.dp else 16.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            if (isSelected) {
+                                Icon(
+                                    imageVector = tabIcon, 
+                                    contentDescription = null, 
+                                    modifier = Modifier.size(18.dp), 
+                                    tint = MaterialTheme.colorScheme.onSecondaryContainer
+                                )
+                            }
+                            Text(
+                                text = tab,
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isSelected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -326,7 +404,6 @@ fun MagicEffectImage(
                         modifier = Modifier
                             .fillMaxSize()
                             .graphicsLayer {
-                                
                                 scaleX = scaleAnim
                                 scaleY = scaleAnim
                                 rotationZ = rotationAnim
