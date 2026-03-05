@@ -1,17 +1,35 @@
 package com.android.CaveArt
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.carousel.CarouselState
+import androidx.compose.material3.carousel.HorizontalMultiBrowseCarousel
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -23,8 +41,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
@@ -32,7 +52,86 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import kotlin.math.absoluteValue
 import kotlin.math.roundToInt
-import kotlin.math.max
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun HeroCarouselWithIndicator(
+    filteredWallpapers: List<Wallpaper>,
+    pagerState: PagerState,
+    carouselState: CarouselState,
+    isCarouselVisible: Boolean,
+    onWallpaperClick: (Int) -> Unit,
+    onHaptics: () -> Unit,
+    viewModel: WallpaperViewModel
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+    	
+        AnimatedVisibility(
+            visible = isCarouselVisible,
+            enter = expandVertically(expandFrom = Alignment.Bottom, animationSpec = tween(400, easing = FastOutSlowInEasing)) + 
+                    scaleIn(transformOrigin = TransformOrigin(0.5f, 1f), animationSpec = tween(400, easing = FastOutSlowInEasing)) + 
+                    fadeIn(tween(300)),
+            exit = shrinkVertically(shrinkTowards = Alignment.Bottom, animationSpec = tween(400, easing = FastOutSlowInEasing)) + 
+                   scaleOut(transformOrigin = TransformOrigin(0.5f, 1f), animationSpec = tween(400, easing = FastOutSlowInEasing)) + 
+                   fadeOut(tween(250))
+        ) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 16.dp),
+                shape = RoundedCornerShape(48.dp),
+                color = MaterialTheme.colorScheme.background,
+                shadowElevation = 0.dp
+            ) {
+                Column(
+                    modifier = Modifier.padding(vertical = 16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    val screenWidth = LocalConfiguration.current.screenWidthDp.dp
+                    val carouselAvailableWidth = screenWidth - 32.dp
+                    val heroItemWidth = carouselAvailableWidth * 0.80f
+
+                    HorizontalMultiBrowseCarousel(
+                        state = carouselState,
+                        preferredItemWidth = heroItemWidth,
+                        itemSpacing = 12.dp,
+                        modifier = Modifier
+                            .width(carouselAvailableWidth) 
+                            .padding(horizontal = 16.dp)
+                            .height(160.dp)
+                    ) { i ->
+                        AsyncWallpaperImage(
+                            wallpaper = filteredWallpapers[i],
+                            contentDescription = null,
+                            viewModel = viewModel,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .maskClip(MaterialTheme.shapes.extraLarge)
+                                .clickable { onWallpaperClick(i) },
+                            allowMagic = false
+                        )
+                    }
+                }
+            }
+        }
+        
+        Box(
+            modifier = Modifier
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 12.dp), 
+            contentAlignment = Alignment.Center
+        ) {
+            FastScrollIndicator(
+                pagerState = pagerState,
+                onDragStartHaptics = onHaptics,
+                onPageChangeHaptics = onHaptics
+            )
+        }
+    }
+}
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -116,7 +215,6 @@ fun FastScrollIndicator(
         currentTrackWidth - activeWidth
     }
     
-
     val fastScrollModifier = Modifier
         .onSizeChanged { trackSize = it }
         .pointerInput(pagerState.pageCount) {
