@@ -11,17 +11,24 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -45,10 +52,12 @@ import androidx.compose.material3.*
 import androidx.compose.material3.carousel.HorizontalMultiBrowseCarousel
 import androidx.compose.material3.carousel.rememberCarouselState
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -115,12 +124,8 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
     var isSettingWallpaper by remember { mutableStateOf(false) }
     var showDestinationSheet by remember { mutableStateOf(false) }
     var wallpaperToApplyState by remember { mutableStateOf<Wallpaper?>(null) }
-    var selectedWallpaperIndex by remember { mutableIntStateOf(-1) }
     var showFilterPanel by remember { mutableStateOf(false) }
     var showSettingsPanel by remember { mutableStateOf(false) }
-
-    val isDetailViewActive = selectedWallpaperIndex != -1
-    BackHandler(enabled = isDetailViewActive) { selectedWallpaperIndex = -1 }
 
     val filteredWallpapers = viewModel.filteredWallpapers
     val selectedTag = viewModel.selectedTag
@@ -130,6 +135,9 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
     val carouselState = rememberCarouselState { filteredWallpapers.size }
 
     var isImmersiveMode by remember { mutableStateOf(false) }
+    
+    var isCarouselVisible by rememberSaveable { mutableStateOf(true) }
+    
     val onHaptics = { if (viewModel.isHapticsEnabled) view.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY) }
 
     BackHandler(enabled = isImmersiveMode) { isImmersiveMode = false }
@@ -186,7 +194,7 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                         contentAlignment = Alignment.Center
                     ) {
                         if (viewModel.isMagicShapeEnabled) {
-                        	
+                            
                             IconButton(
                                 onClick = { viewModel.setMagicShapeEnabled(false) },
                                 modifier = Modifier.align(Alignment.CenterStart)
@@ -277,8 +285,18 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                                 isCurrentPage = isCurrentPage,
                                 normalPageAlpha = alpha,
                                 normalPageScale = scale,
-                                onClick = { 
-                                    if (!viewModel.isMagicShapeEnabled) isImmersiveMode = !isImmersiveMode
+                                onTap = { 
+                                    if (!viewModel.isMagicShapeEnabled) {
+                                        isCarouselVisible = false
+                                    }
+                                },
+                                onLongPress = {
+                                    if (!viewModel.isMagicShapeEnabled) {
+                                        isCarouselVisible = true
+                                        if (viewModel.isHapticsEnabled) {
+                                            view.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+                                        }
+                                    }
                                 },
                                 viewModel = viewModel
                             )
@@ -298,46 +316,20 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                             enter = slideInVertically { it } + fadeIn(),
                             exit = slideOutVertically { it } + fadeOut()
                         ) {
-                            Column {
-                                Surface(
-                                    modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
-                                    shape = RoundedCornerShape(48.dp),
-                                    color = MaterialTheme.colorScheme.background,
-                                    shadowElevation = 0.dp
-                                ) {
-                                    Column(modifier = Modifier.padding(vertical = 20.dp)) {
-                                        val carouselAvailableWidth = LocalConfiguration.current.screenWidthDp.dp - 64.dp
-                                        val heroItemWidth = carouselAvailableWidth * 0.80f
-
-                                        HorizontalMultiBrowseCarousel(
-                                            state = carouselState,
-                                            preferredItemWidth = heroItemWidth,
-                                            itemSpacing = 12.dp,
-                                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).height(160.dp)
-                                        ) { i ->
-                                            AsyncWallpaperImage(
-                                                wallpaper = filteredWallpapers[i],
-                                                contentDescription = null,
-                                                viewModel = viewModel,
-                                                modifier = Modifier.fillMaxSize().maskClip(MaterialTheme.shapes.extraLarge).clickable {
-                                                    scope.launch { mainPagerState.animateScrollToPage(i) }
-                                                    onHaptics()
-                                                }
-                                            )
-                                        }
-
-                                        Box(
-                                            modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            FastScrollIndicator(
-                                                pagerState = mainPagerState,
-                                                onDragStartHaptics = onHaptics,
-                                                onPageChangeHaptics = onHaptics
-                                            )
-                                        }
-                                    }
-                                }
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            	
+                                HeroCarouselWithIndicator(
+                                    filteredWallpapers = filteredWallpapers,
+                                    pagerState = mainPagerState,
+                                    carouselState = carouselState,
+                                    isCarouselVisible = isCarouselVisible,
+                                    onWallpaperClick = { i ->
+                                        scope.launch { mainPagerState.animateScrollToPage(i) }
+                                        onHaptics()
+                                    },
+                                    onHaptics = onHaptics,
+                                    viewModel = viewModel
+                                )
 
                                 Box(
                                     modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 12.dp),
@@ -467,11 +459,13 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun WallpaperPreviewCard(
     wallpaper: Wallpaper,
     isCurrentPage: Boolean,
-    onClick: () -> Unit,
+    onTap: () -> Unit,
+    onLongPress: () -> Unit,
     viewModel: WallpaperViewModel,
     normalPageAlpha: Float,
     normalPageScale: Float
@@ -493,7 +487,10 @@ fun WallpaperPreviewCard(
             modifier = Modifier
                 .fillMaxHeight()
                 .aspectRatio(10.5f / 19.5f)
-                .clickable(onClick = onClick),
+                .combinedClickable(
+                    onClick = onTap,
+                    onLongClick = onLongPress
+                ),
             shape = RoundedCornerShape(20.dp),
             elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
         ) {
@@ -539,7 +536,6 @@ fun ConnectedWallpaperActions(
         },
         modifier = Modifier.wrapContentWidth()
     ) {
-        
         IconButton(onClick = onAddClick) { 
             Icon(Icons.Default.AddPhotoAlternate, "Add", tint = MaterialTheme.colorScheme.onSurfaceVariant) 
         }
