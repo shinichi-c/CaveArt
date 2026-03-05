@@ -45,8 +45,10 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.LocalOffer
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PhotoLibrary
-import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Wallpaper
 import androidx.compose.material3.*
 import androidx.compose.material3.carousel.HorizontalMultiBrowseCarousel
@@ -56,6 +58,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.asImageBitmap
@@ -102,6 +105,46 @@ fun AsyncWallpaperImage(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AmbientBottomSheet(
+    onDismissRequest: () -> Unit,
+    sheetState: SheetState,
+    viewModel: WallpaperViewModel,
+    currentWallpaper: Wallpaper?,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismissRequest,
+        sheetState = sheetState,
+        containerColor = Color.Transparent,
+        dragHandle = null
+    ) {
+        Box(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))) {
+            if (viewModel.isAmbientBlurEnabled && currentWallpaper != null) {
+                AsyncWallpaperImage(
+                    wallpaper = currentWallpaper,
+                    contentDescription = null,
+                    viewModel = viewModel,
+                    modifier = Modifier.matchParentSize().blur(80.dp),
+                    contentScale = ContentScale.Crop,
+                    allowMagic = false
+                )
+                Box(modifier = Modifier.matchParentSize().background(MaterialTheme.colorScheme.surface.copy(alpha = 0.75f)))
+            } else {
+                Box(modifier = Modifier.matchParentSize().background(MaterialTheme.colorScheme.surfaceContainerHigh))
+            }
+            
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    BottomSheetDefaults.DragHandle()
+                }
+                content()
+            }
+        }
+    }
+}
+
 @Composable
 fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
     val context = LocalContext.current
@@ -135,7 +178,6 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
     val carouselState = rememberCarouselState { filteredWallpapers.size }
 
     var isImmersiveMode by remember { mutableStateOf(false) }
-    
     var isCarouselVisible by rememberSaveable { mutableStateOf(true) }
     
     val onHaptics = { if (viewModel.isHapticsEnabled) view.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY) }
@@ -194,12 +236,19 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                         contentAlignment = Alignment.Center
                     ) {
                         if (viewModel.isMagicShapeEnabled) {
-                            
-                            IconButton(
-                                onClick = { viewModel.setMagicShapeEnabled(false) },
-                                modifier = Modifier.align(Alignment.CenterStart)
+                        	
+                            Surface(
+                                modifier = Modifier.align(Alignment.CenterStart),
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.primaryContainer,
+                                shadowElevation = 0.dp
                             ) {
-                                Icon(Icons.Default.ArrowBack, "Cancel", tint = MaterialTheme.colorScheme.onSurface)
+                                IconButton(
+                                    onClick = { viewModel.setMagicShapeEnabled(false) }, 
+                                    modifier = Modifier.size(44.dp)
+                                ) {
+                                    Icon(Icons.Default.ArrowBack, "Cancel", tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(20.dp))
+                                }
                             }
 
                             Text(
@@ -216,14 +265,25 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                                 },
                                 shape = CircleShape,
                                 color = MaterialTheme.colorScheme.primaryContainer,
-                                modifier = Modifier.align(Alignment.CenterEnd).size(48.dp)
+                                modifier = Modifier.align(Alignment.CenterEnd).size(44.dp)
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
-                                    Icon(Icons.Default.Check, "Apply", tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                                    Icon(Icons.Default.Check, "Apply", tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(20.dp))
                                 }
                             }
                         } else {
-                            
+                        	
+                            Surface(
+                                modifier = Modifier.align(Alignment.CenterStart),
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.primaryContainer,
+                                shadowElevation = 0.dp
+                            ) {
+                                IconButton(onClick = { showFilterPanel = true }, modifier = Modifier.size(44.dp)) {
+                                    Icon(Icons.Default.LocalOffer, "Tags", tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(20.dp))
+                                }
+                            }
+
                             AnimatedContent(
                                 targetState = currentWallpaper?.title ?: "Wallpapers",
                                 transitionSpec = {
@@ -242,23 +302,15 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                                     overflow = TextOverflow.Ellipsis
                                 )
                             }
-
+                            
                             Surface(
                                 modifier = Modifier.align(Alignment.CenterEnd),
                                 shape = CircleShape,
-                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                color = MaterialTheme.colorScheme.primaryContainer,
                                 shadowElevation = 0.dp
                             ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    IconButton(onClick = { showFilterPanel = true }, modifier = Modifier.size(40.dp)) {
-                                        Icon(Icons.Default.Category, "Tags", tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    }
-                                    IconButton(onClick = { showSettingsPanel = true }, modifier = Modifier.size(40.dp)) {
-                                        Icon(Icons.Default.Tune, "Settings", tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    }
+                                IconButton(onClick = { showSettingsPanel = true }, modifier = Modifier.size(44.dp)) {
+                                    Icon(Icons.Default.Settings, "Settings", tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(20.dp))
                                 }
                             }
                         }
@@ -369,18 +421,20 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
         
         if (showFilterPanel) {
             val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-            ModalBottomSheet(
+            AmbientBottomSheet(
                 onDismissRequest = { showFilterPanel = false },
                 sheetState = sheetState,
-                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                viewModel = viewModel,
+                currentWallpaper = currentWallpaper
             ) {
-                Column(modifier = Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Column(modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp).navigationBarsPadding(), horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("Categories", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
                     HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
                     LazyVerticalGrid(
                         columns = GridCells.Adaptive(minSize = 120.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
                         items(viewModel.allTags) { tag ->
                             CategoryChip(
@@ -393,6 +447,7 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                             )
                         }
                     }
+                    Spacer(Modifier.height(16.dp))
                 }
             }
         }
@@ -409,12 +464,14 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
             val wallpaperToApply = wallpaperToApplyState!!
             val isFixedAlignmentEnabled = viewModel.isFixedAlignmentEnabled
             val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-            ModalBottomSheet(
+            
+            AmbientBottomSheet(
                 onDismissRequest = { showDestinationSheet = false; wallpaperToApplyState = null },
                 sheetState = sheetState,
-                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                viewModel = viewModel,
+                currentWallpaper = currentWallpaper
             ) {
-                Column(modifier = Modifier.padding(24.dp)) {
+                Column(modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp).navigationBarsPadding()) {
                     Text("Apply Wallpaper To", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black, modifier = Modifier.padding(bottom = 24.dp))
                     
                     val applyAction: (Int) -> Unit = { dest ->
@@ -448,7 +505,7 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                         }
                     }
                     
-                    Spacer(Modifier.height(32.dp))
+                    Spacer(Modifier.height(16.dp))
                 }
             }
         }
@@ -527,20 +584,26 @@ fun ConnectedWallpaperActions(
         floatingActionButton = {
             FloatingActionButton(
                 onClick = { if (enabled) onSetWallpaperClick() },
-                containerColor = MaterialTheme.colorScheme.primaryContainer,
-                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
                 elevation = FloatingActionButtonDefaults.elevation(0.dp, 0.dp, 0.dp, 0.dp)
             ) {
                 Icon(Icons.Default.Wallpaper, contentDescription = "Apply")
             }
         },
-        modifier = Modifier.wrapContentWidth()
+        modifier = Modifier.wrapContentWidth(),
+        colors = FloatingToolbarColors(
+            toolbarContainerColor = MaterialTheme.colorScheme.primaryContainer,
+            toolbarContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+            fabContainerColor = MaterialTheme.colorScheme.primary,
+            fabContentColor = MaterialTheme.colorScheme.onPrimary
+        )
     ) {
         IconButton(onClick = onAddClick) { 
-            Icon(Icons.Default.AddPhotoAlternate, "Add", tint = MaterialTheme.colorScheme.onSurfaceVariant) 
+            Icon(Icons.Default.AddPhotoAlternate, "Add", tint = MaterialTheme.colorScheme.onPrimaryContainer) 
         }
         IconButton(onClick = onMagicClick) {
-            Icon(Icons.Default.AutoAwesome, "Magic Shape", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            Icon(Icons.Default.AutoAwesome, "Magic Shape", tint = MaterialTheme.colorScheme.onPrimaryContainer)
         }
     }
 }
@@ -562,7 +625,10 @@ fun DestinationButton(icon: ImageVector, title: String, subtitle: String, isSett
         onClick = onClick, enabled = !isSetting,
         modifier = Modifier.fillMaxWidth().height(104.dp),
         shape = RoundedCornerShape(32.dp),
-        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest, contentColor = MaterialTheme.colorScheme.onSurface),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f), 
+            contentColor = MaterialTheme.colorScheme.onSurface
+        ),
         contentPadding = PaddingValues(24.dp)
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {

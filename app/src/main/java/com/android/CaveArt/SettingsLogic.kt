@@ -9,13 +9,13 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -43,16 +43,17 @@ fun SettingsSheet(
     val context = LocalContext.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    ModalBottomSheet(
+    AmbientBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+        viewModel = viewModel,
+        currentWallpaper = currentWallpaper
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .navigationBarsPadding()
-                .padding(horizontal = 24.dp, vertical = 24.dp)
+                .padding(horizontal = 24.dp, vertical = 8.dp)
                 .verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
@@ -72,7 +73,7 @@ fun SettingsSheet(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Column(horizontalAlignment = Alignment.Start) {
+                Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.Start) {
                     Text(
                         text = "Fixed Wallpaper Alignment",
                         style = MaterialTheme.typography.titleMedium,
@@ -85,6 +86,7 @@ fun SettingsSheet(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
+                Spacer(Modifier.width(16.dp))
                 Switch(
                     checked = viewModel.isFixedAlignmentEnabled,
                     onCheckedChange = { viewModel.setFixedAlignmentEnabled(it) }
@@ -95,7 +97,7 @@ fun SettingsSheet(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(vertical = 12.dp),
-                color = MaterialTheme.colorScheme.outlineVariant
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
             )
             
             Row(
@@ -106,7 +108,7 @@ fun SettingsSheet(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Column(horizontalAlignment = Alignment.Start) {
+                Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.Start) {
                     Text(
                         text = "Fast Scroll Haptics",
                         style = MaterialTheme.typography.titleMedium,
@@ -119,6 +121,7 @@ fun SettingsSheet(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
+                Spacer(Modifier.width(16.dp))
                 Switch(
                     checked = viewModel.isHapticsEnabled,
                     onCheckedChange = { viewModel.setHapticsEnabled(it) }
@@ -129,7 +132,7 @@ fun SettingsSheet(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(vertical = 12.dp),
-                color = MaterialTheme.colorScheme.outlineVariant
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
             )
             
             Row(
@@ -140,7 +143,7 @@ fun SettingsSheet(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Column(horizontalAlignment = Alignment.Start) {
+                Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.Start) {
                     Text(
                         text = "Ambient Background",
                         style = MaterialTheme.typography.titleMedium,
@@ -153,6 +156,7 @@ fun SettingsSheet(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
+                Spacer(Modifier.width(16.dp))
                 Switch(
                     checked = viewModel.isAmbientBlurEnabled,
                     onCheckedChange = { viewModel.setAmbientBlurEnabled(it) }
@@ -177,7 +181,7 @@ fun SettingsSheet(
                 viewModel.debugResults.forEach { res ->
                     Card(
                         modifier = Modifier.padding(top = 16.dp).fillMaxWidth(),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.6f))
                     ) {
                         Column(Modifier.padding(16.dp)) {
                             Text(
