@@ -74,6 +74,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.lerp
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
+import coil3.compose.rememberAsyncImagePainter
 import kotlinx.coroutines.launch
 import kotlin.math.absoluteValue
 
@@ -86,22 +87,34 @@ fun AsyncWallpaperImage(
     contentScale: ContentScale = ContentScale.Crop,
     allowMagic: Boolean = true
 ) {
-    val context = LocalContext.current
-    var bitmap by remember(wallpaper, allowMagic) { mutableStateOf<Bitmap?>(null) }
-
-    LaunchedEffect(wallpaper, allowMagic) {
-        bitmap = viewModel.getOrCreateProcessedBitmap(context, wallpaper, allowMagic)
-    }
-
-    if (bitmap != null) {
+    
+    if (!allowMagic) {
+        val model = wallpaper.uri ?: wallpaper.resourceId
         Image(
-            bitmap = bitmap!!.asImageBitmap(),
+            painter = rememberAsyncImagePainter(model),
             contentDescription = contentDescription,
             contentScale = contentScale,
             modifier = modifier
         )
     } else {
-        Box(modifier = modifier.background(MaterialTheme.colorScheme.surfaceVariant))
+        
+        val context = LocalContext.current
+        var bitmap by remember(wallpaper) { mutableStateOf<Bitmap?>(null) }
+
+        LaunchedEffect(wallpaper) {
+            bitmap = viewModel.getOrCreateProcessedBitmap(context, wallpaper, true)
+        }
+
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap!!.asImageBitmap(),
+                contentDescription = contentDescription,
+                contentScale = contentScale,
+                modifier = modifier
+            )
+        } else {
+            Box(modifier = modifier.background(MaterialTheme.colorScheme.surfaceVariant))
+        }
     }
 }
 
@@ -184,10 +197,14 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
 
     BackHandler(enabled = isImmersiveMode) { isImmersiveMode = false }
     BackHandler(enabled = viewModel.isMagicShapeEnabled) { viewModel.setMagicShapeEnabled(false) }
-
-    LaunchedEffect(mainPagerState.currentPage) {
+    
+    LaunchedEffect(mainPagerState.currentPage, mainPagerState.isScrollInProgress) {
         if (filteredWallpapers.isNotEmpty()) {
-            carouselState.animateScrollToItem(mainPagerState.currentPage)
+            if (mainPagerState.isScrollInProgress) {
+                carouselState.scrollToItem(mainPagerState.currentPage)
+            } else {
+                carouselState.animateScrollToItem(mainPagerState.currentPage)
+            }
         }
     }
 

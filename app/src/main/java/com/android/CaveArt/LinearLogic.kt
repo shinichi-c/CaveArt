@@ -15,6 +15,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -78,43 +79,27 @@ fun HeroCarouselWithIndicator(
                    scaleOut(transformOrigin = TransformOrigin(0.5f, 1f), animationSpec = tween(400, easing = FastOutSlowInEasing)) + 
                    fadeOut(tween(250))
         ) {
-            Surface(
+            HorizontalMultiBrowseCarousel(
+                state = carouselState,
+                preferredItemWidth = 140.dp, 
+                itemSpacing = 12.dp, 
+                
+                contentPadding = PaddingValues(horizontal = 0.dp), 
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(bottom = 16.dp),
-                shape = RoundedCornerShape(48.dp),
-                color = MaterialTheme.colorScheme.background,
-                shadowElevation = 0.dp
-            ) {
-                Column(
-                    modifier = Modifier.padding(vertical = 16.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    val screenWidth = LocalConfiguration.current.screenWidthDp.dp
-                    val carouselAvailableWidth = screenWidth - 32.dp
-                    val heroItemWidth = carouselAvailableWidth * 0.80f
-
-                    HorizontalMultiBrowseCarousel(
-                        state = carouselState,
-                        preferredItemWidth = heroItemWidth,
-                        itemSpacing = 12.dp,
-                        modifier = Modifier
-                            .width(carouselAvailableWidth) 
-                            .padding(horizontal = 16.dp)
-                            .height(160.dp)
-                    ) { i ->
-                        AsyncWallpaperImage(
-                            wallpaper = filteredWallpapers[i],
-                            contentDescription = null,
-                            viewModel = viewModel,
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .maskClip(MaterialTheme.shapes.extraLarge)
-                                .clickable { onWallpaperClick(i) },
-                            allowMagic = false
-                        )
-                    }
-                }
+                    .padding(top = 12.dp, bottom = 24.dp) 
+                    .height(190.dp)
+            ) { i ->
+                AsyncWallpaperImage(
+                    wallpaper = filteredWallpapers[i],
+                    contentDescription = null,
+                    viewModel = viewModel,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .maskClip(MaterialTheme.shapes.extraLarge)
+                        .clickable { onWallpaperClick(i) },
+                    allowMagic = false
+                )
             }
         }
         
@@ -127,52 +112,11 @@ fun HeroCarouselWithIndicator(
             FastScrollIndicator(
                 pagerState = pagerState,
                 onDragStartHaptics = onHaptics,
-                onPageChangeHaptics = onHaptics
+                onPageChangeHaptics = onHaptics,
+                inactiveColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.15f),
+                activeColor = MaterialTheme.colorScheme.primary
             )
         }
-    }
-}
-
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-fun FixedTransitionIndicator(
-    pagerState: PagerState,
-    modifier: Modifier = Modifier,
-    activeColor: Color = MaterialTheme.colorScheme.primary,
-    inactiveColor: Color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
-    trackWidth: Dp = 80.dp,
-    baseTrackHeight: Dp = 4.dp
-) {
-    if (pagerState.pageCount <= 1) return
-
-    val absoluteTransitionFraction = pagerState.currentPageOffsetFraction.absoluteValue
-    val transitionFraction = pagerState.currentPageOffsetFraction
-
-    val heightIncrease = 2.dp * absoluteTransitionFraction
-    val activeTrackHeight = baseTrackHeight + heightIncrease
-
-    val activeWidth = trackWidth * absoluteTransitionFraction
-
-    val offsetX: Dp = if (transitionFraction < 0) {
-        0.dp
-    } else {
-        trackWidth - activeWidth
-    }
-
-    Box(
-        modifier = modifier
-            .width(trackWidth)
-            .height(baseTrackHeight)
-            .background(inactiveColor, RoundedCornerShape(50))
-    ) {
-        Box(
-            modifier = Modifier
-                .offset(x = offsetX)
-                .width(activeWidth)
-                .height(activeTrackHeight)
-                .background(activeColor, RoundedCornerShape(50))
-                .align(Alignment.CenterStart)
-        )
     }
 }
 
@@ -251,7 +195,6 @@ fun FastScrollIndicator(
 
                         if (targetPage != pagerState.currentPage) {
                             onPageChangeHaptics()
-
                             scope.launch {
                                 pagerState.scrollToPage(targetPage)
                             }
