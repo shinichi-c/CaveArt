@@ -2,6 +2,10 @@ package com.android.CaveArt
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -9,6 +13,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -28,30 +33,31 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.carousel.CarouselState
 import androidx.compose.material3.carousel.HorizontalMultiBrowseCarousel
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
-import kotlin.math.absoluteValue
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -83,7 +89,6 @@ fun HeroCarouselWithIndicator(
                 state = carouselState,
                 preferredItemWidth = 140.dp, 
                 itemSpacing = 12.dp, 
-                
                 contentPadding = PaddingValues(horizontal = 0.dp), 
                 modifier = Modifier
                     .fillMaxWidth()
@@ -113,8 +118,9 @@ fun HeroCarouselWithIndicator(
                 pagerState = pagerState,
                 onDragStartHaptics = onHaptics,
                 onPageChangeHaptics = onHaptics,
-                inactiveColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.15f),
-                activeColor = MaterialTheme.colorScheme.primary
+                inactiveColor = MaterialTheme.colorScheme.onSurface,
+                activeColor = MaterialTheme.colorScheme.primary,
+                trackWidth = 200.dp
             )
         }
     }
@@ -126,11 +132,8 @@ fun FastScrollIndicator(
     pagerState: PagerState,
     modifier: Modifier = Modifier,
     activeColor: Color = MaterialTheme.colorScheme.primary,
-    inactiveColor: Color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
-    defaultTrackWidth: Dp = 80.dp,
-    dragTrackWidth: Dp = 200.dp,
-    defaultTrackHeight: Dp = 4.dp,
-    dragTrackHeight: Dp = 10.dp,
+    inactiveColor: Color = MaterialTheme.colorScheme.onSurface,
+    trackWidth: Dp = 200.dp,
     onDragStartHaptics: () -> Unit,
     onPageChangeHaptics: () -> Unit
 ) {
@@ -139,109 +142,118 @@ fun FastScrollIndicator(
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
     var isDragging by remember { mutableStateOf(false) }
-    var trackSize by remember { mutableStateOf(IntSize.Zero) }
-    var dragOffsetX by remember { mutableFloatStateOf(0f) } 
+    var rawDragOffset by remember { mutableFloatStateOf(0f) }
+    var initialPage by remember { mutableIntStateOf(0) }
+    val isPagerScrolling = pagerState.isScrollInProgress && !isDragging
+    val thumbWidth by animateDpAsState(
+        targetValue = when {
+            isDragging -> 40.dp
+            isPagerScrolling -> 28.dp
+            else -> 20.dp
+        },
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
+        label = "thumbWidth"
+    )
     
-    val currentTrackWidth = if (isDragging) dragTrackWidth else defaultTrackWidth
-    val currentTrackHeight = if (isDragging) dragTrackHeight else defaultTrackHeight
+    val thumbHeight by animateDpAsState(
+        targetValue = if (isDragging) 8.dp else 6.dp,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
+        label = "thumbHeight"
+    )
     
-    val absoluteTransitionFraction = pagerState.currentPageOffsetFraction.absoluteValue
-    val transitionFraction = pagerState.currentPageOffsetFraction
+    val trackAlpha by animateFloatAsState(
+        targetValue = if (isDragging || isPagerScrolling) 0.15f else 0f,
+        animationSpec = tween(400),
+        label = "trackAlpha"
+    )
     
-    val heightIncrease = 2.dp * absoluteTransitionFraction 
-    val activeTrackHeight = currentTrackHeight + heightIncrease
-
-    val activeWidth = currentTrackWidth * absoluteTransitionFraction
-
-    val offsetX: Dp = if (transitionFraction < 0) {
-        0.dp
-    } else {
-        currentTrackWidth - activeWidth
-    }
+    val pagerOffsetPx = with(density) { (pagerState.currentPageOffsetFraction * 40.dp.toPx()) }
     
-    val fastScrollModifier = Modifier
-        .onSizeChanged { trackSize = it }
-        .pointerInput(pagerState.pageCount) {
-            detectDragGestures(
-                onDragStart = { startOffset: Offset ->
-                    isDragging = true
-                    dragOffsetX = startOffset.x.coerceIn(0f, trackSize.width.toFloat())
-                    onDragStartHaptics() 
+    val animatedDragOffset by animateFloatAsState(
+        targetValue = if (isDragging) rawDragOffset else pagerOffsetPx,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
+        label = "dragSpring"
+    )
 
-                    val trackWidthPx = trackSize.width.toFloat()
-                    val pageCount = pagerState.pageCount
-                    if (trackWidthPx > 0) {
-                        val dragFraction = (startOffset.x / trackWidthPx).coerceIn(0f, 1f)
-                        val targetPage = (dragFraction * (pageCount - 1)).roundToInt().coerceIn(0, pageCount - 1)
+    val pageCount = pagerState.pageCount
+    val maxDragPx = with(density) { ((trackWidth / 2) - 20.dp).toPx() } 
 
-                        if (targetPage != pagerState.currentPage) {
-                            scope.launch {
-                                pagerState.scrollToPage(targetPage)
-                            }
-                        }
-                    }
-                },
-                onDrag = { change, _ ->
-                    change.consume() 
-
-                    val trackWidthPx = trackSize.width.toFloat()
-                    val newDragX = change.position.x.coerceIn(0f, trackWidthPx)
-                    dragOffsetX = newDragX
-
-                    val pageCount = pagerState.pageCount
-                    if (trackWidthPx > 0) {
-                        val dragFraction = (newDragX / trackWidthPx).coerceIn(0f, 1f)
-                        val targetPage = (dragFraction * (pageCount - 1)).roundToInt().coerceIn(0, pageCount - 1)
-
-                        if (targetPage != pagerState.currentPage) {
-                            onPageChangeHaptics()
-                            scope.launch {
-                                pagerState.scrollToPage(targetPage)
-                            }
-                        }
-                    }
-                },
-                onDragEnd = { 
-                    isDragging = false
-                    dragOffsetX = 0f
-                },
-                onDragCancel = {
-                    isDragging = false
-                    dragOffsetX = 0f
+    val fastScrollModifier = Modifier.pointerInput(pageCount) {
+        detectDragGestures(
+            onDragStart = { 
+                isDragging = true
+                initialPage = pagerState.currentPage
+                rawDragOffset = 0f
+                onDragStartHaptics()
+            },
+            onDrag = { change, dragAmount ->
+                change.consume()
+                
+                rawDragOffset = (rawDragOffset + dragAmount.x).coerceIn(-maxDragPx, maxDragPx)
+                
+                val dragFraction = rawDragOffset / maxDragPx
+                
+                val calculatedTargetPage = if (dragFraction > 0f) {
+                    
+                    initialPage + dragFraction * (pageCount - 1 - initialPage)
+                } else {
+                    
+                    initialPage + dragFraction * initialPage
                 }
-            )
-        }
+                
+                val targetPage = calculatedTargetPage.roundToInt().coerceIn(0, pageCount - 1)
+
+                if (targetPage != pagerState.currentPage) {
+                    onPageChangeHaptics()
+                    scope.launch { pagerState.scrollToPage(targetPage) }
+                }
+            },
+            onDragEnd = { 
+                isDragging = false
+                rawDragOffset = 0f
+            },
+            onDragCancel = { 
+                isDragging = false
+                rawDragOffset = 0f
+            }
+        )
+    }
         
     Box(
         modifier = modifier
-            .then(fastScrollModifier)
-            .width(currentTrackWidth)
-            .height(currentTrackHeight)
-            .background(inactiveColor, RoundedCornerShape(50))
+            .width(trackWidth)
+            .height(48.dp)
+            .then(fastScrollModifier),
+        contentAlignment = Alignment.Center 
     ) {
+        
+        Canvas(modifier = Modifier.fillMaxSize().graphicsLayer { alpha = trackAlpha }) {
+            val lineThickness = 2.dp.toPx()
+            val y = size.height / 2
+            drawRoundRect(
+                brush = Brush.horizontalGradient(
+                    0f to Color.Transparent,
+                    0.1f to inactiveColor,
+                    0.9f to inactiveColor,
+                    1f to Color.Transparent
+                ),
+                topLeft = Offset(0f, y - lineThickness / 2),
+                size = Size(size.width, lineThickness),
+                cornerRadius = CornerRadius(lineThickness / 2)
+            )
+        }
         
         Box(
             modifier = Modifier
-                .offset(x = offsetX)
-                .width(activeWidth)
-                .height(activeTrackHeight)
-                .background(activeColor, RoundedCornerShape(50))
-                .align(Alignment.CenterStart)
+                .offset(x = with(density) { animatedDragOffset.toDp() })
+                .size(width = thumbWidth, height = thumbHeight)
+                .shadow(
+                    elevation = if (isDragging) 8.dp else 2.dp,
+                    shape = CircleShape, 
+                    spotColor = activeColor,
+                    ambientColor = activeColor
+                )
+                .background(activeColor, CircleShape)
         )
-        
-        if (isDragging) {
-            val dotSize = 12.dp 
-            val dotOffsetXDp = with(density) { dragOffsetX.toDp() }
-            
-            val constrainedDotOffset = dotOffsetXDp.coerceIn(0.dp, currentTrackWidth) - dotSize / 2
-            
-            Box(
-                modifier = Modifier
-                    .offset(x = constrainedDotOffset)
-                    .size(dotSize)
-                    .background(activeColor, CircleShape)
-                    .align(Alignment.CenterStart) 
-            )
-        }
     }
 }
