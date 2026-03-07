@@ -530,6 +530,11 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
         if (isSettingWallpaper) {
             LoadingOverlay(title = "Setting Wallpaper...")
         }
+        
+        AppUpdateHandler(
+viewModel = viewModel,
+            currentWallpaper = currentWallpaper
+)
     }
 }
 
