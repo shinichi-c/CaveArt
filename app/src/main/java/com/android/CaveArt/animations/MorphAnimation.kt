@@ -1,6 +1,7 @@
 package com.android.CaveArt.animations
 
 import android.graphics.*
+import com.android.CaveArt.LiveWallpaperConfig
 import com.android.CaveArt.UnifiedGeometry
 import kotlin.math.sin
 import kotlin.math.cos
@@ -8,6 +9,8 @@ import kotlin.math.abs
 import kotlin.math.max
 
 class MorphAnimation : WallpaperAnimation {
+    
+    override fun needsSegmentationMask(): Boolean = false
 
     companion object {
         private val AGSL_SRC = """
@@ -34,9 +37,7 @@ class MorphAnimation : WallpaperAnimation {
     private val BREATH_SPEED = 1.2f
     
     private val _bodyMatrix = Matrix()
-    private val _shapeMatrix = Matrix()
     private val _popMatrix = Matrix()
-    
     private var runtimeShader: RuntimeShader? = null
 
     override fun update(deltaTime: Float) {
@@ -52,17 +53,32 @@ class MorphAnimation : WallpaperAnimation {
     override fun onUnlock() { targetProgress = 1f }
     override fun onLock() { targetProgress = 0f }
 
-    override fun calculateState(geo: UnifiedGeometry, screenW: Float, screenH: Float, imgW: Int, imgH: Int, is3DPopEnabled: Boolean): AnimationState {
+    override fun draw(
+        canvas: Canvas,
+        originalBitmap: Bitmap,
+        maskBitmap: Bitmap?,
+        geo: UnifiedGeometry,
+        config: LiveWallpaperConfig,
+        paint: Paint,
+        maskXferPaint: Paint,
+        clipPath: Path,
+        screenShapeRect: RectF
+    ) {
+        val screenW = canvas.width.toFloat()
+        val screenH = canvas.height.toFloat()
+        val imgW = originalBitmap.width
+        val imgH = originalBitmap.height
+
         val fillScale = max(screenW / imgW, screenH / imgH)
         val zoomEffect = if (targetProgress == 1f) (currentProgress * 0.02f) else 0f
-        val currentImgScale = lerp(fillScale, geo.baseScale + zoomEffect, currentProgress)
+        val currentImgScale = lerp(fillScale, geo.baseScale * config.scale + zoomEffect, currentProgress)
         
         val floatY = (sin(timeSeconds * BREATH_SPEED) * FLOAT_AMPLITUDE) * currentProgress
         val floatX = (cos(timeSeconds * BREATH_SPEED * 0.5f) * (FLOAT_AMPLITUDE * 0.3f)) * currentProgress
         val tiltAngle = (sin(timeSeconds * BREATH_SPEED) * TILT_AMPLITUDE) * currentProgress
         
-        val anchorX = if (currentProgress > 0.1f && (geo.shiftX != 0f || geo.shiftY != 0f)) geo.subjectCenterX else imgW / 2f
-        val anchorY = if (currentProgress > 0.1f && (geo.shiftX != 0f || geo.shiftY != 0f)) geo.subjectCenterY else imgH / 2f
+        val anchorX = if (currentProgress > 0.1f && config.isCentered) geo.subjectCenterX else imgW / 2f
+        val anchorY = if (currentProgress > 0.1f && config.isCentered) geo.subjectCenterY else imgH / 2f
         
         val finalAnchorX = lerp(imgW / 2f, anchorX, currentProgress)
         val finalAnchorY = lerp(imgH / 2f, anchorY, currentProgress)
@@ -73,39 +89,41 @@ class MorphAnimation : WallpaperAnimation {
         _bodyMatrix.postRotate(tiltAngle)
         _bodyMatrix.postTranslate(screenW / 2f + floatX, screenH / 2f + floatY)
         
-        _shapeMatrix.set(_bodyMatrix)
-        val expansion = lerp(6.0f, 1.0f, currentProgress)
-        _shapeMatrix.postScale(expansion, expansion, screenW / 2f + floatX, screenH / 2f + floatY)
-        
         _popMatrix.set(_bodyMatrix)
-        if (is3DPopEnabled) {
+        if (config.is3DPopEnabled) {
             val popParallax = cos(timeSeconds * 0.8f) * 8f * currentProgress
             _popMatrix.postTranslate(popParallax, -floatY * 0.2f) 
         }
 
-        return AnimationState(
-            _bodyMatrix, _shapeMatrix, _popMatrix, 
-            (currentProgress * 255).toInt().coerceIn(0, 255), 
-            if (is3DPopEnabled) geo.shapeBoundsRel.height() * 0.12f * currentProgress else 0f, 
-            currentProgress, timeSeconds
-        )
-    }
-
-    override fun applyShader(paint: Paint, bitmap: Bitmap, state: AnimationState, canvasWidth: Float, canvasHeight: Float): Boolean {
         if (runtimeShader == null) runtimeShader = RuntimeShader(AGSL_SRC)
         
-        val bShader = BitmapShader(bitmap, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
-        bShader.setLocalMatrix(state.bodyMatrix)
+        val bShader = BitmapShader(originalBitmap, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
+        bShader.setLocalMatrix(_bodyMatrix)
         
         runtimeShader?.let { shader ->
             shader.setInputShader("image", bShader)
-            shader.setFloatUniform("resolution", canvasWidth, canvasHeight)
-            shader.setFloatUniform("progress", state.progress)
-            shader.setFloatUniform("time", state.time)
+            shader.setFloatUniform("resolution", screenW, screenH)
+            shader.setFloatUniform("progress", currentProgress)
+            shader.setFloatUniform("time", timeSeconds)
             paint.shader = shader
-            return true
         }
-        return false
+        
+        canvas.drawColor(config.backgroundColor)
+        canvas.drawRect(0f, 0f, screenW, screenH, paint)
+        paint.shader = null
+
+        val popAlpha = (currentProgress * 255).toInt().coerceIn(0, 255)
+        if (config.is3DPopEnabled && maskBitmap != null && popAlpha > 0) {
+            val vShift = geo.shapeBoundsRel.height() * 0.12f * currentProgress
+            _popMatrix.postTranslate(0f, -vShift)
+
+            val layerId = canvas.saveLayer(0f, 0f, screenW, screenH, null)
+            paint.alpha = popAlpha
+            canvas.drawBitmap(maskBitmap, _popMatrix, paint)
+            canvas.drawBitmap(originalBitmap, _popMatrix, maskXferPaint)
+            paint.alpha = 255
+            canvas.restoreToCount(layerId)
+        }
     }
     
     private fun lerp(start: Float, end: Float, t: Float): Float = start + (end - start) * t

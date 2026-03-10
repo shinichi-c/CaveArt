@@ -13,6 +13,7 @@ import android.util.DisplayMetrics
 import android.util.Log
 import android.view.WindowManager
 import android.widget.Toast
+import com.android.CaveArt.animations.AnimationFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -44,6 +45,9 @@ suspend fun setLiveWallpaper(
     val originalBitmap = components.first
     val cutoutBitmap = components.second
     
+    val animNeedsMask = viewModel.isAnimationEnabled && AnimationFactory.getAnimation(viewModel.currentAnimationStyle).needsSegmentationMask()
+    val needsCutout = viewModel.isMagicShapeEnabled || animNeedsMask
+
     if (originalBitmap != null) {
         try {
             val origFile = File(deviceProtectedContext.noBackupFilesDir, "boot_original.png")
@@ -52,7 +56,7 @@ suspend fun setLiveWallpaper(
             origStream.flush(); origStream.close()
             savedOriginalPath = origFile.absolutePath
             
-            if (cutoutBitmap != null && viewModel.isMagicShapeEnabled) {
+            if (cutoutBitmap != null && needsCutout) {
                 val cutFile = File(deviceProtectedContext.noBackupFilesDir, "boot_cutout.png")
                 val cutStream = FileOutputStream(cutFile)
                 cutoutBitmap.compress(Bitmap.CompressFormat.PNG, 100, cutStream)

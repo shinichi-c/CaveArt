@@ -1,39 +1,29 @@
 package com.android.CaveArt.animations
 
 import android.graphics.Bitmap
-import android.graphics.Matrix
+import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.RectF
+import com.android.CaveArt.LiveWallpaperConfig
 import com.android.CaveArt.UnifiedGeometry
 
-data class AnimationState(
-    val bodyMatrix: Matrix,
-    val shapeMatrix: Matrix,
-    val popMatrix: Matrix,
-    val popAlpha: Int,
-    val vShift: Float,
-    val progress: Float = 1f, 
-    val time: Float = 0f      
-)
-
 interface WallpaperAnimation {
+    fun needsSegmentationMask(): Boolean = false
+
     fun update(deltaTime: Float)
     fun onUnlock()
     fun onLock()
     
-    fun calculateState(
+    fun draw(
+        canvas: Canvas,
+        originalBitmap: Bitmap,
+        maskBitmap: Bitmap?,
         geo: UnifiedGeometry,
-        screenW: Float,
-        screenH: Float,
-        imgW: Int,
-        imgH: Int,
-        is3DPopEnabled: Boolean
-    ): AnimationState
-    
-    fun applyShader(
+        config: LiveWallpaperConfig,
         paint: Paint,
-        bitmap: Bitmap,
-        state: AnimationState,
-        canvasWidth: Float,
-        canvasHeight: Float
-    ): Boolean
+        maskXferPaint: Paint,
+        clipPath: Path,
+        screenShapeRect: RectF
+    )
 }

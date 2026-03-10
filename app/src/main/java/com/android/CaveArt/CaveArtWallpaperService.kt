@@ -130,26 +130,10 @@ class CaveArtWallpaperService : WallpaperService() {
                 if (canvas != null) {
 
                     if (config.isAnimationEnabled) {
-                        val state = currentAnimation.calculateState(
-                            geo, canvas.width.toFloat(), canvas.height.toFloat(), bmp.width, bmp.height, config.is3DPopEnabled
+                        currentAnimation.draw(
+                            canvas, bmp, maskBitmap, geo, config,
+                            bitmapPaint, maskXferPaint, clipPath, screenShapeRect
                         )
-
-                        val isUsingShader = currentAnimation.applyShader(
-                            bitmapPaint, bmp, state, canvas.width.toFloat(), canvas.height.toFloat()
-                        )
-                        
-                        canvas.drawColor(Color.BLACK)
-                        canvas.save()
-                        
-                        if (isUsingShader) {
-                            canvas.drawRect(0f, 0f, canvas.width.toFloat(), canvas.height.toFloat(), bitmapPaint)
-                        } else {
-                            canvas.drawBitmap(bmp, state.bodyMatrix, bitmapPaint)
-                        }
-                        
-                        canvas.restore()
-                        bitmapPaint.shader = null 
-
                     } else if (config.isMagicShapeEnabled) {
                         val timeSeconds = System.nanoTime() / 1_000_000_000f
                         val breathScale = 1.0f + (sin(timeSeconds * 1.5f) * 0.02f)
@@ -255,7 +239,9 @@ class CaveArtWallpaperService : WallpaperService() {
                 } catch (e: Exception) { null }
 
                 var loadedMask = try {
-                    if (!config.cutoutPath.isNullOrEmpty() && config.isMagicShapeEnabled) {
+                    val animNeedsMask = config.isAnimationEnabled && currentAnimation.needsSegmentationMask()
+                    
+                    if (!config.cutoutPath.isNullOrEmpty() && (config.isMagicShapeEnabled || animNeedsMask)) {
                         val options = BitmapFactory.Options()
                         options.inSampleSize = finalSampleSize
                         options.inPreferredConfig = Bitmap.Config.ARGB_8888
@@ -263,7 +249,7 @@ class CaveArtWallpaperService : WallpaperService() {
                     }
                     else null
                 } catch (e: Exception) { null }
-                
+
                 if (loadedMask != null && loadedOriginal != null) {
                     if (loadedMask.width != loadedOriginal.width || loadedMask.height != loadedOriginal.height) {
                         val scaledMask = Bitmap.createScaledBitmap(loadedMask, loadedOriginal.width, loadedOriginal.height, true)
