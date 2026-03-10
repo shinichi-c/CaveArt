@@ -13,6 +13,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.android.CaveArt.animations.AnimationFactory
 import com.android.CaveArt.animations.AnimationStyle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -178,10 +179,11 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     }
     
     suspend fun getOrCreateProcessedBitmap(context: Context, wallpaper: Wallpaper, allowMagic: Boolean = true): Bitmap? {
-        val useMagic = allowMagic && isMagicShapeEnabled
+        val isAnimMaskNeeded = isAnimationEnabled && AnimationFactory.getAnimation(currentAnimationStyle).needsSegmentationMask()
+        val needsCutout = allowMagic && (isMagicShapeEnabled || isAnimMaskNeeded)
         
-        val cacheKey = if(useMagic) {
-            "final_${wallpaper.id}_${currentMagicShape}_${currentBackgroundColor}_${is3DPopEnabled}_${magicScale}_${isCentered}"
+        val cacheKey = if(needsCutout) {
+            "final_${wallpaper.id}_${currentMagicShape}_${currentBackgroundColor}_${is3DPopEnabled}_${magicScale}_${isCentered}_${currentAnimationStyle.name}"
         } else {
             "preview_${wallpaper.id}"
         }
@@ -197,13 +199,13 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
                 }
                 
                 var cutout: Bitmap? = null
-                if (useMagic) {
+                if (needsCutout) {
                     cutout = cutoutCache.get(wallpaper.id) ?: generateCutoutInternal(originalBitmap)?.also { 
                         cutoutCache.put(wallpaper.id, it) 
                     }
                 }
 
-                val resultBitmap = composeFinalImage(context, originalBitmap, cutout, useMagic)
+                val resultBitmap = composeFinalImage(context, originalBitmap, cutout, allowMagic && isMagicShapeEnabled)
                 if (resultBitmap != null) bitmapCache.put(cacheKey, resultBitmap)
                 resultBitmap
             } catch (e: Exception) { null }
@@ -216,7 +218,11 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         } else {
             BitmapHelper.decodeSampledBitmapFromResource(context.resources, wallpaper.resourceId, 2500)
         }
-        val cutout = if (isMagicShapeEnabled && original != null) generateCutoutInternal(original) else null
+        
+        val isAnimMaskNeeded = isAnimationEnabled && AnimationFactory.getAnimation(currentAnimationStyle).needsSegmentationMask()
+        val needsCutout = isMagicShapeEnabled || isAnimMaskNeeded
+        
+        val cutout = if (needsCutout && original != null) generateCutoutInternal(original) else null
         return@withContext Pair(original, cutout)
     }
     

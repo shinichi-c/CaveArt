@@ -1,10 +1,13 @@
 package com.android.CaveArt.animations
 
 import android.graphics.*
+import com.android.CaveArt.LiveWallpaperConfig
 import com.android.CaveArt.UnifiedGeometry
 import kotlin.math.*
 
 class NanoAssemblyAnimation : WallpaperAnimation {
+
+    override fun needsSegmentationMask(): Boolean = false
 
     companion object {
         private val AGSL_SRC = """
@@ -77,23 +80,19 @@ class NanoAssemblyAnimation : WallpaperAnimation {
     private val LEVITATION_AMP = 8f
 
     private val _bodyMatrix = Matrix()
-    private val _shapeMatrix = Matrix()
     private val _popMatrix = Matrix()
     private var runtimeShader: RuntimeShader? = null
 
     override fun update(deltaTime: Float) {
         timeSeconds += deltaTime
-        
         val steps = 4
         val dt = deltaTime / steps
-        
         for (i in 0 until steps) {
             val displacement = currentProgress - targetProgress
             val force = -SPRING_TENSION * displacement - SPRING_FRICTION * velocity
             velocity += force * dt
             currentProgress += velocity * dt
         }
-        
         if (abs(currentProgress - targetProgress) < 0.001f && abs(velocity) < 0.001f) {
             currentProgress = targetProgress
             velocity = 0f
@@ -103,15 +102,28 @@ class NanoAssemblyAnimation : WallpaperAnimation {
     override fun onUnlock() { targetProgress = 1f }
     override fun onLock() { targetProgress = 0f }
 
-    override fun calculateState(geo: UnifiedGeometry, screenW: Float, screenH: Float, imgW: Int, imgH: Int, is3DPopEnabled: Boolean): AnimationState {
-        val fillScale = max(screenW / imgW, screenH / imgH)
-        
-        val safeProgress = currentProgress.coerceIn(0f, 1f)
-        
-        val currentImgScale = lerp(fillScale * 0.45f, geo.baseScale, safeProgress)
+    override fun draw(
+        canvas: Canvas,
+        originalBitmap: Bitmap,
+        maskBitmap: Bitmap?,
+        geo: UnifiedGeometry,
+        config: LiveWallpaperConfig,
+        paint: Paint,
+        maskXferPaint: Paint,
+        clipPath: Path,
+        screenShapeRect: RectF
+    ) {
+        val screenW = canvas.width.toFloat()
+        val screenH = canvas.height.toFloat()
+        val imgW = originalBitmap.width
+        val imgH = originalBitmap.height
 
-        val anchorX = if (safeProgress > 0.05f) geo.subjectCenterX else imgW / 2f
-        val anchorY = if (safeProgress > 0.05f) geo.subjectCenterY else imgH / 2f
+        val fillScale = max(screenW / imgW, screenH / imgH)
+        val safeProgress = currentProgress.coerceIn(0f, 1f)
+        val currentImgScale = lerp(fillScale * 0.45f, geo.baseScale * config.scale, safeProgress)
+
+        val anchorX = if (safeProgress > 0.05f && config.isCentered) geo.subjectCenterX else imgW / 2f
+        val anchorY = if (safeProgress > 0.05f && config.isCentered) geo.subjectCenterY else imgH / 2f
         
         val finalAnchorX = lerp(imgW / 2f, anchorX, safeProgress)
         val finalAnchorY = lerp(imgH / 2f, anchorY, safeProgress)
@@ -126,42 +138,41 @@ class NanoAssemblyAnimation : WallpaperAnimation {
         _bodyMatrix.postTranslate(screenW / 2f, (screenH / 2f) + idleY)
 
         _popMatrix.set(_bodyMatrix)
-        if (is3DPopEnabled) {
+        if (config.is3DPopEnabled) {
             val popLag = (1f - currentProgress.coerceIn(0f, 1.2f)) * 180f 
             _popMatrix.postTranslate(0f, -popLag)
         }
 
-        _shapeMatrix.set(_bodyMatrix)
-        val expansion = lerp(6.0f, 1.0f, safeProgress)
-        _shapeMatrix.postScale(expansion, expansion, screenW / 2f, (screenH / 2f) + idleY)
-
-        return AnimationState(
-            bodyMatrix = _bodyMatrix,
-            shapeMatrix = _shapeMatrix,
-            popMatrix = _popMatrix,
-            popAlpha = (safeProgress * 255).toInt().coerceIn(0, 255),
-            vShift = if (is3DPopEnabled) geo.shapeBoundsRel.height() * geo.baseScale * 0.1f * safeProgress else 0f,
-            progress = safeProgress,
-            time = timeSeconds
-        )
-    }
-
-    override fun applyShader(paint: Paint, bitmap: Bitmap, state: AnimationState, canvasWidth: Float, canvasHeight: Float): Boolean {
         if (runtimeShader == null) runtimeShader = RuntimeShader(AGSL_SRC)
         
-        val bShader = BitmapShader(bitmap, Shader.TileMode.DECAL, Shader.TileMode.DECAL)
-        bShader.setLocalMatrix(state.bodyMatrix)
+        val bShader = BitmapShader(originalBitmap, Shader.TileMode.DECAL, Shader.TileMode.DECAL)
+        bShader.setLocalMatrix(_bodyMatrix)
         
         runtimeShader?.let { shader ->
             shader.setInputShader("image", bShader)
-            shader.setFloatUniform("resolution", canvasWidth, canvasHeight)
-            shader.setFloatUniform("progress", state.progress)
-            shader.setFloatUniform("time", state.time)
+            shader.setFloatUniform("resolution", screenW, screenH)
+            shader.setFloatUniform("progress", safeProgress)
+            shader.setFloatUniform("time", timeSeconds)
             shader.setFloatUniform("rotationAngle", (currentRotation * PI / 180f).toFloat())
             paint.shader = shader
-            return true
         }
-        return false
+
+        canvas.drawColor(config.backgroundColor)
+        canvas.drawRect(0f, 0f, screenW, screenH, paint)
+        paint.shader = null
+
+        val popAlpha = (safeProgress * 255).toInt().coerceIn(0, 255)
+        if (config.is3DPopEnabled && maskBitmap != null && popAlpha > 0) {
+            val vShift = geo.shapeBoundsRel.height() * geo.baseScale * 0.1f * safeProgress
+            _popMatrix.postTranslate(0f, -vShift)
+
+            val layerId = canvas.saveLayer(0f, 0f, screenW, screenH, null)
+            paint.alpha = popAlpha
+            canvas.drawBitmap(maskBitmap, _popMatrix, paint)
+            canvas.drawBitmap(originalBitmap, _popMatrix, maskXferPaint)
+            paint.alpha = 255
+            canvas.restoreToCount(layerId)
+        }
     }
 
     private fun lerp(start: Float, end: Float, t: Float): Float = start + (end - start) * t
