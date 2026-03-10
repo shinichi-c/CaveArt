@@ -16,6 +16,7 @@ import com.android.CaveArt.animations.AnimationStyle
 import com.android.CaveArt.animations.WallpaperAnimation
 import kotlinx.coroutines.*
 import kotlin.math.max
+import kotlin.math.sin
 
 class CaveArtWallpaperService : WallpaperService() {
     override fun onCreateEngine(): Engine = CaveArtEngine()
@@ -38,6 +39,9 @@ class CaveArtWallpaperService : WallpaperService() {
         private val screenShapeRect = RectF()
         private var cachedGeometry: UnifiedGeometry? = null
         
+        private val _bodyMatrix = Matrix()
+        private val _shapeMatrix = Matrix()
+
         private var isVisible = false
         private var lastFrameTimeNanos = 0L
         private val choreographer = Choreographer.getInstance()
@@ -53,8 +57,7 @@ class CaveArtWallpaperService : WallpaperService() {
         
         override fun onComputeColors(): WallpaperColors? {
             return try {
-                if (config.backgroundColor != 0) {
-                    
+                if (config.backgroundColor != 0 && config.isMagicShapeEnabled) {
                     val primary = Color.valueOf(config.backgroundColor)
                     WallpaperColors(primary, null, null)
                 } else if (originalBitmap != null) {
@@ -84,6 +87,7 @@ class CaveArtWallpaperService : WallpaperService() {
                 if (km.isKeyguardLocked) currentAnimation.onLock() else currentAnimation.onUnlock()
 
                 lastFrameTimeNanos = System.nanoTime()
+                
                 choreographer.postFrameCallback(this)
             } else {
                 choreographer.removeFrameCallback(this)
@@ -93,16 +97,23 @@ class CaveArtWallpaperService : WallpaperService() {
         override fun onSurfaceChanged(holder: SurfaceHolder?, format: Int, width: Int, height: Int) {
             super.onSurfaceChanged(holder, format, width, height)
             updateGeometry()
-            if (isVisible) draw()
+            if (isVisible) {
+                if (!config.isAnimationEnabled) currentAnimation.update(1.0f)
+                draw()
+            }
         }
 
         override fun doFrame(frameTimeNanos: Long) {
             if (!isVisible) return
+            
             val dt = (frameTimeNanos - lastFrameTimeNanos) / 1_000_000_000f
             lastFrameTimeNanos = frameTimeNanos
             val safeDt = if (dt > 0.1f) 0.1f else dt
 
-            currentAnimation.update(safeDt)
+            if (config.isAnimationEnabled) {
+                currentAnimation.update(safeDt)
+            }
+            
             draw()
             choreographer.postFrameCallback(this)
         }
@@ -117,43 +128,74 @@ class CaveArtWallpaperService : WallpaperService() {
                 canvas = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) holder.lockHardwareCanvas() else holder.lockCanvas()
 
                 if (canvas != null) {
-                    val state = currentAnimation.calculateState(
-                        geo, canvas.width.toFloat(), canvas.height.toFloat(), bmp.width, bmp.height, config.is3DPopEnabled
-                    )
 
-                    val isUsingShader = currentAnimation.applyShader(
-                        bitmapPaint, bmp, state, canvas.width.toFloat(), canvas.height.toFloat()
-                    )
+                    if (config.isAnimationEnabled) {
+                        val state = currentAnimation.calculateState(
+                            geo, canvas.width.toFloat(), canvas.height.toFloat(), bmp.width, bmp.height, config.is3DPopEnabled
+                        )
 
-                    canvas.drawColor(config.backgroundColor)
-                    
-                    screenShapeRect.set(geo.shapeBoundsRel)
-                    state.shapeMatrix.mapRect(screenShapeRect)
-                    screenShapeRect.offset(0f, state.vShift)
-                    
-                    clipPath.rewind()
-                    val shapeEnum = try { MagicShape.valueOf(config.shapeName) } catch(e:Exception) { MagicShape.SQUIRCLE }
-                    ShapePathProvider.updatePathForShape(clipPath, shapeEnum, screenShapeRect)
+                        val isUsingShader = currentAnimation.applyShader(
+                            bitmapPaint, bmp, state, canvas.width.toFloat(), canvas.height.toFloat()
+                        )
+                        
+                        canvas.drawColor(Color.BLACK)
+                        canvas.save()
+                        
+                        if (isUsingShader) {
+                            canvas.drawRect(0f, 0f, canvas.width.toFloat(), canvas.height.toFloat(), bitmapPaint)
+                        } else {
+                            canvas.drawBitmap(bmp, state.bodyMatrix, bitmapPaint)
+                        }
+                        
+                        canvas.restore()
+                        bitmapPaint.shader = null 
 
-                    canvas.save()
-                    canvas.clipPath(clipPath)
-                    
-                    if (isUsingShader) {
-                        canvas.drawRect(0f, 0f, canvas.width.toFloat(), canvas.height.toFloat(), bitmapPaint)
+                    } else if (config.isMagicShapeEnabled) {
+                        val timeSeconds = System.nanoTime() / 1_000_000_000f
+                        val breathScale = 1.0f + (sin(timeSeconds * 1.5f) * 0.02f)
+                        val breathY = sin(timeSeconds * 1.2f) * 8f
+
+                        val currentImgScale = geo.baseScale * config.scale * breathScale
+
+                        val anchorX = if (config.isCentered) geo.subjectCenterX else bmp.width / 2f
+                        val anchorY = if (config.isCentered) geo.subjectCenterY else bmp.height / 2f
+
+                        _bodyMatrix.reset()
+                        _bodyMatrix.postTranslate(-anchorX, -anchorY)
+                        _bodyMatrix.postScale(currentImgScale, currentImgScale)
+                        _bodyMatrix.postTranslate(canvas.width / 2f, (canvas.height / 2f) + breathY)
+
+                        canvas.drawColor(config.backgroundColor)
+                        
+                        screenShapeRect.set(geo.shapeBoundsRel)
+                        _shapeMatrix.set(_bodyMatrix)
+                        _shapeMatrix.mapRect(screenShapeRect)
+                        
+                        val vShift = if (config.is3DPopEnabled) screenShapeRect.height() * 0.12f else 0f
+                        screenShapeRect.offset(0f, vShift)
+                        
+                        clipPath.rewind()
+                        val shapeEnum = try { MagicShape.valueOf(config.shapeName) } catch(e:Exception) { MagicShape.SQUIRCLE }
+                        ShapePathProvider.updatePathForShape(clipPath, shapeEnum, screenShapeRect)
+
+                        canvas.save()
+                        canvas.clipPath(clipPath)
+                        canvas.drawBitmap(bmp, _bodyMatrix, bitmapPaint)
+                        canvas.restore()
+
+                        if (config.is3DPopEnabled && maskBitmap != null) {
+                            val popMatrix = Matrix(_bodyMatrix)
+                            
+                            val id = canvas.saveLayer(0f, 0f, canvas.width.toFloat(), canvas.height.toFloat(), null)
+                            canvas.drawBitmap(maskBitmap!!, popMatrix, bitmapPaint)
+                            canvas.drawBitmap(bmp, popMatrix, maskXferPaint)
+                            canvas.restoreToCount(id)
+                        }
                     } else {
-                        canvas.drawBitmap(bmp, state.bodyMatrix, bitmapPaint)
-                    }
-                    canvas.restore()
-
-                    bitmapPaint.shader = null 
-
-                    if (config.is3DPopEnabled && maskBitmap != null && state.popAlpha > 0) {
-                        val id = canvas.saveLayer(0f, 0f, canvas.width.toFloat(), canvas.height.toFloat(), null)
-                        bitmapPaint.alpha = state.popAlpha
-                        canvas.drawBitmap(maskBitmap!!, state.popMatrix, bitmapPaint)
-                        canvas.drawBitmap(bmp, state.popMatrix, maskXferPaint)
-                        bitmapPaint.alpha = 255
-                        canvas.restoreToCount(id)
+                        canvas.drawColor(Color.BLACK)
+                        _bodyMatrix.reset()
+                        _bodyMatrix.postScale(geo.baseScale, geo.baseScale)
+                        canvas.drawBitmap(bmp, _bodyMatrix, bitmapPaint)
                     }
                 }
             } catch (e: Exception) { e.printStackTrace() } finally {
@@ -186,6 +228,8 @@ class CaveArtWallpaperService : WallpaperService() {
                     config = newConfig
                 }
                 
+                var finalSampleSize = 1
+                
                 val loadedOriginal = try {
                     if (!config.imagePath.isNullOrEmpty()) {
                         val metrics = resources.displayMetrics
@@ -194,14 +238,13 @@ class CaveArtWallpaperService : WallpaperService() {
                         val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                         BitmapFactory.decodeFile(config.imagePath, options)
                         
-                        var sampleSize = 1
                         val halfH = options.outHeight / 2
                         val halfW = options.outWidth / 2
-                        while ((halfH / sampleSize) >= maxDim && (halfW / sampleSize) >= maxDim) {
-                            sampleSize *= 2
+                        while ((halfH / finalSampleSize) >= maxDim && (halfW / finalSampleSize) >= maxDim) {
+                            finalSampleSize *= 2
                         }
                         
-                        options.inSampleSize = sampleSize
+                        options.inSampleSize = finalSampleSize
                         options.inJustDecodeBounds = false
                         options.inPreferredConfig = Bitmap.Config.ARGB_8888
                         
@@ -211,20 +254,25 @@ class CaveArtWallpaperService : WallpaperService() {
                     else null
                 } catch (e: Exception) { null }
 
-                val loadedMask = try {
-                    if (!config.cutoutPath.isNullOrEmpty()) {
-                        
+                var loadedMask = try {
+                    if (!config.cutoutPath.isNullOrEmpty() && config.isMagicShapeEnabled) {
                         val options = BitmapFactory.Options()
-                        if (loadedOriginal != null) {
-                            options.inJustDecodeBounds = true
-                            BitmapFactory.decodeFile(config.cutoutPath, options)
-                            options.inSampleSize = loadedOriginal.width / options.outWidth.coerceAtLeast(1)
-                            options.inJustDecodeBounds = false
-                        }
+                        options.inSampleSize = finalSampleSize
+                        options.inPreferredConfig = Bitmap.Config.ARGB_8888
                         BitmapFactory.decodeFile(config.cutoutPath, options)
                     }
                     else null
                 } catch (e: Exception) { null }
+                
+                if (loadedMask != null && loadedOriginal != null) {
+                    if (loadedMask.width != loadedOriginal.width || loadedMask.height != loadedOriginal.height) {
+                        val scaledMask = Bitmap.createScaledBitmap(loadedMask, loadedOriginal.width, loadedOriginal.height, true)
+                        if (scaledMask != loadedMask) {
+                            loadedMask.recycle()
+                            loadedMask = scaledMask
+                        }
+                    }
+                }
 
                 withContext(Dispatchers.Main) {
                     originalBitmap?.recycle()

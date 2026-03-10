@@ -61,7 +61,7 @@ private data class Particle(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MagicControlsSheet(
+fun EffectsControlsSheet(
     wallpaper: Wallpaper,
     viewModel: WallpaperViewModel
 ) {
@@ -70,7 +70,23 @@ fun MagicControlsSheet(
     var sliderPosition by remember { mutableFloatStateOf(viewModel.magicScale) }
     
     var selectedTab by remember { mutableStateOf("Shape") }
-    val tabs = listOf("Shape", "Animation", "Style")
+    val tabs = remember(viewModel.isMagicShapeEnabled, viewModel.isAnimationEnabled) {
+        val list = mutableListOf<String>()
+        if (viewModel.isMagicShapeEnabled) {
+            list.add("Shape")
+            list.add("Style")
+        }
+        if (viewModel.isAnimationEnabled) {
+            list.add("Animation")
+        }
+        list
+    }
+
+    LaunchedEffect(tabs) {
+        if (!tabs.contains(selectedTab) && tabs.isNotEmpty()) {
+            selectedTab = tabs.first()
+        }
+    }
 
     LaunchedEffect(wallpaper) {
         withContext(Dispatchers.IO) {
@@ -98,7 +114,6 @@ fun MagicControlsSheet(
                     )
                     finalColors = (finalColors + generated).distinct().take(5)
                 } else if (finalColors.isEmpty()) {
-                    
                     finalColors = listOf(
                         android.graphics.Color.parseColor("#4CAF50"),
                         android.graphics.Color.parseColor("#2196F3"),
@@ -124,184 +139,183 @@ fun MagicControlsSheet(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(48.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.background), 
-            elevation = CardDefaults.cardElevation(0.dp)
-        ) {
-            Box(modifier = Modifier.padding(vertical = 28.dp).animateContentSize()) {
-                when (selectedTab) {
-                    "Shape" -> {
-                        Column(modifier = Modifier.fillMaxWidth()) {
-                        	
-                            Row(
-                                modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally)
-                            ) {
-                                MagicShape.values().take(5).forEach { shape ->
-                                    val isSelected = viewModel.currentMagicShape == shape
-                                    Box(
-                                        modifier = Modifier
-                                            .weight(1f) 
-                                            .aspectRatio(1f) 
-                                            .clip(RoundedCornerShape(16.dp))
-                                            .background(if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant)
-                                            .clickable { viewModel.updateMagicConfig(shape, viewModel.currentBackgroundColor) },
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        ShapeIcon(
-                                            shape = shape, 
-                                            color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant, 
-                                            modifier = Modifier.fillMaxSize(0.45f)
-                                        )
-                                    }
-                                }
-                            }
-                            
-                            Spacer(Modifier.height(28.dp))
-                            
-                            Row(
-                                modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally)
-                            ) {
-                                extractedColors.forEach { colorInt ->
-                                    val isSelected = viewModel.currentBackgroundColor == colorInt
-                                    Box(
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .aspectRatio(1f),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        
-                                        if (isSelected) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .fillMaxSize()
-                                                    .border(3.dp, Color(colorInt), CircleShape)
-                                            )
-                                        }
-                                        
+
+        if (tabs.isNotEmpty()) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(48.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.background), 
+                elevation = CardDefaults.cardElevation(0.dp)
+            ) {
+                Box(modifier = Modifier.padding(vertical = 28.dp).animateContentSize()) {
+                    when (selectedTab) {
+                        "Shape" -> {
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally)
+                                ) {
+                                    MagicShape.values().take(5).forEach { shape ->
+                                        val isSelected = viewModel.currentMagicShape == shape
                                         Box(
                                             modifier = Modifier
-                                                .fillMaxSize(if (isSelected) 0.65f else 1f) 
-                                                .clip(CircleShape)
-                                                .background(Color(colorInt))
-                                                .clickable { viewModel.updateMagicConfig(viewModel.currentMagicShape, colorInt) }
+                                                .weight(1f) 
+                                                .aspectRatio(1f) 
+                                                .clip(RoundedCornerShape(16.dp))
+                                                .background(if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant)
+                                                .clickable { viewModel.updateMagicConfig(shape, viewModel.currentBackgroundColor) },
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            ShapeIcon(
+                                                shape = shape, 
+                                                color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant, 
+                                                modifier = Modifier.fillMaxSize(0.45f)
+                                            )
+                                        }
+                                    }
+                                }
+                                
+                                Spacer(Modifier.height(28.dp))
+                                
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally)
+                                ) {
+                                    extractedColors.forEach { colorInt ->
+                                        val isSelected = viewModel.currentBackgroundColor == colorInt
+                                        Box(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .aspectRatio(1f),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            if (isSelected) {
+                                                Box(modifier = Modifier.fillMaxSize().border(3.dp, Color(colorInt), CircleShape))
+                                            }
+                                            
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxSize(if (isSelected) 0.65f else 1f) 
+                                                    .clip(CircleShape)
+                                                    .background(Color(colorInt))
+                                                    .clickable { viewModel.updateMagicConfig(viewModel.currentMagicShape, colorInt) }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        "Animation" -> {
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text("Animation Style", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Spacer(Modifier.height(16.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 24.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    AnimationStyle.values().forEach { style ->
+                                        val isSelected = viewModel.currentAnimationStyle == style
+                                        FilterChip(
+                                            selected = isSelected,
+                                            onClick = { viewModel.updateAnimationStyle(style) },
+                                            label = { Text(style.label, fontWeight = FontWeight.Bold) },
+                                            shape = RoundedCornerShape(16.dp),
+                                            colors = FilterChipDefaults.filterChipColors(selectedContainerColor = MaterialTheme.colorScheme.primaryContainer, selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer),
+                                            border = FilterChipDefaults.filterChipBorder(enabled = true, selected = isSelected, borderColor = Color.Transparent)
                                         )
                                     }
                                 }
                             }
                         }
-                    }
-                    "Animation" -> {
-                        Column(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Text("Animation Style", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Spacer(Modifier.height(16.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 24.dp),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp)
-                            ) {
-                                AnimationStyle.values().forEach { style ->
-                                    val isSelected = viewModel.currentAnimationStyle == style
+                        "Style" -> {
+                            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                     FilterChip(
-                                        selected = isSelected,
-                                        onClick = { viewModel.updateAnimationStyle(style) },
-                                        label = { Text(style.label, fontWeight = FontWeight.Bold) },
-                                        shape = RoundedCornerShape(16.dp),
-                                        colors = FilterChipDefaults.filterChipColors(selectedContainerColor = MaterialTheme.colorScheme.primaryContainer, selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer),
-                                        border = FilterChipDefaults.filterChipBorder(enabled = true, selected = isSelected, borderColor = Color.Transparent)
+                                        selected = viewModel.is3DPopEnabled, 
+                                        onClick = { viewModel.toggle3DPop() }, 
+                                        label = { Text("3D Pop", fontWeight = FontWeight.Bold) }, 
+                                        leadingIcon = { Icon(Icons.Default.Layers, null, Modifier.size(18.dp)) }, 
+                                        shape = RoundedCornerShape(16.dp), border = null
+                                    )
+                                    FilterChip(
+                                        selected = viewModel.isCentered, 
+                                        onClick = { viewModel.toggleCentered() }, 
+                                        label = { Text("Center", fontWeight = FontWeight.Bold) }, 
+                                        leadingIcon = { Icon(Icons.Default.FilterCenterFocus, null, Modifier.size(18.dp)) }, 
+                                        shape = RoundedCornerShape(16.dp), border = null
                                     )
                                 }
+                                Spacer(Modifier.height(24.dp))
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("Shape Size", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(if (sliderPosition < 1.0f) "Tight" else "Wide", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                                }
+                                Slider(value = sliderPosition, onValueChange = { sliderPosition = it }, onValueChangeFinished = { viewModel.updateMagicScale(sliderPosition) }, valueRange = 0.5f..1.5f, steps = 5)
                             }
-                        }
-                    }
-                    "Style" -> {
-                        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                FilterChip(
-                                    selected = viewModel.is3DPopEnabled, 
-                                    onClick = { viewModel.toggle3DPop() }, 
-                                    label = { Text("3D Pop", fontWeight = FontWeight.Bold) }, 
-                                    leadingIcon = { Icon(Icons.Default.Layers, null, Modifier.size(18.dp)) }, 
-                                    shape = RoundedCornerShape(16.dp), border = null
-                                )
-                                FilterChip(
-                                    selected = viewModel.isCentered, 
-                                    onClick = { viewModel.toggleCentered() }, 
-                                    label = { Text("Center", fontWeight = FontWeight.Bold) }, 
-                                    leadingIcon = { Icon(Icons.Default.FilterCenterFocus, null, Modifier.size(18.dp)) }, 
-                                    shape = RoundedCornerShape(16.dp), border = null
-                                )
-                            }
-                            Spacer(Modifier.height(24.dp))
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("Shape Size", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                Text(if (sliderPosition < 1.0f) "Tight" else "Wide", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                            }
-                            Slider(value = sliderPosition, onValueChange = { sliderPosition = it }, onValueChangeFinished = { viewModel.updateMagicScale(sliderPosition) }, valueRange = 0.5f..1.5f, steps = 5)
                         }
                     }
                 }
             }
-        }
 
-        Spacer(Modifier.height(16.dp))
-        
-        Surface(
-            modifier = Modifier.navigationBarsPadding().padding(bottom = 12.dp).height(64.dp),
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.background,
-            shadowElevation = 0.dp
-        ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalAlignment = Alignment.CenterVertically
+            Spacer(Modifier.height(16.dp))
+            
+            Surface(
+                modifier = Modifier.navigationBarsPadding().padding(bottom = 12.dp).height(64.dp),
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.background,
+                shadowElevation = 0.dp
             ) {
-                tabs.forEach { tab ->
-                    val isSelected = selectedTab == tab
-                    val tabIcon = when (tab) {
-                        "Shape" -> Icons.Default.Category
-                        "Animation" -> Icons.Default.Animation
-                        else -> Icons.Default.Palette
-                    }
+                Row(
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    tabs.forEach { tab ->
+                        val isSelected = selectedTab == tab
+                        val tabIcon = when (tab) {
+                            "Shape" -> Icons.Default.Category
+                            "Animation" -> Icons.Default.Animation
+                            else -> Icons.Default.Palette
+                        }
 
-                    Box(
-                        modifier = Modifier
-                            .height(48.dp)
-                            .clip(CircleShape)
-                            .background(if (isSelected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
-                            .clickable { selectedTab = tab }
-                            .padding(horizontal = if (isSelected) 20.dp else 16.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                        Box(
+                            modifier = Modifier
+                                .height(48.dp)
+                                .clip(CircleShape)
+                                .background(if (isSelected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
+                                .clickable { selectedTab = tab }
+                                .padding(horizontal = if (isSelected) 20.dp else 16.dp),
+                            contentAlignment = Alignment.Center
                         ) {
-                            if (isSelected) {
-                                Icon(
-                                    imageVector = tabIcon, 
-                                    contentDescription = null, 
-                                    modifier = Modifier.size(18.dp), 
-                                    tint = MaterialTheme.colorScheme.onSecondaryContainer
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                if (isSelected) {
+                                    Icon(
+                                        imageVector = tabIcon, 
+                                        contentDescription = null, 
+                                        modifier = Modifier.size(18.dp), 
+                                        tint = MaterialTheme.colorScheme.onSecondaryContainer
+                                    )
+                                }
+                                Text(
+                                    text = tab,
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isSelected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
-                            Text(
-                                text = tab,
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = FontWeight.Bold,
-                                color = if (isSelected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
-                            )
                         }
                     }
                 }
             }
+        } else {
+            Spacer(Modifier.navigationBarsPadding().padding(bottom = 12.dp))
         }
     }
 }
@@ -315,7 +329,7 @@ fun ShapeIcon(shape: MagicShape, color: Color, modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun MagicEffectImage(
+fun LiveEffectImage(
     wallpaper: Wallpaper,
     viewModel: WallpaperViewModel,
     modifier: Modifier = Modifier
@@ -329,8 +343,9 @@ fun MagicEffectImage(
         activeWallpaperId = wallpaper.id
     }
 
-    LaunchedEffect(wallpaper, viewModel.currentMagicShape, viewModel.currentBackgroundColor, viewModel.is3DPopEnabled, viewModel.magicScale, viewModel.isCentered) {
-        val newBitmap = viewModel.getOrCreateProcessedBitmap(context, wallpaper)
+    LaunchedEffect(wallpaper, viewModel.currentMagicShape, viewModel.currentBackgroundColor, viewModel.is3DPopEnabled, viewModel.magicScale, viewModel.isCentered, viewModel.isMagicShapeEnabled, viewModel.isAnimationEnabled) {
+        val useMagic = viewModel.isMagicShapeEnabled
+        val newBitmap = viewModel.getOrCreateProcessedBitmap(context, wallpaper, allowMagic = useMagic)
         if (newBitmap != null) currentBitmap = newBitmap
     }
     
@@ -360,38 +375,44 @@ fun MagicEffectImage(
         }
         
         if (currentBitmap != null) {
-            val styleName = viewModel.currentAnimationStyle.name
-            val isBigBang = styleName.contains("BIG", true) || styleName.contains("BANG", true)
-            val isMorph = styleName.contains("MORPH", true) || styleName.contains("ORGANIC", true)
-            
             val infiniteTransition = rememberInfiniteTransition(label = "LivePreview")
             
-            val targetScale = if (isBigBang) 1.25f else 1.05f
-            val scaleDuration = if (isBigBang) 800 else 3000
-            
-            val scaleAnim by infiniteTransition.animateFloat(
-                initialValue = 1f,
-                targetValue = targetScale,
-                animationSpec = infiniteRepeatable(
-                    animation = tween(scaleDuration, easing = FastOutSlowInEasing),
-                    repeatMode = RepeatMode.Reverse
-                ),
-                label = "scale"
-            )
-            
-            val rotationAnim by infiniteTransition.animateFloat(
-                initialValue = if (isMorph) -3f else 0f,
-                targetValue = if (isMorph) 3f else 0f,
-                animationSpec = infiniteRepeatable(
-                    animation = tween(4000, easing = LinearOutSlowInEasing),
-                    repeatMode = RepeatMode.Reverse
-                ),
-                label = "rotation"
-            )
+            val finalScale: Float
+            val finalRotation: Float
+
+            if (viewModel.isAnimationEnabled) {
+                val styleName = viewModel.currentAnimationStyle.name
+                val isBigBang = styleName.contains("BIG", true) || styleName.contains("BANG", true)
+                val isMorph = styleName.contains("MORPH", true) || styleName.contains("ORGANIC", true)
+                
+                val targetScale = if (isBigBang) 1.25f else 1.05f
+                val scaleDuration = if (isBigBang) 800 else 3000
+                
+                val animScale by infiniteTransition.animateFloat(
+                    initialValue = 1f, targetValue = targetScale,
+                    animationSpec = infiniteRepeatable(tween(scaleDuration, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "animScale"
+                )
+                val animRot by infiniteTransition.animateFloat(
+                    initialValue = if (isMorph) -3f else 0f, targetValue = if (isMorph) 3f else 0f,
+                    animationSpec = infiniteRepeatable(tween(4000, easing = LinearOutSlowInEasing), RepeatMode.Reverse), label = "animRot"
+                )
+                finalScale = animScale
+                finalRotation = animRot
+            } else if (viewModel.isMagicShapeEnabled) {
+                val magicScale by infiniteTransition.animateFloat(
+                    initialValue = 1f, targetValue = 1.03f,
+                    animationSpec = infiniteRepeatable(tween(3000, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "magicScale"
+                )
+                finalScale = magicScale
+                finalRotation = 0f
+            } else {
+                finalScale = 1f
+                finalRotation = 0f
+            }
 
             AnimatedContent(
                 targetState = currentBitmap, 
-                label = "MagicDepthAnim", 
+                label = "LiveDepthAnim", 
                 transitionSpec = { 
                     (fadeIn(animationSpec = tween(500)) + scaleIn(initialScale = 0.95f, animationSpec = tween(500, easing = LinearOutSlowInEasing)))
                     .togetherWith(fadeOut(animationSpec = tween(300)) + scaleOut(targetScale = 1.15f, animationSpec = tween(400, easing = FastOutSlowInEasing))) 
@@ -404,9 +425,9 @@ fun MagicEffectImage(
                         modifier = Modifier
                             .fillMaxSize()
                             .graphicsLayer {
-                                scaleX = scaleAnim
-                                scaleY = scaleAnim
-                                rotationZ = rotationAnim
+                                scaleX = finalScale
+                                scaleY = finalScale
+                                rotationZ = finalRotation
                             }, 
                         contentScale = ContentScale.Crop
                     )

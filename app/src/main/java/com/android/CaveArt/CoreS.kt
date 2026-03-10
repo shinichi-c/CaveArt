@@ -40,6 +40,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddPhotoAlternate
+import androidx.compose.material.icons.filled.Animation
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Category
@@ -193,10 +194,15 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
     var isImmersiveMode by remember { mutableStateOf(false) }
     var isCarouselVisible by rememberSaveable { mutableStateOf(true) }
     
+    val isEffectActive = viewModel.isMagicShapeEnabled || viewModel.isAnimationEnabled
+    
     val onHaptics = { if (viewModel.isHapticsEnabled) view.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY) }
 
     BackHandler(enabled = isImmersiveMode) { isImmersiveMode = false }
-    BackHandler(enabled = viewModel.isMagicShapeEnabled) { viewModel.setMagicShapeEnabled(false) }
+    BackHandler(enabled = isEffectActive) { 
+        viewModel.setMagicShapeEnabled(false)
+        viewModel.setAnimationEnabled(false) 
+    }
     
     LaunchedEffect(mainPagerState.currentPage, mainPagerState.isScrollInProgress) {
         if (filteredWallpapers.isNotEmpty()) {
@@ -252,7 +258,7 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                         modifier = Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 8.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        if (viewModel.isMagicShapeEnabled) {
+                        if (isEffectActive) {
                         	
                             Surface(
                                 modifier = Modifier.align(Alignment.CenterStart),
@@ -261,7 +267,10 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                                 shadowElevation = 0.dp
                             ) {
                                 IconButton(
-                                    onClick = { viewModel.setMagicShapeEnabled(false) }, 
+                                    onClick = { 
+                                        viewModel.setMagicShapeEnabled(false)
+                                        viewModel.setAnimationEnabled(false)
+                                    }, 
                                     modifier = Modifier.size(44.dp)
                                 ) {
                                     Icon(Icons.Default.ArrowBack, "Cancel", tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(20.dp))
@@ -341,7 +350,7 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                         HorizontalPager(
                             state = mainPagerState,
                             modifier = Modifier.fillMaxSize(),
-                            userScrollEnabled = !viewModel.isMagicShapeEnabled
+                            userScrollEnabled = !isEffectActive
                         ) { pageIndex ->
                             val wp = filteredWallpapers[pageIndex]
                             val isCurrentPage = pageIndex == mainPagerState.currentPage
@@ -355,12 +364,12 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                                 normalPageAlpha = alpha,
                                 normalPageScale = scale,
                                 onTap = { 
-                                    if (!viewModel.isMagicShapeEnabled) {
+                                    if (!isEffectActive) {
                                         isCarouselVisible = false
                                     }
                                 },
                                 onLongPress = {
-                                    if (!viewModel.isMagicShapeEnabled) {
+                                    if (!isEffectActive) {
                                         isCarouselVisible = true
                                         if (viewModel.isHapticsEnabled) {
                                             view.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
@@ -381,7 +390,7 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                     Box(contentAlignment = Alignment.BottomCenter) {
                     	
                         androidx.compose.animation.AnimatedVisibility(
-                            visible = !viewModel.isMagicShapeEnabled,
+                            visible = !isEffectActive,
                             enter = slideInVertically { it } + fadeIn(),
                             exit = slideOutVertically { it } + fadeOut()
                         ) {
@@ -413,6 +422,7 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                                             }
                                         },
                                         onMagicClick = { viewModel.setMagicShapeEnabled(true) },
+                                        onAnimationClick = { viewModel.setAnimationEnabled(true) },
                                         onAddClick = { galleryLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
                                     )
                                 }
@@ -420,12 +430,12 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                         }
                         
                         androidx.compose.animation.AnimatedVisibility(
-                            visible = viewModel.isMagicShapeEnabled && currentWallpaper != null,
+                            visible = isEffectActive && currentWallpaper != null,
                             enter = slideInVertically { it } + fadeIn(tween(400)),
                             exit = slideOutVertically { it } + fadeOut(tween(300))
                         ) {
                             if (currentWallpaper != null) {
-                                MagicControlsSheet(
+                                EffectsControlsSheet(
                                     wallpaper = currentWallpaper,
                                     viewModel = viewModel
                                 )
@@ -498,7 +508,8 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                             showDestinationSheet = false
                             isSettingWallpaper = false
                             wallpaperToApplyState = null
-                            viewModel.setMagicShapeEnabled(false) 
+                            viewModel.setMagicShapeEnabled(false)
+                            viewModel.setAnimationEnabled(false)
                         }
                     }
 
@@ -508,7 +519,7 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                     Spacer(Modifier.height(12.dp))
                     DestinationButton(Icons.Default.Lock, "Lock Screen Only", "Set on lock screen", isSettingWallpaper) { applyAction(WallpaperDestinations.FLAG_LOCK_SCREEN) }
                     
-                    if (viewModel.isMagicShapeEnabled) {
+                    if (isEffectActive) {
                         Spacer(Modifier.height(12.dp))
                         DestinationButton(Icons.Default.AutoAwesome, "Live Wallpaper", "Animated interactive wallpaper", isSettingWallpaper) {
                             isSettingWallpaper = true
@@ -518,6 +529,7 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                                 isSettingWallpaper = false
                                 wallpaperToApplyState = null
                                 viewModel.setMagicShapeEnabled(false)
+                                viewModel.setAnimationEnabled(false)
                             }
                         }
                     }
@@ -531,10 +543,7 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
             LoadingOverlay(title = "Setting Wallpaper...")
         }
         
-        AppUpdateHandler(
-viewModel = viewModel,
-            currentWallpaper = currentWallpaper
-)
+        AppUpdateHandler(viewModel = viewModel, currentWallpaper = currentWallpaper)
     }
 }
 
@@ -549,7 +558,7 @@ fun WallpaperPreviewCard(
     normalPageAlpha: Float,
     normalPageScale: Float
 ) {
-    val isMagicActive = viewModel.isMagicShapeEnabled && isCurrentPage
+    val isLiveActive = (viewModel.isMagicShapeEnabled || viewModel.isAnimationEnabled) && isCurrentPage
 
     Box(
         modifier = Modifier
@@ -573,8 +582,8 @@ fun WallpaperPreviewCard(
             shape = RoundedCornerShape(20.dp),
             elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
         ) {
-            if (isMagicActive) {
-                MagicEffectImage(
+            if (isLiveActive) {
+                LiveEffectImage(
                     wallpaper = wallpaper,
                     viewModel = viewModel,
                     modifier = Modifier.fillMaxSize()
@@ -597,6 +606,7 @@ fun ConnectedWallpaperActions(
     currentWallpaper: Wallpaper?, 
     onSetWallpaperClick: () -> Unit, 
     onMagicClick: () -> Unit,
+    onAnimationClick: () -> Unit,
     onAddClick: () -> Unit
 ) {
     val enabled = currentWallpaper != null
@@ -623,6 +633,9 @@ fun ConnectedWallpaperActions(
     ) {
         IconButton(onClick = onAddClick) { 
             Icon(Icons.Default.AddPhotoAlternate, "Add", tint = MaterialTheme.colorScheme.onPrimaryContainer) 
+        }
+        IconButton(onClick = onAnimationClick) {
+            Icon(Icons.Default.Animation, "Animation", tint = MaterialTheme.colorScheme.onPrimaryContainer)
         }
         IconButton(onClick = onMagicClick) {
             Icon(Icons.Default.AutoAwesome, "Magic Shape", tint = MaterialTheme.colorScheme.onPrimaryContainer)

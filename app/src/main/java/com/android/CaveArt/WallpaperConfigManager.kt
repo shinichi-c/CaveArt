@@ -24,7 +24,9 @@ data class LiveWallpaperConfig(
     val is3DPopEnabled: Boolean = false,
     val scale: Float = 1.0f,
     val isCentered: Boolean = false,
-    val animationStyle: String = AnimationStyle.NANO_ASSEMBLY.name
+    val animationStyle: String = AnimationStyle.NANO_ASSEMBLY.name,
+    val isMagicShapeEnabled: Boolean = true,
+    val isAnimationEnabled: Boolean = true
 )
 
 object WallpaperConfigManager {
