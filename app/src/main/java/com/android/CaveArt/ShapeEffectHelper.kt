@@ -16,7 +16,7 @@ data class UnifiedGeometry(
 object ShapeEffectHelper {
 
     fun getUnifiedGeometry(imgW: Int, imgH: Int, screenW: Float, screenH: Float, mask: Bitmap?, config: LiveWallpaperConfig): UnifiedGeometry {
-        val rawSubject = if (mask != null) {
+        val rawSubject = if (mask != null && config.isMagicShapeEnabled) {
             Geometric.calculateCircleBounds(mask, imgW, imgH, config.scale)
         } else {
             val r = min(imgW, imgH) / 2f * config.scale
@@ -39,7 +39,9 @@ object ShapeEffectHelper {
         return UnifiedGeometry(baseScale, shiftX, shiftY, rawSubject.centerX(), rawSubject.centerY(), shapeBoundsRel)
     }
     
-    fun createShapeCropBitmapWithPreCutout(original: Bitmap, cutout: Bitmap, config: LiveWallpaperConfig): Bitmap {
+    fun createShapeCropBitmapWithPreCutout(original: Bitmap, cutout: Bitmap?, config: LiveWallpaperConfig): Bitmap {
+        if (!config.isMagicShapeEnabled) return original
+
         val w = original.width
         val h = original.height
         val geo = getUnifiedGeometry(w, h, w.toFloat(), h.toFloat(), cutout, config)
@@ -73,7 +75,7 @@ object ShapeEffectHelper {
         canvas.drawBitmap(original, matrix, paint)
         canvas.restore()
         
-        if (config.is3DPopEnabled) {
+        if (config.is3DPopEnabled && cutout != null) {
             val layerId = canvas.saveLayer(0f, 0f, w.toFloat(), h.toFloat(), null)
             canvas.drawBitmap(cutout, matrix, paint)
             paint.xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_IN)
