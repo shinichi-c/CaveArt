@@ -38,7 +38,9 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
+import com.android.CaveArt.animations.AnimationFactory
 import com.android.CaveArt.animations.AnimationStyle
+import com.android.CaveArt.animations.AnimSetting
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -69,16 +71,18 @@ fun EffectsControlsSheet(
     var extractedColors by remember { mutableStateOf(listOf<Int>()) }
     var sliderPosition by remember { mutableFloatStateOf(viewModel.magicScale) }
     
-    var selectedTab by remember { mutableStateOf("Shape") }
+    var selectedTab by remember { mutableStateOf(if (viewModel.isMagicShapeEnabled) "Shape" else "Animation") }
+    
     val tabs = remember(viewModel.isMagicShapeEnabled, viewModel.isAnimationEnabled) {
         val list = mutableListOf<String>()
         if (viewModel.isMagicShapeEnabled) {
             list.add("Shape")
-            list.add("Style")
         }
         if (viewModel.isAnimationEnabled) {
             list.add("Animation")
         }
+        
+        list.add("Style")
         list
     }
 
@@ -139,7 +143,7 @@ fun EffectsControlsSheet(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-
+        
         if (tabs.isNotEmpty()) {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -208,13 +212,13 @@ fun EffectsControlsSheet(
                         }
                         "Animation" -> {
                             Column(
-                                modifier = Modifier.fillMaxWidth(),
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
                                 Text("Animation Style", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 Spacer(Modifier.height(16.dp))
                                 Row(
-                                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 24.dp),
+                                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                                 ) {
                                     AnimationStyle.values().forEach { style ->
@@ -227,6 +231,53 @@ fun EffectsControlsSheet(
                                             colors = FilterChipDefaults.filterChipColors(selectedContainerColor = MaterialTheme.colorScheme.primaryContainer, selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer),
                                             border = FilterChipDefaults.filterChipBorder(enabled = true, selected = isSelected, borderColor = Color.Transparent)
                                         )
+                                    }
+                                }
+
+                                val currentAnim = remember(viewModel.currentAnimationStyle) { 
+                                    AnimationFactory.getAnimation(viewModel.currentAnimationStyle) 
+                                }
+                                val customSettings = currentAnim.getCustomSettings()
+                                
+                                if (customSettings.isNotEmpty()) {
+                                    Spacer(Modifier.height(24.dp))
+                                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                                    Spacer(Modifier.height(16.dp))
+                                    Text("Customize Effect", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+                                    Spacer(Modifier.height(16.dp))
+                                    
+                                    customSettings.forEach { setting ->
+                                        val currentValue = viewModel.currentAnimParams[setting.id] ?: 
+                                            if (setting is AnimSetting.Slider) setting.defaultValue 
+                                            else if ((setting as AnimSetting.Toggle).defaultValue) 1f else 0f
+                                            
+                                        when (setting) {
+                                            is AnimSetting.Slider -> {
+                                                Column(modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
+                                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                                        Text(setting.title, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                    }
+                                                    Slider(
+                                                        value = currentValue,
+                                                        onValueChange = { viewModel.updateAnimParam(setting.id, it) },
+                                                        valueRange = setting.minValue..setting.maxValue
+                                                    )
+                                                }
+                                            }
+                                            is AnimSetting.Toggle -> {
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Text(setting.title, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                    Switch(
+                                                        checked = currentValue > 0.5f,
+                                                        onCheckedChange = { viewModel.updateAnimParam(setting.id, if (it) 1f else 0f) }
+                                                    )
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -251,7 +302,7 @@ fun EffectsControlsSheet(
                                 }
                                 Spacer(Modifier.height(24.dp))
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                    Text("Shape Size", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text("Effect Size", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     Text(if (sliderPosition < 1.0f) "Tight" else "Wide", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                                 }
                                 Slider(value = sliderPosition, onValueChange = { sliderPosition = it }, onValueChangeFinished = { viewModel.updateMagicScale(sliderPosition) }, valueRange = 0.5f..1.5f, steps = 5)
@@ -343,7 +394,9 @@ fun LiveEffectImage(
         activeWallpaperId = wallpaper.id
     }
 
-    LaunchedEffect(wallpaper, viewModel.currentMagicShape, viewModel.currentBackgroundColor, viewModel.is3DPopEnabled, viewModel.magicScale, viewModel.isCentered, viewModel.isMagicShapeEnabled, viewModel.isAnimationEnabled) {
+    val paramStateStr = viewModel.currentAnimParams.toString()
+
+    LaunchedEffect(wallpaper, viewModel.currentMagicShape, viewModel.currentBackgroundColor, viewModel.is3DPopEnabled, viewModel.magicScale, viewModel.isCentered, viewModel.isMagicShapeEnabled, viewModel.isAnimationEnabled, paramStateStr) {
         val useMagic = viewModel.isMagicShapeEnabled
         val newBitmap = viewModel.getOrCreateProcessedBitmap(context, wallpaper, allowMagic = useMagic)
         if (newBitmap != null) currentBitmap = newBitmap
@@ -377,38 +430,22 @@ fun LiveEffectImage(
         if (currentBitmap != null) {
             val infiniteTransition = rememberInfiniteTransition(label = "LivePreview")
             
-            val finalScale: Float
-            val finalRotation: Float
-
-            if (viewModel.isAnimationEnabled) {
-                val styleName = viewModel.currentAnimationStyle.name
-                val isBigBang = styleName.contains("BIG", true) || styleName.contains("BANG", true)
-                val isMorph = styleName.contains("MORPH", true) || styleName.contains("ORGANIC", true)
-                
-                val targetScale = if (isBigBang) 1.25f else 1.05f
-                val scaleDuration = if (isBigBang) 800 else 3000
-                
-                val animScale by infiniteTransition.animateFloat(
-                    initialValue = 1f, targetValue = targetScale,
-                    animationSpec = infiniteRepeatable(tween(scaleDuration, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "animScale"
-                )
-                val animRot by infiniteTransition.animateFloat(
-                    initialValue = if (isMorph) -3f else 0f, targetValue = if (isMorph) 3f else 0f,
-                    animationSpec = infiniteRepeatable(tween(4000, easing = LinearOutSlowInEasing), RepeatMode.Reverse), label = "animRot"
-                )
-                finalScale = animScale
-                finalRotation = animRot
-            } else if (viewModel.isMagicShapeEnabled) {
-                val magicScale by infiniteTransition.animateFloat(
-                    initialValue = 1f, targetValue = 1.03f,
-                    animationSpec = infiniteRepeatable(tween(3000, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "magicScale"
-                )
-                finalScale = magicScale
-                finalRotation = 0f
-            } else {
-                finalScale = 1f
-                finalRotation = 0f
+            val currentAnim = remember(viewModel.currentAnimationStyle) { 
+                AnimationFactory.getAnimation(viewModel.currentAnimationStyle) 
             }
+            
+            val targetScale = if (viewModel.isAnimationEnabled) currentAnim.getPreviewScaleTarget() else 1.03f
+            val targetRot = if (viewModel.isAnimationEnabled) currentAnim.getPreviewRotationTarget() else 0f
+            val animDuration = if (viewModel.isAnimationEnabled) currentAnim.getPreviewDuration() else 3000
+
+            val finalScale by infiniteTransition.animateFloat(
+                initialValue = 1f, targetValue = targetScale,
+                animationSpec = infiniteRepeatable(tween(animDuration, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "animScale"
+            )
+            val finalRotation by infiniteTransition.animateFloat(
+                initialValue = -targetRot, targetValue = targetRot,
+                animationSpec = infiniteRepeatable(tween(animDuration, easing = LinearOutSlowInEasing), RepeatMode.Reverse), label = "animRot"
+            )
 
             AnimatedContent(
                 targetState = currentBitmap, 
