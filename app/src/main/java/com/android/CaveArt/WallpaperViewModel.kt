@@ -15,6 +15,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.android.CaveArt.animations.AnimationFactory
 import com.android.CaveArt.animations.AnimationStyle
+import com.android.CaveArt.animations.AnimSetting
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -78,6 +79,8 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     var magicScale by mutableFloatStateOf(1.0f)
     var isCentered by mutableStateOf(false)
     var currentAnimationStyle by mutableStateOf(AnimationStyle.NANO_ASSEMBLY)
+    
+    var currentAnimParams by mutableStateOf<Map<String, Float>>(emptyMap())
 
     fun setMagicShapeEnabled(enabled: Boolean) { 
         _isMagicShapeEnabled.value = enabled
@@ -96,7 +99,23 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     fun toggle3DPop() { is3DPopEnabled = !is3DPopEnabled }
     fun updateMagicScale(scale: Float) { magicScale = scale }
     fun toggleCentered() { isCentered = !isCentered }
-    fun updateAnimationStyle(style: AnimationStyle) { currentAnimationStyle = style }
+    
+    fun updateAnimationStyle(style: AnimationStyle) { 
+        currentAnimationStyle = style 
+        val anim = AnimationFactory.getAnimation(style)
+        val defaults = mutableMapOf<String, Float>()
+        anim.getCustomSettings().forEach { setting ->
+            when(setting) {
+                is AnimSetting.Slider -> defaults[setting.id] = setting.defaultValue
+                is AnimSetting.Toggle -> defaults[setting.id] = if(setting.defaultValue) 1f else 0f
+            }
+        }
+        currentAnimParams = defaults
+    }
+    
+    fun updateAnimParam(key: String, value: Float) {
+        currentAnimParams = currentAnimParams.toMutableMap().apply { put(key, value) }
+    }
     
     var baseWallpapers by mutableStateOf<List<Wallpaper>>(emptyList())
     var allWallpapers by mutableStateOf<List<Wallpaper>>(emptyList())
@@ -134,6 +153,7 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
             updateTags()
             isLoading = false
             scanWallpapersForTags(application.applicationContext)
+            updateAnimationStyle(currentAnimationStyle)
         }
     }
     
@@ -182,8 +202,9 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         val isAnimMaskNeeded = isAnimationEnabled && AnimationFactory.getAnimation(currentAnimationStyle).needsSegmentationMask()
         val needsCutout = allowMagic && (isMagicShapeEnabled || isAnimMaskNeeded)
         
+        val paramKey = currentAnimParams.entries.joinToString { "${it.key}=${it.value}" }
         val cacheKey = if(needsCutout) {
-            "final_${wallpaper.id}_${currentMagicShape}_${currentBackgroundColor}_${is3DPopEnabled}_${magicScale}_${isCentered}_${currentAnimationStyle.name}"
+            "final_${wallpaper.id}_${currentMagicShape}_${currentBackgroundColor}_${is3DPopEnabled}_${magicScale}_${isCentered}_${currentAnimationStyle.name}_$paramKey"
         } else {
             "preview_${wallpaper.id}"
         }
@@ -234,7 +255,8 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
                 is3DPopEnabled = is3DPopEnabled,
                 scale = magicScale,
                 isCentered = isCentered,
-                isMagicShapeEnabled = true
+                isMagicShapeEnabled = true,
+                animParams = currentAnimParams
             )
             ShapeEffectHelper.createShapeCropBitmapWithPreCutout(original, cutout, config)
         } else {

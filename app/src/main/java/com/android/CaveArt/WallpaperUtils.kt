@@ -79,7 +79,8 @@ suspend fun setLiveWallpaper(
         isCentered = viewModel.isCentered,
         animationStyle = viewModel.currentAnimationStyle.name,
         isMagicShapeEnabled = viewModel.isMagicShapeEnabled,
-        isAnimationEnabled = viewModel.isAnimationEnabled
+        isAnimationEnabled = viewModel.isAnimationEnabled,
+        animParams = viewModel.currentAnimParams
     )
     
     WallpaperConfigManager.saveConfig(context, config)

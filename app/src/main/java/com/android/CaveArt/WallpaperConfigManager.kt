@@ -6,11 +6,9 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.android.CaveArt.animations.AnimationStyle
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.map
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-
 
 private val Context.dataStore by preferencesDataStore(name = "cave_art_live_prefs")
 
@@ -26,7 +24,8 @@ data class LiveWallpaperConfig(
     val isCentered: Boolean = false,
     val animationStyle: String = AnimationStyle.NANO_ASSEMBLY.name,
     val isMagicShapeEnabled: Boolean = true,
-    val isAnimationEnabled: Boolean = true
+    val isAnimationEnabled: Boolean = true,
+    val animParams: Map<String, Float> = emptyMap()
 )
 
 object WallpaperConfigManager {
