@@ -9,6 +9,8 @@ class OrganicBlobAnimation : WallpaperAnimation {
 
     override fun needsSegmentationMask(): Boolean = true
     
+    override fun supportsCenter(): Boolean = false
+    
     override fun getCustomSettings(): List<AnimSetting> = listOf(
         AnimSetting.Slider("blob_wobble_size", "Blob Wobble Size", 0.01f, 0.15f, 0.05f)
     )
@@ -27,6 +29,7 @@ class OrganicBlobAnimation : WallpaperAnimation {
     private val _bodyMatrix = Matrix()
     private val _blobPath = Path()
     private val _shapeRect = RectF()
+    
     private val _fadePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_IN)
     }
@@ -67,19 +70,18 @@ class OrganicBlobAnimation : WallpaperAnimation {
     ) {
         val screenW = canvas.width.toFloat()
         val screenH = canvas.height.toFloat()
-        val imgW = originalBitmap.width
-        val imgH = originalBitmap.height
 
         val safeProgress = currentProgress.coerceIn(0f, 1f)
+        
         val unlockScale = lerp(0.7f, 1.0f, safeProgress) 
         
         val maxWobbleSize = config.animParams["blob_wobble_size"] ?: 0.05f
         val activeWobbleSize = lerp(maxWobbleSize * 0.6f, maxWobbleSize, safeProgress)
 
         val currentImgScale = geo.baseScale * config.scale * unlockScale
-
-        val anchorX = if (config.isCentered) geo.subjectCenterX else imgW / 2f
-        val anchorY = if (config.isCentered) geo.subjectCenterY else imgH / 2f
+        
+        val anchorX = geo.subjectCenterX
+        val anchorY = geo.subjectCenterY
 
         _bodyMatrix.reset()
         _bodyMatrix.postTranslate(-anchorX, -anchorY)

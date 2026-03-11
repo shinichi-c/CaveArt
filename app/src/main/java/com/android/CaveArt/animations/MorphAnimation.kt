@@ -9,8 +9,10 @@ import kotlin.math.abs
 import kotlin.math.max
 
 class MorphAnimation : WallpaperAnimation {
-    
+	
     override fun needsSegmentationMask(): Boolean = false
+    override fun supports3DPop(): Boolean = false
+    override fun supportsCenter(): Boolean = false
 
     companion object {
         private val AGSL_SRC = """
@@ -37,7 +39,6 @@ class MorphAnimation : WallpaperAnimation {
     private val BREATH_SPEED = 1.2f
     
     private val _bodyMatrix = Matrix()
-    private val _popMatrix = Matrix()
     private var runtimeShader: RuntimeShader? = null
 
     override fun update(deltaTime: Float) {
@@ -77,11 +78,8 @@ class MorphAnimation : WallpaperAnimation {
         val floatX = (cos(timeSeconds * BREATH_SPEED * 0.5f) * (FLOAT_AMPLITUDE * 0.3f)) * currentProgress
         val tiltAngle = (sin(timeSeconds * BREATH_SPEED) * TILT_AMPLITUDE) * currentProgress
         
-        val anchorX = if (currentProgress > 0.1f && config.isCentered) geo.subjectCenterX else imgW / 2f
-        val anchorY = if (currentProgress > 0.1f && config.isCentered) geo.subjectCenterY else imgH / 2f
-        
-        val finalAnchorX = lerp(imgW / 2f, anchorX, currentProgress)
-        val finalAnchorY = lerp(imgH / 2f, anchorY, currentProgress)
+        val finalAnchorX = imgW / 2f
+        val finalAnchorY = imgH / 2f
         
         _bodyMatrix.reset()
         _bodyMatrix.postTranslate(-finalAnchorX, -finalAnchorY)
@@ -89,12 +87,6 @@ class MorphAnimation : WallpaperAnimation {
         _bodyMatrix.postRotate(tiltAngle)
         _bodyMatrix.postTranslate(screenW / 2f + floatX, screenH / 2f + floatY)
         
-        _popMatrix.set(_bodyMatrix)
-        if (config.is3DPopEnabled) {
-            val popParallax = cos(timeSeconds * 0.8f) * 8f * currentProgress
-            _popMatrix.postTranslate(popParallax, -floatY * 0.2f) 
-        }
-
         if (runtimeShader == null) runtimeShader = RuntimeShader(AGSL_SRC)
         
         val bShader = BitmapShader(originalBitmap, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
@@ -111,19 +103,6 @@ class MorphAnimation : WallpaperAnimation {
         canvas.drawColor(config.backgroundColor)
         canvas.drawRect(0f, 0f, screenW, screenH, paint)
         paint.shader = null
-
-        val popAlpha = (currentProgress * 255).toInt().coerceIn(0, 255)
-        if (config.is3DPopEnabled && maskBitmap != null && popAlpha > 0) {
-            val vShift = geo.shapeBoundsRel.height() * 0.12f * currentProgress
-            _popMatrix.postTranslate(0f, -vShift)
-
-            val layerId = canvas.saveLayer(0f, 0f, screenW, screenH, null)
-            paint.alpha = popAlpha
-            canvas.drawBitmap(maskBitmap, _popMatrix, paint)
-            canvas.drawBitmap(originalBitmap, _popMatrix, maskXferPaint)
-            paint.alpha = 255
-            canvas.restoreToCount(layerId)
-        }
     }
     
     private fun lerp(start: Float, end: Float, t: Float): Float = start + (end - start) * t

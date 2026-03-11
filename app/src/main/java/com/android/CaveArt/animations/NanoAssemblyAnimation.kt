@@ -6,8 +6,10 @@ import com.android.CaveArt.UnifiedGeometry
 import kotlin.math.*
 
 class NanoAssemblyAnimation : WallpaperAnimation {
-
+	
     override fun needsSegmentationMask(): Boolean = false
+    override fun supports3DPop(): Boolean = false
+    override fun supportsCenter(): Boolean = false
 
     companion object {
         private val AGSL_SRC = """
@@ -80,7 +82,6 @@ class NanoAssemblyAnimation : WallpaperAnimation {
     private val LEVITATION_AMP = 8f
 
     private val _bodyMatrix = Matrix()
-    private val _popMatrix = Matrix()
     private var runtimeShader: RuntimeShader? = null
 
     override fun update(deltaTime: Float) {
@@ -121,12 +122,9 @@ class NanoAssemblyAnimation : WallpaperAnimation {
         val fillScale = max(screenW / imgW, screenH / imgH)
         val safeProgress = currentProgress.coerceIn(0f, 1f)
         val currentImgScale = lerp(fillScale * 0.45f, geo.baseScale * config.scale, safeProgress)
-
-        val anchorX = if (safeProgress > 0.05f && config.isCentered) geo.subjectCenterX else imgW / 2f
-        val anchorY = if (safeProgress > 0.05f && config.isCentered) geo.subjectCenterY else imgH / 2f
         
-        val finalAnchorX = lerp(imgW / 2f, anchorX, safeProgress)
-        val finalAnchorY = lerp(imgH / 2f, anchorY, safeProgress)
+        val finalAnchorX = imgW / 2f
+        val finalAnchorY = imgH / 2f
 
         val idleY = sin(timeSeconds * LEVITATION_SPEED) * LEVITATION_AMP * (1f - safeProgress)
         currentRotation = (1f - currentProgress) * 5f 
@@ -136,12 +134,6 @@ class NanoAssemblyAnimation : WallpaperAnimation {
         _bodyMatrix.postScale(currentImgScale, currentImgScale)
         _bodyMatrix.postRotate(currentRotation)
         _bodyMatrix.postTranslate(screenW / 2f, (screenH / 2f) + idleY)
-
-        _popMatrix.set(_bodyMatrix)
-        if (config.is3DPopEnabled) {
-            val popLag = (1f - currentProgress.coerceIn(0f, 1.2f)) * 180f 
-            _popMatrix.postTranslate(0f, -popLag)
-        }
 
         if (runtimeShader == null) runtimeShader = RuntimeShader(AGSL_SRC)
         
@@ -160,19 +152,6 @@ class NanoAssemblyAnimation : WallpaperAnimation {
         canvas.drawColor(config.backgroundColor)
         canvas.drawRect(0f, 0f, screenW, screenH, paint)
         paint.shader = null
-
-        val popAlpha = (safeProgress * 255).toInt().coerceIn(0, 255)
-        if (config.is3DPopEnabled && maskBitmap != null && popAlpha > 0) {
-            val vShift = geo.shapeBoundsRel.height() * geo.baseScale * 0.1f * safeProgress
-            _popMatrix.postTranslate(0f, -vShift)
-
-            val layerId = canvas.saveLayer(0f, 0f, screenW, screenH, null)
-            paint.alpha = popAlpha
-            canvas.drawBitmap(maskBitmap, _popMatrix, paint)
-            canvas.drawBitmap(originalBitmap, _popMatrix, maskXferPaint)
-            paint.alpha = 255
-            canvas.restoreToCount(layerId)
-        }
     }
 
     private fun lerp(start: Float, end: Float, t: Float): Float = start + (end - start) * t
