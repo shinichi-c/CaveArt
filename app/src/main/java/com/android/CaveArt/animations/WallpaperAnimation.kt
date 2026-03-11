@@ -9,7 +9,6 @@ import com.android.CaveArt.LiveWallpaperConfig
 import com.android.CaveArt.UnifiedGeometry
 
 sealed class AnimSetting {
-    
     abstract val id: String
     abstract val title: String
     
@@ -19,6 +18,9 @@ sealed class AnimSetting {
 
 interface WallpaperAnimation {
     fun needsSegmentationMask(): Boolean = false
+    fun supports3DPop(): Boolean = true
+    fun supportsCenter(): Boolean = true
+    fun supportsScale(): Boolean = true
     
     fun getCustomSettings(): List<AnimSetting> = emptyList()
     

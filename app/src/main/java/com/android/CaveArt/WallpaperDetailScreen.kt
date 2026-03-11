@@ -76,15 +76,26 @@ fun EffectsControlsSheet(
     
     var selectedTab by remember { mutableStateOf(if (viewModel.isMagicShapeEnabled) "Shape" else "Animation") }
     
-    val tabs = remember(viewModel.isMagicShapeEnabled, viewModel.isAnimationEnabled) {
+    val currentAnim = remember(viewModel.currentAnimationStyle) { 
+        AnimationFactory.getAnimation(viewModel.currentAnimationStyle) 
+    }
+    
+    val tabs = remember(viewModel.isMagicShapeEnabled, viewModel.isAnimationEnabled, currentAnim) {
         val list = mutableListOf<String>()
         if (viewModel.isMagicShapeEnabled) {
             list.add("Shape")
+            list.add("Style")
         }
         if (viewModel.isAnimationEnabled) {
             list.add("Animation")
+            
+            val hasStandard = currentAnim.supports3DPop() || currentAnim.supportsCenter() || currentAnim.supportsScale()
+            val hasCustom = currentAnim.getCustomSettings().isNotEmpty()
+            
+            if (hasStandard || hasCustom) {
+                list.add("Style")
+            }
         }
-        list.add("Style")
         list
     }
 
@@ -235,79 +246,95 @@ fun EffectsControlsSheet(
                                         )
                                     }
                                 }
-
-                                val currentAnim = remember(viewModel.currentAnimationStyle) { 
-                                    AnimationFactory.getAnimation(viewModel.currentAnimationStyle) 
-                                }
-                                val customSettings = currentAnim.getCustomSettings()
+                            }
+                        }
+                        "Style" -> {
+                            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
                                 
-                                if (customSettings.isNotEmpty()) {
-                                    Spacer(Modifier.height(24.dp))
-                                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                                    Spacer(Modifier.height(16.dp))
-                                    Text("Customize Effect", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
-                                    Spacer(Modifier.height(16.dp))
+                                val showPop = viewModel.isMagicShapeEnabled || (viewModel.isAnimationEnabled && currentAnim.supports3DPop())
+                                val showCenter = viewModel.isMagicShapeEnabled || (viewModel.isAnimationEnabled && currentAnim.supportsCenter())
+                                val showScale = viewModel.isMagicShapeEnabled || (viewModel.isAnimationEnabled && currentAnim.supportsScale())
+                                
+                                if (showPop || showCenter) {
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                        if (showPop) {
+                                            FilterChip(
+                                                selected = viewModel.is3DPopEnabled, 
+                                                onClick = { viewModel.toggle3DPop() }, 
+                                                label = { Text("3D Pop", fontWeight = FontWeight.Bold) }, 
+                                                leadingIcon = { Icon(Icons.Default.Layers, null, Modifier.size(18.dp)) }, 
+                                                shape = RoundedCornerShape(16.dp), border = null
+                                            )
+                                        }
+                                        if (showCenter) {
+                                            FilterChip(
+                                                selected = viewModel.isCentered, 
+                                                onClick = { viewModel.toggleCentered() }, 
+                                                label = { Text("Center", fontWeight = FontWeight.Bold) }, 
+                                                leadingIcon = { Icon(Icons.Default.FilterCenterFocus, null, Modifier.size(18.dp)) }, 
+                                                shape = RoundedCornerShape(16.dp), border = null
+                                            )
+                                        }
+                                    }
+                                }
+                                
+                                if (showScale) {
+                                    if (showPop || showCenter) Spacer(Modifier.height(24.dp))
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                        Text("Effect Size", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Text(if (sliderPosition < 1.0f) "Tight" else "Wide", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                                    }
+                                    Slider(value = sliderPosition, onValueChange = { sliderPosition = it }, onValueChangeFinished = { viewModel.updateMagicScale(sliderPosition) }, valueRange = 0.5f..1.5f, steps = 5)
+                                }
+                                
+                                if (viewModel.isAnimationEnabled) {
+                                    val customSettings = currentAnim.getCustomSettings()
                                     
-                                    customSettings.forEach { setting ->
-                                        val currentValue = viewModel.currentAnimParams[setting.id] ?: 
-                                            if (setting is AnimSetting.Slider) setting.defaultValue 
-                                            else if ((setting as AnimSetting.Toggle).defaultValue) 1f else 0f
-                                            
-                                        when (setting) {
-                                            is AnimSetting.Slider -> {
-                                                Column(modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
-                                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                                        Text(setting.title, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    if (customSettings.isNotEmpty()) {
+                                        if (showPop || showCenter || showScale) {
+                                            Spacer(Modifier.height(16.dp))
+                                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                                            Spacer(Modifier.height(16.dp))
+                                        }
+                                        
+                                        Text("Customize Effect", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+                                        Spacer(Modifier.height(16.dp))
+                                        
+                                        customSettings.forEach { setting ->
+                                            val currentValue = viewModel.currentAnimParams[setting.id] ?: 
+                                                if (setting is AnimSetting.Slider) setting.defaultValue 
+                                                else if ((setting as AnimSetting.Toggle).defaultValue) 1f else 0f
+                                                
+                                            when (setting) {
+                                                is AnimSetting.Slider -> {
+                                                    Column(modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
+                                                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                                            Text(setting.title, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                        }
+                                                        Slider(
+                                                            value = currentValue,
+                                                            onValueChange = { viewModel.updateAnimParam(setting.id, it) },
+                                                            valueRange = setting.minValue..setting.maxValue
+                                                        )
                                                     }
-                                                    Slider(
-                                                        value = currentValue,
-                                                        onValueChange = { viewModel.updateAnimParam(setting.id, it) },
-                                                        valueRange = setting.minValue..setting.maxValue
-                                                    )
                                                 }
-                                            }
-                                            is AnimSetting.Toggle -> {
-                                                Row(
-                                                    modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
-                                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                                    verticalAlignment = Alignment.CenterVertically
-                                                ) {
-                                                    Text(setting.title, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                                    Switch(
-                                                        checked = currentValue > 0.5f,
-                                                        onCheckedChange = { viewModel.updateAnimParam(setting.id, if (it) 1f else 0f) }
-                                                    )
+                                                is AnimSetting.Toggle -> {
+                                                    Row(
+                                                        modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        Text(setting.title, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                        Switch(
+                                                            checked = currentValue > 0.5f,
+                                                            onCheckedChange = { viewModel.updateAnimParam(setting.id, if (it) 1f else 0f) }
+                                                        )
+                                                    }
                                                 }
                                             }
                                         }
                                     }
                                 }
-                            }
-                        }
-                        "Style" -> {
-                            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
-                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                    FilterChip(
-                                        selected = viewModel.is3DPopEnabled, 
-                                        onClick = { viewModel.toggle3DPop() }, 
-                                        label = { Text("3D Pop", fontWeight = FontWeight.Bold) }, 
-                                        leadingIcon = { Icon(Icons.Default.Layers, null, Modifier.size(18.dp)) }, 
-                                        shape = RoundedCornerShape(16.dp), border = null
-                                    )
-                                    FilterChip(
-                                        selected = viewModel.isCentered, 
-                                        onClick = { viewModel.toggleCentered() }, 
-                                        label = { Text("Center", fontWeight = FontWeight.Bold) }, 
-                                        leadingIcon = { Icon(Icons.Default.FilterCenterFocus, null, Modifier.size(18.dp)) }, 
-                                        shape = RoundedCornerShape(16.dp), border = null
-                                    )
-                                }
-                                Spacer(Modifier.height(24.dp))
-                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                    Text("Effect Size", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    Text(if (sliderPosition < 1.0f) "Tight" else "Wide", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                                }
-                                Slider(value = sliderPosition, onValueChange = { sliderPosition = it }, onValueChangeFinished = { viewModel.updateMagicScale(sliderPosition) }, valueRange = 0.5f..1.5f, steps = 5)
                             }
                         }
                     }
@@ -450,7 +477,6 @@ fun LiveEffectImage(
         
         if (currentBitmap != null) {
             if (viewModel.isAnimationEnabled && previewOriginal != null) {
-                
                 val currentAnim = remember(viewModel.currentAnimationStyle) { 
                     AnimationFactory.getAnimation(viewModel.currentAnimationStyle).apply { onUnlock() } 
                 }
@@ -481,6 +507,7 @@ fun LiveEffectImage(
                     modifier = Modifier
                         .fillMaxSize()
                         .pointerInput(currentAnim) {
+                            
                             detectTapGestures(
                                 onPress = {
                                     currentAnim.onLock()
@@ -525,7 +552,7 @@ fun LiveEffectImage(
                         )
                     }
                 }
-                
+
                 var showHint by remember { mutableStateOf(true) }
                 
                 LaunchedEffect(Unit) {
