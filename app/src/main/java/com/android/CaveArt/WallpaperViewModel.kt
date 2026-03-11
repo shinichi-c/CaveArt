@@ -79,7 +79,6 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     var magicScale by mutableFloatStateOf(1.0f)
     var isCentered by mutableStateOf(false)
     var currentAnimationStyle by mutableStateOf(AnimationStyle.NANO_ASSEMBLY)
-    
     var currentAnimParams by mutableStateOf<Map<String, Float>>(emptyMap())
 
     fun setMagicShapeEnabled(enabled: Boolean) { 
@@ -153,6 +152,7 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
             updateTags()
             isLoading = false
             scanWallpapersForTags(application.applicationContext)
+            
             updateAnimationStyle(currentAnimationStyle)
         }
     }
@@ -198,6 +198,27 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         return finalCutout
     }
     
+    suspend fun getPreviewAnimationComponents(context: Context, wallpaper: Wallpaper): Pair<Bitmap?, Bitmap?> = withContext(Dispatchers.Default) {
+        try {
+            val original = if (wallpaper.uri != null) {
+                BitmapHelper.decodeSampledBitmapFromUri(context, wallpaper.uri, 1024)
+            } else {
+                BitmapHelper.decodeSampledBitmapFromResource(context.resources, wallpaper.resourceId, 1024)
+            }
+            var cutout: Bitmap? = null
+            val isAnimMaskNeeded = isAnimationEnabled && AnimationFactory.getAnimation(currentAnimationStyle).needsSegmentationMask()
+            
+            if (isAnimMaskNeeded && original != null) {
+                cutout = cutoutCache.get(wallpaper.id) ?: generateCutoutInternal(original)?.also { 
+                    cutoutCache.put(wallpaper.id, it) 
+                }
+            }
+            Pair(original, cutout)
+        } catch(e: Exception) {
+            Pair(null, null)
+        }
+    }
+
     suspend fun getOrCreateProcessedBitmap(context: Context, wallpaper: Wallpaper, allowMagic: Boolean = true): Bitmap? {
         val isAnimMaskNeeded = isAnimationEnabled && AnimationFactory.getAnimation(currentAnimationStyle).needsSegmentationMask()
         val needsCutout = allowMagic && (isMagicShapeEnabled || isAnimMaskNeeded)
