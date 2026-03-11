@@ -84,13 +84,13 @@ fun EffectsControlsSheet(
         val list = mutableListOf<String>()
         if (viewModel.isMagicShapeEnabled) {
             list.add("Shape")
-            list.add("Style")
+            list.add("Style") 
         }
         if (viewModel.isAnimationEnabled) {
             list.add("Animation")
             
             val hasStandard = currentAnim.supports3DPop() || currentAnim.supportsCenter() || currentAnim.supportsScale()
-            val hasCustom = currentAnim.getCustomSettings().isNotEmpty()
+            val hasCustom = currentAnim.hasCustomUI()
             
             if (hasStandard || hasCustom) {
                 list.add("Style")
@@ -288,51 +288,17 @@ fun EffectsControlsSheet(
                                 }
                                 
                                 if (viewModel.isAnimationEnabled) {
-                                    val customSettings = currentAnim.getCustomSettings()
-                                    
-                                    if (customSettings.isNotEmpty()) {
+                                    if (currentAnim.hasCustomUI()) {
                                         if (showPop || showCenter || showScale) {
                                             Spacer(Modifier.height(16.dp))
                                             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                                             Spacer(Modifier.height(16.dp))
                                         }
                                         
-                                        Text("Customize Effect", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
-                                        Spacer(Modifier.height(16.dp))
-                                        
-                                        customSettings.forEach { setting ->
-                                            val currentValue = viewModel.currentAnimParams[setting.id] ?: 
-                                                if (setting is AnimSetting.Slider) setting.defaultValue 
-                                                else if ((setting as AnimSetting.Toggle).defaultValue) 1f else 0f
-                                                
-                                            when (setting) {
-                                                is AnimSetting.Slider -> {
-                                                    Column(modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
-                                                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                                            Text(setting.title, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                                        }
-                                                        Slider(
-                                                            value = currentValue,
-                                                            onValueChange = { viewModel.updateAnimParam(setting.id, it) },
-                                                            valueRange = setting.minValue..setting.maxValue
-                                                        )
-                                                    }
-                                                }
-                                                is AnimSetting.Toggle -> {
-                                                    Row(
-                                                        modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
-                                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                                        verticalAlignment = Alignment.CenterVertically
-                                                    ) {
-                                                        Text(setting.title, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                                        Switch(
-                                                            checked = currentValue > 0.5f,
-                                                            onCheckedChange = { viewModel.updateAnimParam(setting.id, if (it) 1f else 0f) }
-                                                        )
-                                                    }
-                                                }
-                                            }
-                                        }
+                                        currentAnim.CustomUI(
+                                            params = viewModel.currentAnimParams,
+                                            onUpdateParam = { id, value -> viewModel.updateAnimParam(id, value) }
+                                        )
                                     }
                                 }
                             }
@@ -507,7 +473,6 @@ fun LiveEffectImage(
                     modifier = Modifier
                         .fillMaxSize()
                         .pointerInput(currentAnim) {
-                            
                             detectTapGestures(
                                 onPress = {
                                     currentAnim.onLock()
