@@ -20,9 +20,9 @@ class OrganicBlobAnimation : WallpaperAnimation {
     private var currentProgress = 0f
     private var targetProgress = 0f
     private var velocity = 0f
-
-    private val SPRING_TENSION = 200f
-    private val SPRING_FRICTION = 20f
+    
+    private val SPRING_TENSION = 220f
+    private val SPRING_FRICTION = 18f
 
     private val _bodyMatrix = Matrix()
     private val _blobPath = Path()
@@ -35,6 +35,7 @@ class OrganicBlobAnimation : WallpaperAnimation {
 
     override fun update(deltaTime: Float) {
         timeSeconds += deltaTime
+        
         val steps = 4
         val dt = deltaTime / steps
         for (i in 0 until steps) {
@@ -64,18 +65,18 @@ class OrganicBlobAnimation : WallpaperAnimation {
         clipPath: Path,
         screenShapeRect: RectF
     ) {
-        
-        val wobbleSize = config.animParams["blob_wobble_size"] ?: 0.05f
-
         val screenW = canvas.width.toFloat()
         val screenH = canvas.height.toFloat()
         val imgW = originalBitmap.width
         val imgH = originalBitmap.height
 
-        val safeProgress = currentProgress.coerceAtLeast(0.01f)
-        val popScale = lerp(0.3f, 1.0f, safeProgress) 
+        val safeProgress = currentProgress.coerceIn(0f, 1f)
+        val unlockScale = lerp(0.7f, 1.0f, safeProgress) 
         
-        val currentImgScale = geo.baseScale * config.scale * popScale
+        val maxWobbleSize = config.animParams["blob_wobble_size"] ?: 0.05f
+        val activeWobbleSize = lerp(maxWobbleSize * 0.6f, maxWobbleSize, safeProgress)
+
+        val currentImgScale = geo.baseScale * config.scale * unlockScale
 
         val anchorX = if (config.isCentered) geo.subjectCenterX else imgW / 2f
         val anchorY = if (config.isCentered) geo.subjectCenterY else imgH / 2f
@@ -88,21 +89,20 @@ class OrganicBlobAnimation : WallpaperAnimation {
         _shapeRect.set(geo.shapeBoundsRel)
         _bodyMatrix.mapRect(_shapeRect)
         
-        val vShift = if (config.is3DPopEnabled) _shapeRect.height() * (0.12f + wobbleSize * 1.5f) else 0f
+        val vShift = if (config.is3DPopEnabled) _shapeRect.height() * (0.12f + activeWobbleSize * 1.5f) else 0f
         
         val centerX = _shapeRect.centerX()
         val centerY = _shapeRect.centerY() + vShift
         val baseRadius = min(_shapeRect.width(), _shapeRect.height()) / 2f
-
+        
         _blobPath.rewind()
         val numPoints = 120 
-        
         for (i in 0..numPoints) {
             val angle = (i.toFloat() / numPoints) * (PI.toFloat() * 2f)
             
-            val offset1 = sin(angle * 4f + timeSeconds * 2.2f) * (baseRadius * wobbleSize)
-            val offset2 = cos(angle * 3f - timeSeconds * 1.5f) * (baseRadius * wobbleSize * 0.8f)
-            val offset3 = sin(angle * 6f + timeSeconds * 1.0f) * (baseRadius * wobbleSize * 0.5f)
+            val offset1 = sin(angle * 4f + timeSeconds * 2.2f) * (baseRadius * activeWobbleSize)
+            val offset2 = cos(angle * 3f - timeSeconds * 1.5f) * (baseRadius * activeWobbleSize * 0.8f)
+            val offset3 = sin(angle * 6f + timeSeconds * 1.0f) * (baseRadius * activeWobbleSize * 0.5f)
             
             val r = baseRadius + offset1 + offset2 + offset3
             val x = centerX + r * cos(angle)
@@ -111,22 +111,24 @@ class OrganicBlobAnimation : WallpaperAnimation {
             if (i == 0) _blobPath.moveTo(x, y) else _blobPath.lineTo(x, y)
         }
         _blobPath.close()
-
+        
         canvas.drawColor(config.backgroundColor)
-
+        
         canvas.save()
         canvas.clipPath(_blobPath)
         
-        paint.alpha = (safeProgress * 255).toInt().coerceIn(0, 255)
+        paint.alpha = 255
         canvas.drawBitmap(originalBitmap, _bodyMatrix, paint)
-        paint.alpha = 255 
         canvas.restore()
         
-        if (config.is3DPopEnabled && maskBitmap != null) {
+        val popAlpha = (safeProgress * 255).toInt().coerceIn(0, 255)
+        
+        if (config.is3DPopEnabled && maskBitmap != null && popAlpha > 0) {
             val popMatrix = Matrix(_bodyMatrix)
             
             val layerId = canvas.saveLayer(0f, 0f, screenW, screenH, null)
-            paint.alpha = (safeProgress * 255).toInt().coerceIn(0, 255)
+            
+            paint.alpha = popAlpha
             
             canvas.drawBitmap(maskBitmap, popMatrix, paint)
             canvas.drawBitmap(originalBitmap, popMatrix, maskXferPaint)
