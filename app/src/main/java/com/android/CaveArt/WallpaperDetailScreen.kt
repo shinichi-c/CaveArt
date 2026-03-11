@@ -28,7 +28,9 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asComposePath
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -44,6 +46,7 @@ import com.android.CaveArt.animations.AnimSetting
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.delay
 import kotlin.math.sin
 import kotlin.math.pow
 import coil3.compose.rememberAsyncImagePainter
@@ -81,7 +84,6 @@ fun EffectsControlsSheet(
         if (viewModel.isAnimationEnabled) {
             list.add("Animation")
         }
-        
         list.add("Style")
         list
     }
@@ -387,19 +389,38 @@ fun LiveEffectImage(
 ) {
     val context = LocalContext.current
     var currentBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var previewOriginal by remember { mutableStateOf<Bitmap?>(null) }
+    var previewMask by remember { mutableStateOf<Bitmap?>(null) }
     var activeWallpaperId by remember { mutableStateOf(wallpaper.id) }
 
     if (activeWallpaperId != wallpaper.id) {
         currentBitmap = null
+        previewOriginal = null
+        previewMask = null
         activeWallpaperId = wallpaper.id
     }
 
-    val paramStateStr = viewModel.currentAnimParams.toString()
-
-    LaunchedEffect(wallpaper, viewModel.currentMagicShape, viewModel.currentBackgroundColor, viewModel.is3DPopEnabled, viewModel.magicScale, viewModel.isCentered, viewModel.isMagicShapeEnabled, viewModel.isAnimationEnabled, paramStateStr) {
-        val useMagic = viewModel.isMagicShapeEnabled
-        val newBitmap = viewModel.getOrCreateProcessedBitmap(context, wallpaper, allowMagic = useMagic)
-        if (newBitmap != null) currentBitmap = newBitmap
+    LaunchedEffect(
+        wallpaper, 
+        viewModel.isAnimationEnabled, 
+        viewModel.isMagicShapeEnabled, 
+        viewModel.currentMagicShape, 
+        viewModel.currentBackgroundColor, 
+        viewModel.is3DPopEnabled, 
+        viewModel.magicScale, 
+        viewModel.isCentered, 
+        viewModel.currentAnimationStyle
+    ) {
+        if (viewModel.isAnimationEnabled) {
+            val components = viewModel.getPreviewAnimationComponents(context, wallpaper)
+            previewOriginal = components.first
+            previewMask = components.second
+            if (components.first != null) currentBitmap = components.first 
+        } else {
+            val useMagic = viewModel.isMagicShapeEnabled
+            val newBitmap = viewModel.getOrCreateProcessedBitmap(context, wallpaper, allowMagic = useMagic)
+            if (newBitmap != null) currentBitmap = newBitmap
+        }
     }
     
     val isDarkTheme = isSystemInDarkTheme()
@@ -428,46 +449,153 @@ fun LiveEffectImage(
         }
         
         if (currentBitmap != null) {
-            val infiniteTransition = rememberInfiniteTransition(label = "LivePreview")
-            
-            val currentAnim = remember(viewModel.currentAnimationStyle) { 
-                AnimationFactory.getAnimation(viewModel.currentAnimationStyle) 
-            }
-            
-            val targetScale = if (viewModel.isAnimationEnabled) currentAnim.getPreviewScaleTarget() else 1.03f
-            val targetRot = if (viewModel.isAnimationEnabled) currentAnim.getPreviewRotationTarget() else 0f
-            val animDuration = if (viewModel.isAnimationEnabled) currentAnim.getPreviewDuration() else 3000
-
-            val finalScale by infiniteTransition.animateFloat(
-                initialValue = 1f, targetValue = targetScale,
-                animationSpec = infiniteRepeatable(tween(animDuration, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "animScale"
-            )
-            val finalRotation by infiniteTransition.animateFloat(
-                initialValue = -targetRot, targetValue = targetRot,
-                animationSpec = infiniteRepeatable(tween(animDuration, easing = LinearOutSlowInEasing), RepeatMode.Reverse), label = "animRot"
-            )
-
-            AnimatedContent(
-                targetState = currentBitmap, 
-                label = "LiveDepthAnim", 
-                transitionSpec = { 
-                    (fadeIn(animationSpec = tween(500)) + scaleIn(initialScale = 0.95f, animationSpec = tween(500, easing = LinearOutSlowInEasing)))
-                    .togetherWith(fadeOut(animationSpec = tween(300)) + scaleOut(targetScale = 1.15f, animationSpec = tween(400, easing = FastOutSlowInEasing))) 
+            if (viewModel.isAnimationEnabled && previewOriginal != null) {
+                
+                val currentAnim = remember(viewModel.currentAnimationStyle) { 
+                    AnimationFactory.getAnimation(viewModel.currentAnimationStyle).apply { onUnlock() } 
                 }
-            ) { bitmap ->
-                if (bitmap != null) {
-                    Image(
-                        bitmap = bitmap.asImageBitmap(), 
-                        contentDescription = null, 
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .graphicsLayer {
-                                scaleX = finalScale
-                                scaleY = finalScale
-                                rotationZ = finalRotation
-                            }, 
-                        contentScale = ContentScale.Crop
+                
+                var frameTimeNanos by remember { mutableLongStateOf(0L) }
+                
+                LaunchedEffect(currentAnim) {
+                    var lastTime = withFrameNanos { it }
+                    currentAnim.onUnlock()
+                    while (true) {
+                        frameTimeNanos = withFrameNanos { it }
+                        val dt = (frameTimeNanos - lastTime) / 1_000_000_000f
+                        lastTime = frameTimeNanos
+                        currentAnim.update(dt.coerceAtMost(0.1f))
+                    }
+                }
+
+                val paint = remember { android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG or android.graphics.Paint.FILTER_BITMAP_FLAG) }
+                val maskXferPaint = remember { 
+                    android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { 
+                        xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.SRC_IN) 
+                    } 
+                }
+                val clipPath = remember { android.graphics.Path() }
+                val screenShapeRect = remember { android.graphics.RectF() }
+                
+                androidx.compose.foundation.Canvas(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .pointerInput(currentAnim) {
+                            detectTapGestures(
+                                onPress = {
+                                    currentAnim.onLock()
+                                    tryAwaitRelease()
+                                    currentAnim.onUnlock()
+                                }
+                            )
+                        }
+                ) {
+                    
+                    frameTimeNanos.let {} 
+                    
+                    val config = LiveWallpaperConfig(
+                        shapeName = viewModel.currentMagicShape.name,
+                        backgroundColor = viewModel.currentBackgroundColor,
+                        is3DPopEnabled = viewModel.is3DPopEnabled,
+                        scale = viewModel.magicScale,
+                        isCentered = viewModel.isCentered,
+                        animationStyle = viewModel.currentAnimationStyle.name,
+                        isMagicShapeEnabled = false,
+                        isAnimationEnabled = true,
+                        animParams = viewModel.currentAnimParams
                     )
+
+                    val geo = ShapeEffectHelper.getUnifiedGeometry(
+                        previewOriginal!!.width, previewOriginal!!.height,
+                        size.width, size.height,
+                        previewMask, config
+                    )
+                    
+                    drawIntoCanvas { canvas ->
+                        currentAnim.draw(
+                            canvas.nativeCanvas,
+                            previewOriginal!!,
+                            previewMask,
+                            geo,
+                            config,
+                            paint,
+                            maskXferPaint,
+                            clipPath,
+                            screenShapeRect
+                        )
+                    }
+                }
+                
+                var showHint by remember { mutableStateOf(true) }
+                
+                LaunchedEffect(Unit) {
+                    delay(4000)
+                    showHint = false
+                }
+
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = showHint,
+                    enter = fadeIn(tween(500)),
+                    exit = fadeOut(tween(800)),
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 24.dp)
+                ) {
+                    Surface(
+                        color = Color.Black.copy(alpha = 0.55f),
+                        shape = RoundedCornerShape(20.dp),
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.TouchApp, 
+                                contentDescription = null, 
+                                tint = Color.White, 
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text(
+                                "Press & hold to test lock screen",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color.White
+                            )
+                        }
+                    }
+                }
+
+            } else {
+                
+                val infiniteTransition = rememberInfiniteTransition(label = "LivePreview")
+                val finalScale by infiniteTransition.animateFloat(
+                    initialValue = 1f, targetValue = 1.03f,
+                    animationSpec = infiniteRepeatable(tween(3000, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "animScale"
+                )
+
+                AnimatedContent(
+                    targetState = currentBitmap, 
+                    label = "LiveDepthAnim", 
+                    transitionSpec = { 
+                        (fadeIn(animationSpec = tween(500)) + scaleIn(initialScale = 0.95f, animationSpec = tween(500, easing = LinearOutSlowInEasing)))
+                        .togetherWith(fadeOut(animationSpec = tween(300)) + scaleOut(targetScale = 1.15f, animationSpec = tween(400, easing = FastOutSlowInEasing))) 
+                    }
+                ) { bitmap ->
+                    if (bitmap != null) {
+                        Image(
+                            bitmap = bitmap.asImageBitmap(), 
+                            contentDescription = null, 
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .graphicsLayer {
+                                    scaleX = finalScale
+                                    scaleY = finalScale
+                                }, 
+                            contentScale = ContentScale.Crop
+                        )
+                    }
                 }
             }
         }
