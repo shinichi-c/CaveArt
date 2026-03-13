@@ -20,19 +20,24 @@ import com.android.CaveArt.LiveWallpaperConfig
 import com.android.CaveArt.UnifiedGeometry
 import kotlin.math.*
 
-class OrganicBlobAnimation : WallpaperAnimation {
+class FluidMorphAnimation : WallpaperAnimation {
 
     override fun needsSegmentationMask(): Boolean = true
     
     override fun supportsCenter(): Boolean = false
-    override fun supportsScale(): Boolean = false
+    override fun supportsScale(): Boolean = false 
     override fun supports3DPop(): Boolean = true
-    
+
     override fun getCustomSettings(): List<AnimSetting> = listOf(
         AnimSetting.Slider("effect_scale", "Effect Size", 0.5f, 1.5f, 1.0f),
-        AnimSetting.Slider("blob_wobble_size", "Blob Wobble Size", 0.01f, 0.15f, 0.05f)
+        AnimSetting.Slider("morph_speed", "Shape Morph Speed", 0.1f, 3.0f, 0.8f),
+        AnimSetting.Slider("rot_speed", "Rotation Speed", -40.0f, 40.0f, 15.0f),
+        AnimSetting.Slider("wander_radius", "Wander Distance", 0f, 100f, 40f),
+        AnimSetting.Slider("layer_count", "Background Layers", 1f, 5f, 3f),
+        AnimSetting.Slider("layer_spread", "Layer Spacing", 0.05f, 0.4f, 0.15f),
+        AnimSetting.Slider("bounce_delay", "Bounce Delay", 0.0f, 1.0f, 0.2f)
     )
-    
+
     @Composable
     override fun CustomUI(
         params: Map<String, Float>,
@@ -154,11 +159,12 @@ class OrganicBlobAnimation : WallpaperAnimation {
     private var targetProgress = 0f
     private var velocity = 0f
 
-    private val SPRING_TENSION = 220f
-    private val SPRING_FRICTION = 18f
+    private val SPRING_TENSION = 200f
+    private val SPRING_FRICTION = 20f
 
     private val _bodyMatrix = Matrix()
     private val _blobPath = Path()
+    private val _pathMatrix = Matrix()
     private val _shapeRect = RectF()
     
     private val _fadePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -186,6 +192,48 @@ class OrganicBlobAnimation : WallpaperAnimation {
     override fun onUnlock() { targetProgress = 1f }
     override fun onLock() { targetProgress = 0f }
 
+    private fun smoothstep(edge0: Float, edge1: Float, x: Float): Float {
+        val t = ((x - edge0) / (edge1 - edge0)).coerceIn(0f, 1f)
+        return t * t * (3f - 2f * t)
+    }
+
+    private fun getShapeRadius(angle: Float, r: Float, type: Int): Float {
+        return when (type % 4) {
+            0 -> r + sin(angle * 3f) * (r * 0.06f) + cos(angle * 2f) * (r * 0.04f) 
+            1 -> r + sin(angle * 12f) * (r * 0.08f) 
+            2 -> r + cos(angle * 4f) * (r * 0.12f)  
+            3 -> r + cos(angle * 6f) * (r * 0.08f)  
+            else -> r
+        }
+    }
+
+    private fun buildMorphingPath(path: Path, r: Float, time: Float, morphSpeed: Float) {
+        path.rewind()
+        val pts = 120
+        
+        val cycle = abs(time * morphSpeed) % 4f
+        val typeA = cycle.toInt()
+        val typeB = (typeA + 1) % 4
+        val fraction = cycle - typeA
+        
+        val blend = smoothstep(0.3f, 0.7f, fraction)
+        
+        for (i in 0..pts) {
+            val a = (i.toFloat() / pts) * (PI.toFloat() * 2f)
+            
+            val rA = getShapeRadius(a, r, typeA)
+            val rB = getShapeRadius(a, r, typeB)
+            
+            val finalR = rA + (rB - rA) * blend
+            
+            val x = finalR * cos(a)
+            val y = finalR * sin(a)
+            
+            if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+        }
+        path.close()
+    }
+
     override fun draw(
         canvas: Canvas,
         originalBitmap: Bitmap,
@@ -197,16 +245,20 @@ class OrganicBlobAnimation : WallpaperAnimation {
         clipPath: Path,
         screenShapeRect: RectF
     ) {
+        val customScale = config.animParams["effect_scale"] ?: 1.0f 
+        val morphSpeed = config.animParams["morph_speed"] ?: 0.8f
+        val rotSpeed = config.animParams["rot_speed"] ?: 15.0f
+        val wanderRadius = config.animParams["wander_radius"] ?: 40f
+        val numLayers = (config.animParams["layer_count"] ?: 3f).toInt()
+        val layerSpread = config.animParams["layer_spread"] ?: 0.15f
+        val bounceDelay = config.animParams["bounce_delay"] ?: 0.2f
+
         val screenW = canvas.width.toFloat()
         val screenH = canvas.height.toFloat()
 
         val safeProgress = currentProgress.coerceIn(0f, 1f)
         val unlockScale = lerp(0.7f, 1.0f, safeProgress) 
         
-        val maxWobbleSize = config.animParams["blob_wobble_size"] ?: 0.05f
-        val customScale = config.animParams["effect_scale"] ?: 1.0f
-        
-        val activeWobbleSize = lerp(maxWobbleSize * 0.6f, maxWobbleSize, safeProgress)
         val currentImgScale = geo.baseScale * customScale * unlockScale
 
         val anchorX = geo.subjectCenterX
@@ -220,30 +272,60 @@ class OrganicBlobAnimation : WallpaperAnimation {
         _shapeRect.set(geo.shapeBoundsRel)
         _bodyMatrix.mapRect(_shapeRect)
         
-        val vShift = if (config.is3DPopEnabled) _shapeRect.height() * (0.12f + activeWobbleSize * 1.5f) else 0f
+        val activeWanderRadius = lerp(wanderRadius * 0.3f, wanderRadius, safeProgress)
+        val wanderX = sin(timeSeconds * 0.6f) * cos(timeSeconds * 0.4f) * activeWanderRadius
+        val wanderY = sin(timeSeconds * 0.5f) * cos(timeSeconds * 0.7f) * activeWanderRadius
+        val vShift = if (config.is3DPopEnabled) _shapeRect.height() * 0.15f else 0f
         
-        val centerX = _shapeRect.centerX()
-        val centerY = _shapeRect.centerY() + vShift
-        val baseRadius = min(_shapeRect.width(), _shapeRect.height()) / 2f
+        val dynamicCX = _shapeRect.centerX() + wanderX
+        val dynamicCY = _shapeRect.centerY() + vShift + wanderY
+        val baseRadius = (min(_shapeRect.width(), _shapeRect.height()) / 2f) * 0.85f
+        
+        val currentRotation = timeSeconds * rotSpeed
 
-        _blobPath.rewind()
-        val numPoints = 120 
-        for (i in 0..numPoints) {
-            val angle = (i.toFloat() / numPoints) * (PI.toFloat() * 2f)
+        val hsv = FloatArray(3)
+        Color.colorToHSV(config.backgroundColor, hsv)
+        
+        val bgHsv = floatArrayOf(hsv[0], hsv[1] * 0.3f, min(1f, hsv[2] * 1.3f))
+        canvas.drawColor(Color.HSVToColor(bgHsv))
+
+        val baseAlpha = 255
+        paint.alpha = baseAlpha
+        
+        for (i in numLayers downTo 1) {
+            val scale = 1f + (i * layerSpread)
+            val phaseOffset = i * bounceDelay 
+
+            val fraction = 1f - (i.toFloat() / (numLayers + 1f))
+            val layerHsv = floatArrayOf(
+                hsv[0],
+                lerp(bgHsv[1], hsv[1], fraction),
+                lerp(bgHsv[2], hsv[2], fraction)
+            )
+            paint.color = Color.HSVToColor(layerHsv)
+            paint.alpha = baseAlpha 
+
+            buildMorphingPath(_blobPath, baseRadius * scale, timeSeconds - phaseOffset, morphSpeed)
             
-            val offset1 = sin(angle * 4f + timeSeconds * 2.2f) * (baseRadius * activeWobbleSize)
-            val offset2 = cos(angle * 3f - timeSeconds * 1.5f) * (baseRadius * activeWobbleSize * 0.8f)
-            val offset3 = sin(angle * 6f + timeSeconds * 1.0f) * (baseRadius * activeWobbleSize * 0.5f)
+            _pathMatrix.reset()
+            _pathMatrix.postRotate(currentRotation) 
+            _pathMatrix.postTranslate(dynamicCX, dynamicCY)
+            _blobPath.transform(_pathMatrix)
             
-            val r = baseRadius + offset1 + offset2 + offset3
-            val x = centerX + r * cos(angle)
-            val y = centerY + r * sin(angle)
-            
-            if (i == 0) _blobPath.moveTo(x, y) else _blobPath.lineTo(x, y)
+            canvas.drawPath(_blobPath, paint)
         }
-        _blobPath.close()
 
-        canvas.drawColor(config.backgroundColor)
+        paint.color = config.backgroundColor
+        paint.alpha = baseAlpha
+        
+        buildMorphingPath(_blobPath, baseRadius, timeSeconds, morphSpeed)
+        
+        _pathMatrix.reset()
+        _pathMatrix.postRotate(currentRotation)
+        _pathMatrix.postTranslate(dynamicCX, dynamicCY)
+        _blobPath.transform(_pathMatrix)
+
+        canvas.drawPath(_blobPath, paint)
 
         canvas.save()
         canvas.clipPath(_blobPath)
@@ -251,9 +333,9 @@ class OrganicBlobAnimation : WallpaperAnimation {
         canvas.drawBitmap(originalBitmap, _bodyMatrix, paint)
         canvas.restore()
 
-        val popAlpha = (safeProgress * 255).toInt().coerceIn(0, 255)
+        val popAlpha = 255 
         
-        if (config.is3DPopEnabled && maskBitmap != null && popAlpha > 0) {
+        if (config.is3DPopEnabled && maskBitmap != null) {
             val popMatrix = Matrix(_bodyMatrix)
             val layerId = canvas.saveLayer(0f, 0f, screenW, screenH, null)
             
