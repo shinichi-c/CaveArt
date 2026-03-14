@@ -46,6 +46,16 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         private set
 
     private val mlProcessingSemaphore = Semaphore(2)
+    
+    private val _showFastScrollGuide = mutableStateOf(!prefs.getBoolean("has_seen_fast_scroll_guide", false))
+    val showFastScrollGuide: Boolean by _showFastScrollGuide
+    fun dismissFastScrollGuide() { 
+        if (_showFastScrollGuide.value) {
+            _showFastScrollGuide.value = false 
+            prefs.edit().putBoolean("has_seen_fast_scroll_guide", true).apply()
+        }
+    }
+
     private val _isHapticsEnabled = mutableStateOf(prefs.getBoolean("haptics_enabled", true))
     val isHapticsEnabled: Boolean by _isHapticsEnabled
     fun setHapticsEnabled(enabled: Boolean) { 
@@ -79,6 +89,7 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     var magicScale by mutableFloatStateOf(1.0f)
     var isCentered by mutableStateOf(false)
     var currentAnimationStyle by mutableStateOf(AnimationStyle.NANO_ASSEMBLY)
+    
     var currentAnimParams by mutableStateOf<Map<String, Float>>(emptyMap())
 
     fun setMagicShapeEnabled(enabled: Boolean) { 
@@ -98,7 +109,7 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     fun toggle3DPop() { is3DPopEnabled = !is3DPopEnabled }
     fun updateMagicScale(scale: Float) { magicScale = scale }
     fun toggleCentered() { isCentered = !isCentered }
-    
+
     fun updateAnimationStyle(style: AnimationStyle) { 
         currentAnimationStyle = style 
         val anim = AnimationFactory.getAnimation(style)
@@ -111,7 +122,7 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         }
         currentAnimParams = defaults
     }
-    
+
     fun updateAnimParam(key: String, value: Float) {
         currentAnimParams = currentAnimParams.toMutableMap().apply { put(key, value) }
     }
