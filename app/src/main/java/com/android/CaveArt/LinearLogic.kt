@@ -1,48 +1,23 @@
 package com.android.CaveArt
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
-import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.TouchApp
+import androidx.compose.material3.*
 import androidx.compose.material3.carousel.CarouselState
 import androidx.compose.material3.carousel.HorizontalMultiBrowseCarousel
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
@@ -55,6 +30,7 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
@@ -108,6 +84,59 @@ fun HeroCarouselWithIndicator(
             }
         }
         
+        AnimatedVisibility(
+            visible = viewModel.showFastScrollGuide && pagerState.pageCount > 1 && isCarouselVisible,
+            enter = expandVertically(expandFrom = Alignment.Bottom) + fadeIn(tween(500)),
+            exit = shrinkVertically(shrinkTowards = Alignment.Bottom) + fadeOut(tween(300))
+        ) {
+            
+            val infiniteTransition = rememberInfiniteTransition(label = "drag_guide")
+            val dragX by infiniteTransition.animateFloat(
+                initialValue = -12f,
+                targetValue = 12f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(1200, easing = FastOutSlowInEasing),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "drag_x"
+            )
+
+            Surface(
+                modifier = Modifier
+                    .padding(bottom = 12.dp)
+                    .clickable { viewModel.dismissFastScrollGuide() },
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.primary,
+                shadowElevation = 4.dp
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.TouchApp,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.offset(x = dragX.dp).size(20.dp)
+                    )
+                    Spacer(Modifier.width(20.dp))
+                    Text(
+                        "Drag to fast scroll",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Dismiss",
+                        tint = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f),
+                        modifier = Modifier.size(16.dp).clickable { viewModel.dismissFastScrollGuide() }
+                    )
+                }
+            }
+        }
+        
         Box(
             modifier = Modifier
                 .padding(horizontal = 24.dp)
@@ -116,7 +145,10 @@ fun HeroCarouselWithIndicator(
         ) {
             FastScrollIndicator(
                 pagerState = pagerState,
-                onDragStartHaptics = onHaptics,
+                onDragStartHaptics = { 
+                    onHaptics()
+                    viewModel.dismissFastScrollGuide() 
+                },
                 onPageChangeHaptics = onHaptics,
                 inactiveColor = MaterialTheme.colorScheme.onSurface,
                 activeColor = MaterialTheme.colorScheme.primary,
