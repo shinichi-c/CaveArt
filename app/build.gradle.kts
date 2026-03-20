@@ -13,8 +13,8 @@ android {
         applicationId = "com.android.CaveArt"
         minSdk = 35
         targetSdk = 36
-        versionCode = 9
-        versionName = "2.9-otters"
+        versionCode = 10
+        versionName = "4.0-FireFlies"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
