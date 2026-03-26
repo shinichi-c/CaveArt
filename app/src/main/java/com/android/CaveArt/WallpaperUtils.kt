@@ -80,6 +80,7 @@ suspend fun setLiveWallpaper(
         animationStyle = viewModel.currentAnimationStyle.name,
         isMagicShapeEnabled = viewModel.isMagicShapeEnabled,
         isAnimationEnabled = viewModel.isAnimationEnabled,
+        isFilamentEnabled = viewModel.isFilamentEnabled,
         animParams = viewModel.currentAnimParams
     )
     
@@ -88,10 +89,16 @@ suspend fun setLiveWallpaper(
     originalBitmap?.recycle()
     cutoutBitmap?.recycle()
     
+    val serviceClass = if (viewModel.isFilamentEnabled) {
+        CaveArtFilamentService::class.java
+    } else {
+        CaveArtWallpaperService::class.java
+    }
+    
     val isRoot = RootUtils.isRootAvailable()
     if (isRoot) {
         withContext(Dispatchers.Main) { Toast.makeText(context, "Attempting System Injection...", Toast.LENGTH_SHORT).show() }
-        val resultLog = RootUtils.bruteForceSetWallpaper(context, CaveArtWallpaperService::class.java)
+        val resultLog = RootUtils.bruteForceSetWallpaper(context, serviceClass)
         if (resultLog.contains("SUCCESS")) {
              try { WallpaperManager.getInstance(context).clear(WallpaperManager.FLAG_LOCK) } catch (e: Exception) {}
              withContext(Dispatchers.Main) { Toast.makeText(context, "Applied via Root!", Toast.LENGTH_SHORT).show() }
@@ -102,7 +109,7 @@ suspend fun setLiveWallpaper(
     withContext(Dispatchers.Main) {
         try {
             val intent = Intent(WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER)
-            intent.putExtra(WallpaperManager.EXTRA_LIVE_WALLPAPER_COMPONENT, ComponentName(context, CaveArtWallpaperService::class.java))
+            intent.putExtra(WallpaperManager.EXTRA_LIVE_WALLPAPER_COMPONENT, ComponentName(context, serviceClass))
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             context.startActivity(intent)
         } catch (e: Exception) {

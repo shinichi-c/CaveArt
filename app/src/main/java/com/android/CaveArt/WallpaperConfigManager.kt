@@ -25,6 +25,7 @@ data class LiveWallpaperConfig(
     val animationStyle: String = AnimationStyle.NANO_ASSEMBLY.name,
     val isMagicShapeEnabled: Boolean = true,
     val isAnimationEnabled: Boolean = true,
+    val isFilamentEnabled: Boolean = false,
     val animParams: Map<String, Float> = emptyMap()
 )
 

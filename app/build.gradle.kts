@@ -94,4 +94,7 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
 
     implementation(libs.androidx.datastore.preferences)
+ implementation("com.google.android.filament:filament-android:1.70.0")
+    implementation("com.google.android.filament:gltfio-android:1.70.0")
+    implementation("com.google.android.filament:filament-utils-android:1.70.0")
 }
