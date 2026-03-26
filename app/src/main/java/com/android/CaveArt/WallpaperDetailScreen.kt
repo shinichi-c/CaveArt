@@ -4,6 +4,10 @@ import android.app.Activity
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.RectF
+import android.graphics.SurfaceTexture
+import android.view.Choreographer
+import android.view.Surface
+import android.view.TextureView
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
@@ -39,6 +43,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import com.android.CaveArt.animations.AnimationFactory
 import com.android.CaveArt.animations.AnimationStyle
@@ -54,6 +59,16 @@ import kotlin.random.Random
 import com.materialkolor.quantize.QuantizerCelebi
 import com.materialkolor.score.Score
 import com.materialkolor.hct.Hct
+
+import com.google.android.filament.Camera
+import com.google.android.filament.Engine as FilamentEngineCore
+import com.google.android.filament.Filament
+import com.google.android.filament.Renderer
+import com.google.android.filament.Scene
+import com.google.android.filament.Skybox
+import com.google.android.filament.SwapChain
+import com.google.android.filament.View as FilamentView
+import com.google.android.filament.Viewport
 
 private data class Particle(
     val initialX: Float,
@@ -71,16 +86,43 @@ fun EffectsControlsSheet(
     viewModel: WallpaperViewModel
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val modelPickerLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri != null) {
+            scope.launch(Dispatchers.IO) {
+                try {
+                    
+                    context.contentResolver.openInputStream(uri)?.use { input ->
+                        java.io.File(context.filesDir, "custom_model.glb").outputStream().use { output ->
+                            input.copyTo(output)
+                        }
+                    }
+                    withContext(Dispatchers.Main) {
+                        
+                        viewModel.setFilamentEnabled(false)
+                        delay(100)
+                        viewModel.setFilamentEnabled(true)
+                        android.widget.Toast.makeText(context, "3D Model Imported!", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+        }
+    }
+
     var extractedColors by remember { mutableStateOf(listOf<Int>()) }
     var sliderPosition by remember { mutableFloatStateOf(viewModel.magicScale) }
     
-    var selectedTab by remember { mutableStateOf(if (viewModel.isMagicShapeEnabled) "Shape" else "Animation") }
+    var selectedTab by remember { mutableStateOf(if (viewModel.isMagicShapeEnabled) "Shape" else if (viewModel.isFilamentEnabled) "3D Engine" else "Animation") }
     
     val currentAnim = remember(viewModel.currentAnimationStyle) { 
         AnimationFactory.getAnimation(viewModel.currentAnimationStyle) 
     }
     
-    val tabs = remember(viewModel.isMagicShapeEnabled, viewModel.isAnimationEnabled, currentAnim) {
+    val tabs = remember(viewModel.isMagicShapeEnabled, viewModel.isAnimationEnabled, viewModel.isFilamentEnabled, currentAnim) {
         val list = mutableListOf<String>()
         if (viewModel.isMagicShapeEnabled) {
             list.add("Shape")
@@ -95,6 +137,9 @@ fun EffectsControlsSheet(
             if (hasStandard || hasCustom) {
                 list.add("Style")
             }
+        }
+        if (viewModel.isFilamentEnabled) {
+            list.add("3D Engine")
         }
         list
     }
@@ -168,7 +213,6 @@ fun EffectsControlsSheet(
                     when (selectedTab) {
                         "Shape" -> {
                             Column(modifier = Modifier.fillMaxWidth()) {
-                                
                                 Row(
                                     modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
                                     horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally)
@@ -248,9 +292,30 @@ fun EffectsControlsSheet(
                                 }
                             }
                         }
+                        "3D Engine" -> {
+                            Column(
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text("Filament Engine Active", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
+                                Spacer(Modifier.height(8.dp))
+                                Text("Applies a physical 3D scene to your background. Import a .glb file to render it.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                                
+                                Spacer(Modifier.height(16.dp))
+                                
+                                Button(
+                                    onClick = { modelPickerLauncher.launch("*/*") },
+                                    shape = RoundedCornerShape(16.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primaryContainer, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
+                                ) {
+                                    Icon(Icons.Default.FolderOpen, contentDescription = "Import")
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Import .GLB Model", fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
                         "Style" -> {
                             Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
-                                
                                 val showPop = viewModel.isMagicShapeEnabled || (viewModel.isAnimationEnabled && currentAnim.supports3DPop())
                                 val showCenter = viewModel.isMagicShapeEnabled || (viewModel.isAnimationEnabled && currentAnim.supportsCenter())
                                 val showScale = viewModel.isMagicShapeEnabled || (viewModel.isAnimationEnabled && currentAnim.supportsScale())
@@ -287,19 +352,17 @@ fun EffectsControlsSheet(
                                     Slider(value = sliderPosition, onValueChange = { sliderPosition = it }, onValueChangeFinished = { viewModel.updateMagicScale(sliderPosition) }, valueRange = 0.5f..1.5f, steps = 5)
                                 }
                                 
-                                if (viewModel.isAnimationEnabled) {
-                                    if (currentAnim.hasCustomUI()) {
-                                        if (showPop || showCenter || showScale) {
-                                            Spacer(Modifier.height(16.dp))
-                                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                                            Spacer(Modifier.height(16.dp))
-                                        }
-                                        
-                                        currentAnim.CustomUI(
-                                            params = viewModel.currentAnimParams,
-                                            onUpdateParam = { id, value -> viewModel.updateAnimParam(id, value) }
-                                        )
+                                if (viewModel.isAnimationEnabled && currentAnim.hasCustomUI()) {
+                                    if (showPop || showCenter || showScale) {
+                                        Spacer(Modifier.height(16.dp))
+                                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                                        Spacer(Modifier.height(16.dp))
                                     }
+                                    
+                                    currentAnim.CustomUI(
+                                        params = viewModel.currentAnimParams,
+                                        onUpdateParam = { id, value -> viewModel.updateAnimParam(id, value) }
+                                    )
                                 }
                             }
                         }
@@ -325,6 +388,7 @@ fun EffectsControlsSheet(
                         val tabIcon = when (tab) {
                             "Shape" -> Icons.Default.Category
                             "Animation" -> Icons.Default.Animation
+                            "3D Engine" -> Icons.Default.ViewInAr
                             else -> Icons.Default.Palette
                         }
 
@@ -396,7 +460,8 @@ fun LiveEffectImage(
     LaunchedEffect(
         wallpaper, 
         viewModel.isAnimationEnabled, 
-        viewModel.isMagicShapeEnabled, 
+        viewModel.isMagicShapeEnabled,
+        viewModel.isFilamentEnabled,
         viewModel.currentMagicShape, 
         viewModel.currentBackgroundColor, 
         viewModel.is3DPopEnabled, 
@@ -404,7 +469,9 @@ fun LiveEffectImage(
         viewModel.isCentered, 
         viewModel.currentAnimationStyle
     ) {
-        if (viewModel.isAnimationEnabled) {
+        if (viewModel.isFilamentEnabled) {
+            currentBitmap = null
+        } else if (viewModel.isAnimationEnabled) {
             val components = viewModel.getPreviewAnimationComponents(context, wallpaper)
             previewOriginal = components.first
             previewMask = components.second
@@ -424,7 +491,16 @@ fun LiveEffectImage(
 
     Box(modifier = modifier.background(backgroundColor), contentAlignment = Alignment.Center) {
         
-        if (currentBitmap == null) {
+        if (currentBitmap == null && viewModel.isFilamentEnabled) {
+            AndroidView(
+                modifier = Modifier.fillMaxSize(),
+                factory = { ctx ->
+                    TextureView(ctx).apply {
+                        FilamentTextureController(this)
+                    }
+                }
+            )
+        } else if (currentBitmap == null) {
             if (wallpaper.uri != null) {
                 Image(painter = rememberAsyncImagePainter(wallpaper.uri), contentDescription = null, modifier = Modifier.fillMaxSize().blur(25.dp), contentScale = ContentScale.Crop)
             } else {
@@ -482,7 +558,6 @@ fun LiveEffectImage(
                             )
                         }
                 ) {
-                    
                     frameTimeNanos.let {} 
                     
                     val config = LiveWallpaperConfig(
@@ -494,6 +569,7 @@ fun LiveEffectImage(
                         animationStyle = viewModel.currentAnimationStyle.name,
                         isMagicShapeEnabled = false,
                         isAnimationEnabled = true,
+                        isFilamentEnabled = false,
                         animParams = viewModel.currentAnimParams
                     )
 
@@ -613,6 +689,151 @@ fun ParticleLoadingOverlay(color: Color) {
             val currentX = (p.initialX * width) + (rawSway * swayPx)
             val blinkFactor = ((sin((time * p.swaySpeed * 3f + index).toDouble()).toFloat() + 1) / 2f).pow(2)
             drawCircle(color = color, radius = p.radius * density.density, center = Offset(currentX, currentY), alpha = (p.initialAlpha * blinkFactor).coerceIn(0f, 1f))
+        }
+    }
+}
+
+class FilamentTextureController(val textureView: android.view.TextureView) : android.view.TextureView.SurfaceTextureListener, android.view.Choreographer.FrameCallback {
+    private var filamentEngine: com.google.android.filament.Engine? = null
+    private var renderer: com.google.android.filament.Renderer? = null
+    private var scene: com.google.android.filament.Scene? = null
+    private var camera: com.google.android.filament.Camera? = null
+    private var view: com.google.android.filament.View? = null
+    private var swapChain: com.google.android.filament.SwapChain? = null
+    
+    private var assetLoader: com.google.android.filament.gltfio.AssetLoader? = null
+    private var resourceLoader: com.google.android.filament.gltfio.ResourceLoader? = null
+    private var filamentAsset: com.google.android.filament.gltfio.FilamentAsset? = null
+    private var light: Int = 0
+    
+    private val choreographer = android.view.Choreographer.getInstance()
+    private var androidSurface: android.view.Surface? = null
+    private var rotationAngle = 0f
+
+    init {
+        runCatching { com.google.android.filament.Filament.init() }
+        runCatching { com.google.android.filament.gltfio.Gltfio.init() }
+        runCatching { System.loadLibrary("gltfio-jni") }
+        
+        textureView.surfaceTextureListener = this
+        textureView.isOpaque = false
+    }
+
+    override fun onSurfaceTextureAvailable(surface: android.graphics.SurfaceTexture, width: Int, height: Int) {
+        val engine = com.google.android.filament.Engine.create().also { filamentEngine = it }
+        renderer = engine.createRenderer()
+        scene = engine.createScene()
+        camera = engine.createCamera(engine.entityManager.create())
+        view = engine.createView()
+        
+        view?.scene = scene
+        view?.camera = camera
+        
+        val skybox = com.google.android.filament.Skybox.Builder().color(0.1f, 0.12f, 0.15f, 1.0f).build(engine)
+        scene?.skybox = skybox
+        
+        light = com.google.android.filament.EntityManager.get().create()
+        com.google.android.filament.LightManager.Builder(com.google.android.filament.LightManager.Type.DIRECTIONAL)
+            .color(1.0f, 1.0f, 0.95f)
+            .intensity(50000.0f)
+            .direction(-1.0f, -1.0f, -1.0f)
+            .castShadows(true)
+            .build(engine, light)
+        scene?.addEntity(light)
+        
+        assetLoader = com.google.android.filament.gltfio.AssetLoader(engine, com.google.android.filament.gltfio.UbershaderProvider(engine), com.google.android.filament.EntityManager.get())
+        resourceLoader = com.google.android.filament.gltfio.ResourceLoader(engine)
+
+        try {
+            
+            val customFile = java.io.File(textureView.context.filesDir, "custom_model.glb")
+            if (customFile.exists()) {
+                val bytes = customFile.readBytes()
+                val buffer = java.nio.ByteBuffer.allocateDirect(bytes.size)
+                buffer.put(bytes)
+                buffer.rewind()
+
+                filamentAsset = assetLoader?.createAsset(buffer)
+                filamentAsset?.let { asset ->
+                    resourceLoader?.loadResources(asset)
+                    asset.releaseSourceData()
+                    scene?.addEntities(asset.entities)
+                }
+            } else {
+                android.util.Log.w("CaveArt3D", "No custom model found in UI Preview.")
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("CaveArt3D", "Failed to load model in UI Preview", e)
+        }
+
+        androidSurface = android.view.Surface(surface)
+        swapChain = engine.createSwapChain(androidSurface!!)
+        
+        view?.viewport = com.google.android.filament.Viewport(0, 0, width, height)
+        val aspect = width.toDouble() / height.toDouble()
+        camera?.setProjection(45.0, aspect, 0.1, 100.0, com.google.android.filament.Camera.Fov.VERTICAL)
+        camera?.lookAt(0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0)
+
+        choreographer.postFrameCallback(this)
+    }
+
+    override fun onSurfaceTextureSizeChanged(surface: android.graphics.SurfaceTexture, width: Int, height: Int) {
+        view?.viewport = com.google.android.filament.Viewport(0, 0, width, height)
+        val aspect = width.toDouble() / height.toDouble()
+        camera?.setProjection(45.0, aspect, 0.1, 100.0, com.google.android.filament.Camera.Fov.VERTICAL)
+    }
+
+    override fun onSurfaceTextureDestroyed(surface: android.graphics.SurfaceTexture): Boolean {
+        choreographer.removeFrameCallback(this)
+        filamentEngine?.let { engine ->
+            filamentAsset?.let { assetLoader?.destroyAsset(it) }
+            assetLoader?.destroy()
+            resourceLoader?.destroy()
+            engine.destroyEntity(light)
+            
+            swapChain?.let { engine.destroySwapChain(it) }
+            renderer?.let { engine.destroyRenderer(it) }
+            view?.let { engine.destroyView(it) }
+            scene?.let { engine.destroyScene(it) }
+            camera?.let { engine.destroyCameraComponent(it.entity) }
+            engine.destroy()
+        }
+        filamentEngine = null
+        androidSurface?.release()
+        return true
+    }
+
+    override fun onSurfaceTextureUpdated(surface: android.graphics.SurfaceTexture) {}
+
+    override fun doFrame(frameTimeNanos: Long) {
+        if (filamentEngine != null && swapChain != null) {
+            choreographer.postFrameCallback(this)
+            
+            filamentAsset?.let { asset ->
+                val tm = filamentEngine?.transformManager
+                val instance = tm?.getInstance(asset.root)
+                if (instance != null && instance != 0) {
+                    val center = asset.boundingBox.center
+                    val halfExtent = asset.boundingBox.halfExtent
+                    val maxExtent = kotlin.math.max(halfExtent[0], kotlin.math.max(halfExtent[1], halfExtent[2]))
+                    
+                    val scaleFactor = if (maxExtent > 0f) 2.0f / maxExtent else 1.0f
+
+                    val transform = FloatArray(16)
+                    android.opengl.Matrix.setIdentityM(transform, 0)
+                    android.opengl.Matrix.rotateM(transform, 0, rotationAngle, 0f, 1f, 0f)
+                    android.opengl.Matrix.scaleM(transform, 0, scaleFactor, scaleFactor, scaleFactor)
+                    android.opengl.Matrix.translateM(transform, 0, -center[0], -center[1], -center[2])
+                    
+                    tm.setTransform(instance, transform)
+                    rotationAngle += 0.3f 
+                }
+            }
+            
+            if (renderer?.beginFrame(swapChain!!, frameTimeNanos) == true) {
+                renderer?.render(view!!)
+                renderer?.endFrame()
+            }
         }
     }
 }

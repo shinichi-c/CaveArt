@@ -82,6 +82,9 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     
     private val _isAnimationEnabled = mutableStateOf(false)
     val isAnimationEnabled: Boolean by _isAnimationEnabled
+
+    private val _isFilamentEnabled = mutableStateOf(false)
+    val isFilamentEnabled: Boolean by _isFilamentEnabled
     
     var currentMagicShape by mutableStateOf(MagicShape.SQUIRCLE)
     var currentBackgroundColor by mutableStateOf(AndroidColor.parseColor("#4CAF50"))
@@ -94,12 +97,26 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun setMagicShapeEnabled(enabled: Boolean) { 
         _isMagicShapeEnabled.value = enabled
-        if (enabled) _isAnimationEnabled.value = false
+        if (enabled) {
+            _isAnimationEnabled.value = false
+            _isFilamentEnabled.value = false
+        }
     }
     
     fun setAnimationEnabled(enabled: Boolean) { 
         _isAnimationEnabled.value = enabled
-        if (enabled) _isMagicShapeEnabled.value = false
+        if (enabled) {
+            _isMagicShapeEnabled.value = false
+            _isFilamentEnabled.value = false
+        }
+    }
+
+    fun setFilamentEnabled(enabled: Boolean) { 
+        _isFilamentEnabled.value = enabled
+        if (enabled) {
+            _isMagicShapeEnabled.value = false
+            _isAnimationEnabled.value = false
+        }
     }
     
     fun updateMagicConfig(shape: MagicShape, color: Int) {
