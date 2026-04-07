@@ -1,7 +1,6 @@
 package com.android.CaveArt
 
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -78,7 +77,7 @@ private fun ProcessedImageComposable(
                 )
             } else {
                 val originalBitmap = remember(wallpaper.resourceId) {
-                    BitmapFactory.decodeResource(context.resources, wallpaper.resourceId)
+                    BitmapHelper.decodeSampledBitmapFromResource(context.resources, wallpaper.resourceId, 1024)
                 }
                 Image(
                     bitmap = originalBitmap.asImageBitmap(),
