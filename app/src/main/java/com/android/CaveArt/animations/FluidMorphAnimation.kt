@@ -29,7 +29,7 @@ class FluidMorphAnimation : WallpaperAnimation {
     override fun supports3DPop(): Boolean = true
 
     override fun getCustomSettings(): List<AnimSetting> = listOf(
-        AnimSetting.Slider("effect_scale", "Effect Size", 0.5f, 1.5f, 1.0f),
+        AnimSetting.Slider("effect_scale", "Effect Size", 0.5f, 1.5f, 0.76f),
         AnimSetting.Slider("morph_speed", "Shape Morph Speed", 0.1f, 3.0f, 0.8f),
         AnimSetting.Slider("rot_speed", "Rotation Speed", -40.0f, 40.0f, 15.0f),
         AnimSetting.Slider("wander_radius", "Wander Distance", 0f, 100f, 40f),

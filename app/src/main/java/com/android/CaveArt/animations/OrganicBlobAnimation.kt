@@ -29,7 +29,7 @@ class OrganicBlobAnimation : WallpaperAnimation {
     override fun supports3DPop(): Boolean = true
     
     override fun getCustomSettings(): List<AnimSetting> = listOf(
-        AnimSetting.Slider("effect_scale", "Effect Size", 0.5f, 1.5f, 1.0f),
+        AnimSetting.Slider("effect_scale", "Effect Size", 0.5f, 1.5f, 0.76f),
         AnimSetting.Slider("blob_wobble_size", "Blob Wobble Size", 0.01f, 0.15f, 0.05f)
     )
     
