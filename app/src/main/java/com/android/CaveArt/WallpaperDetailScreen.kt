@@ -93,14 +93,12 @@ fun EffectsControlsSheet(
         if (uri != null) {
             scope.launch(Dispatchers.IO) {
                 try {
-                    
                     context.contentResolver.openInputStream(uri)?.use { input ->
                         java.io.File(context.filesDir, "custom_model.glb").outputStream().use { output ->
                             input.copyTo(output)
                         }
                     }
                     withContext(Dispatchers.Main) {
-                        
                         viewModel.setFilamentEnabled(false)
                         delay(100)
                         viewModel.setFilamentEnabled(true)
@@ -152,7 +150,7 @@ fun EffectsControlsSheet(
 
     LaunchedEffect(wallpaper) {
         withContext(Dispatchers.IO) {
-            val bitmap = if(wallpaper.uri != null) BitmapHelper.decodeSampledBitmapFromUri(context, wallpaper.uri, 500) else BitmapFactory.decodeResource(context.resources, wallpaper.resourceId)
+            val bitmap = if(wallpaper.uri != null) BitmapHelper.decodeSampledBitmapFromUri(context, wallpaper.uri, 500) else BitmapHelper.decodeSampledBitmapFromResource(context.resources, wallpaper.resourceId, 500)
             if (bitmap != null) {
                 val scaledBitmap = Bitmap.createScaledBitmap(bitmap, 112, 112, true)
                 val pixels = IntArray(scaledBitmap.width * scaledBitmap.height)
@@ -745,7 +743,6 @@ class FilamentTextureController(val textureView: android.view.TextureView) : and
         resourceLoader = com.google.android.filament.gltfio.ResourceLoader(engine)
 
         try {
-            
             val customFile = java.io.File(textureView.context.filesDir, "custom_model.glb")
             if (customFile.exists()) {
                 val bytes = customFile.readBytes()

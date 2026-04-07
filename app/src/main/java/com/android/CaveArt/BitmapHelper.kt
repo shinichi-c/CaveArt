@@ -7,6 +7,7 @@ import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.media.ExifInterface
 import android.net.Uri
+import kotlin.math.max
 
 object BitmapHelper {
     
@@ -17,15 +18,19 @@ object BitmapHelper {
     ): Bitmap {
         val options = BitmapFactory.Options().apply {
             inJustDecodeBounds = true
+            inScaled = false
         }
         BitmapFactory.decodeResource(res, resId, options)
         
         options.inSampleSize = calculateInSampleSize(options, maxDimension)
         options.inJustDecodeBounds = false
         options.inPreferredConfig = Bitmap.Config.ARGB_8888
+        options.inScaled = false
         
-        return BitmapFactory.decodeResource(res, resId, options) 
+        val bitmap = BitmapFactory.decodeResource(res, resId, options) 
             ?: throw IllegalArgumentException("Resource not found or decode failed for ID: $resId")
+            
+        return scaleToFit(bitmap, maxDimension)
     }
     
     fun decodeSampledBitmapFromUri(
@@ -60,11 +65,30 @@ object BitmapHelper {
                 e.printStackTrace()
             }
             
-            return rotateBitmap(bitmap, orientation)
+            val rotated = rotateBitmap(bitmap, orientation)
+            return scaleToFit(rotated, maxDimension)
         } catch (e: Exception) {
             e.printStackTrace()
             throw e
         }
+    }
+
+    private fun scaleToFit(bitmap: Bitmap, maxDimension: Int): Bitmap {
+        val width = bitmap.width
+        val height = bitmap.height
+        val maxSide = max(width, height)
+        
+        if (maxSide <= maxDimension) return bitmap
+        
+        val scale = maxDimension.toFloat() / maxSide
+        val newWidth = (width * scale).toInt()
+        val newHeight = (height * scale).toInt()
+        
+        val scaled = Bitmap.createScaledBitmap(bitmap, newWidth, newHeight, true)
+        if (scaled != bitmap) {
+            bitmap.recycle()
+        }
+        return scaled
     }
 
     private fun rotateBitmap(bitmap: Bitmap, orientation: Int): Bitmap {

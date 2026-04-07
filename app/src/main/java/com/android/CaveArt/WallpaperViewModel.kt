@@ -209,6 +209,26 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     private val cutoutCache = object : LruCache<String, Bitmap>(cacheSize / 4) {
         override fun sizeOf(key: String, bitmap: Bitmap) = bitmap.byteCount / 1024
     }
+
+    private val originalCache = object : LruCache<String, Bitmap>(cacheSize / 4) {
+        override fun sizeOf(key: String, bitmap: Bitmap) = bitmap.byteCount / 1024
+    }
+
+    private suspend fun getCachedOriginal(context: Context, wallpaper: Wallpaper, maxDim: Int = 1024): Bitmap? = withContext(Dispatchers.IO) {
+        val cacheKey = "orig_${wallpaper.id}_$maxDim"
+        originalCache.get(cacheKey)?.let { return@withContext it }
+        
+        val bitmap = if (wallpaper.uri != null) {
+            BitmapHelper.decodeSampledBitmapFromUri(context, wallpaper.uri, maxDim)
+        } else {
+            BitmapHelper.decodeSampledBitmapFromResource(context.resources, wallpaper.resourceId, maxDim)
+        }
+        
+        if (bitmap != null) {
+            originalCache.put(cacheKey, bitmap)
+        }
+        return@withContext bitmap
+    }
     
     private suspend fun generateCutoutInternal(originalBitmap: Bitmap): Bitmap? {
         val coarse = segmentationHelper.generateSoftMask(originalBitmap) ?: return null
@@ -228,11 +248,7 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     
     suspend fun getPreviewAnimationComponents(context: Context, wallpaper: Wallpaper): Pair<Bitmap?, Bitmap?> = withContext(Dispatchers.Default) {
         try {
-            val original = if (wallpaper.uri != null) {
-                BitmapHelper.decodeSampledBitmapFromUri(context, wallpaper.uri, 1024)
-            } else {
-                BitmapHelper.decodeSampledBitmapFromResource(context.resources, wallpaper.resourceId, 1024)
-            }
+            val original = getCachedOriginal(context, wallpaper, 1024)
             var cutout: Bitmap? = null
             val isAnimMaskNeeded = isAnimationEnabled && AnimationFactory.getAnimation(currentAnimationStyle).needsSegmentationMask()
             
@@ -262,11 +278,7 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         
         return withContext(Dispatchers.Default) {
             try {
-                val originalBitmap = if (wallpaper.uri != null) {
-                    BitmapHelper.decodeSampledBitmapFromUri(context, wallpaper.uri, 1024)
-                } else {
-                    BitmapHelper.decodeSampledBitmapFromResource(context.resources, wallpaper.resourceId, 1024)
-                }
+                val originalBitmap = getCachedOriginal(context, wallpaper, 1024) ?: return@withContext null
                 
                 var cutout: Bitmap? = null
                 if (needsCutout) {
@@ -364,7 +376,7 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
             isRunningDebug = true
             try {
                 val original = if (target.uri != null) BitmapHelper.decodeSampledBitmapFromUri(context, target.uri, 512)
-                else BitmapFactory.decodeResource(context.resources, target.resourceId)
+                else BitmapHelper.decodeSampledBitmapFromResource(context.resources, target.resourceId, 512)
                 if (original != null) {
                     val res = PixelDebugHelper.runFullPipelineDiagnostic(context, original)
                     withContext(Dispatchers.Main) { 
