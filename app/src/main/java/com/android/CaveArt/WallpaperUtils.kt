@@ -134,7 +134,9 @@ suspend fun setDeviceWallpaper(
         windowManager.defaultDisplay.getMetrics(metrics)
     }
     
-    val rawBitmap = viewModel.getOrCreateProcessedBitmap(context, wallpaper) ?: return@withContext
+    val maxScreenDim = max(metrics.widthPixels, metrics.heightPixels)
+    val targetDim = max(maxScreenDim, 2500)
+    val rawBitmap = viewModel.getOrCreateProcessedBitmap(context, wallpaper, allowMagic = true, maxDim = targetDim) ?: return@withContext
 
     try {
         if (isFixedAlignmentEnabled) {
@@ -147,7 +149,9 @@ suspend fun setDeviceWallpaper(
             val h = rawBitmap.height * scale
             val left = (metrics.widthPixels - w) / 2f
             val top = (metrics.heightPixels - h) / 2f
-            canvas.drawBitmap(rawBitmap, null, RectF(left, top, left+w, top+h), null)
+            
+            val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+            canvas.drawBitmap(rawBitmap, null, RectF(left, top, left+w, top+h), paint)
             
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) wallpaperManager.setBitmap(finalBitmap, null, false, destination)
             else wallpaperManager.setBitmap(finalBitmap)
