@@ -253,8 +253,9 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
             val isAnimMaskNeeded = isAnimationEnabled && AnimationFactory.getAnimation(currentAnimationStyle).needsSegmentationMask()
             
             if (isAnimMaskNeeded && original != null) {
-                cutout = cutoutCache.get(wallpaper.id) ?: generateCutoutInternal(original)?.also { 
-                    cutoutCache.put(wallpaper.id, it) 
+                val cutoutKey = "${wallpaper.id}_1024"
+                cutout = cutoutCache.get(cutoutKey) ?: generateCutoutInternal(original)?.also { 
+                    cutoutCache.put(cutoutKey, it) 
                 }
             }
             Pair(original, cutout)
@@ -263,27 +264,28 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    suspend fun getOrCreateProcessedBitmap(context: Context, wallpaper: Wallpaper, allowMagic: Boolean = true): Bitmap? {
+    suspend fun getOrCreateProcessedBitmap(context: Context, wallpaper: Wallpaper, allowMagic: Boolean = true, maxDim: Int = 1024): Bitmap? {
         val isAnimMaskNeeded = isAnimationEnabled && AnimationFactory.getAnimation(currentAnimationStyle).needsSegmentationMask()
         val needsCutout = allowMagic && (isMagicShapeEnabled || isAnimMaskNeeded)
         
         val paramKey = currentAnimParams.entries.joinToString { "${it.key}=${it.value}" }
         val cacheKey = if(needsCutout) {
-            "final_${wallpaper.id}_${currentMagicShape}_${currentBackgroundColor}_${is3DPopEnabled}_${magicScale}_${isCentered}_${currentAnimationStyle.name}_$paramKey"
+            "final_${wallpaper.id}_${currentMagicShape}_${currentBackgroundColor}_${is3DPopEnabled}_${magicScale}_${isCentered}_${currentAnimationStyle.name}_${paramKey}_$maxDim"
         } else {
-            "preview_${wallpaper.id}"
+            "preview_${wallpaper.id}_$maxDim"
         }
         
         bitmapCache.get(cacheKey)?.let { return it }
         
         return withContext(Dispatchers.Default) {
             try {
-                val originalBitmap = getCachedOriginal(context, wallpaper, 1024) ?: return@withContext null
+                val originalBitmap = getCachedOriginal(context, wallpaper, maxDim) ?: return@withContext null
                 
                 var cutout: Bitmap? = null
                 if (needsCutout) {
-                    cutout = cutoutCache.get(wallpaper.id) ?: generateCutoutInternal(originalBitmap)?.also { 
-                        cutoutCache.put(wallpaper.id, it) 
+                    val cutoutKey = "${wallpaper.id}_$maxDim"
+                    cutout = cutoutCache.get(cutoutKey) ?: generateCutoutInternal(originalBitmap)?.also { 
+                        cutoutCache.put(cutoutKey, it) 
                     }
                 }
 
