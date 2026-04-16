@@ -1,29 +1,37 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-
+    	
     <path
-        android:fillColor="#FF81D4FA"
-        android:pathData="M 30 45 L 54 25 L 78 45 L 54 50 Z" />
-
+        android:pathData="M32,74V44C32,31.8 41.8,22 54,22C66.2,22 76,31.8 76,44V74C76,77.3 73.3,80 70,80H38C34.7,80 32,77.3 32,74Z"
+        android:fillColor="#15000000"/>
+        
     <path
-        android:fillColor="#FF4FC3F7"
-        android:pathData="M 30 48 L 54 30 L 78 48 L 54 55 Z" />
+        android:pathData="M32,72V44C32,31.8 41.8,22 54,22C66.2,22 76,31.8 76,44V72C76,75.3 73.3,78 70,78H62V44C62,39.6 58.4,36 54,36C49.6,36 46,39.6 46,44V78H38C34.7,78 32,75.3 32,72Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="54"
+                android:startY="22"
+                android:endX="54"
+                android:endY="78"
+                android:type="linear">
+                <item android:offset="0" android:color="#FF42A5F5" />
+                <item android:offset="1" android:color="#FF1976D2" />
+            </gradient>
+        </aapt:attr>
+    </path>
     
     <path
-        android:fillColor="#FF0288D1"
-        android:pathData="M 54 55 L 58 50 L 54 65 L 50 50 Z" />
-
-    <path
-        android:fillColor="#FF4FC3F7"
-        android:pathData="M 54 65 L 50 80 L 58 80 Z" />
-
-    <path
-        android:strokeColor="#FFFFFFFF"
-        android:strokeWidth="2"
-        android:strokeLineCap="round"
-        android:pathData="M 54 25 L 60 20" />
+        android:pathData="M40,24C44,22.5 49,22 54,22C59,22 64,22.5 68,24"
+        android:strokeColor="#60FFFFFF"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round" />
         
+    <path
+        android:pathData="M54,42C56.2,42 58,43.8 58,46V54C58,56.2 56.2,58 54,58C51.8,58 50,56.2 50,54V46C50,43.8 51.8,42 54,42Z"
+        android:fillColor="#FFFFFF" />
+
 </vector>
