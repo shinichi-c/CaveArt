@@ -13,8 +13,8 @@ android {
         applicationId = "com.android.CaveArt"
         minSdk = 35
         targetSdk = 36
-        versionCode = 11
-        versionName = "4.2-FireFlies"
+        versionCode = 12
+        versionName = "4.4-FireFlies"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -94,7 +94,8 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
 
     implementation(libs.androidx.datastore.preferences)
- implementation("com.google.android.filament:filament-android:1.70.0")
+    implementation("com.google.android.filament:filament-android:1.70.0")
     implementation("com.google.android.filament:gltfio-android:1.70.0")
     implementation("com.google.android.filament:filament-utils-android:1.70.0")
+
 }
