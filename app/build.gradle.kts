@@ -98,4 +98,5 @@ dependencies {
     implementation("com.google.android.filament:gltfio-android:1.70.0")
     implementation("com.google.android.filament:filament-utils-android:1.70.0")
 
+    compileOnly("io.github.libxposed:api:101.0.1")
 }
