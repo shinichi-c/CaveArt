@@ -162,6 +162,32 @@ fun SettingsSheet(
                     onCheckedChange = { viewModel.setAmbientBlurEnabled(it) }
                 )
             }
+            
+            HorizontalDivider(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+            )
+
+            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(
+                        text = "Lockscreen Clock Size",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "${viewModel.lockscreenClockSize.toInt()} dp",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+                androidx.compose.material3.Slider(
+                    value = viewModel.lockscreenClockSize,
+                    onValueChange = { viewModel.updateLockscreenClockSize(context, it) },
+                    valueRange = 50f..150f 
+                )
+            }
 
             Spacer(modifier = Modifier.height(24.dp))
             
