@@ -4,8 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.graphics.Color
-import android.graphics.Typeface
+import android.graphics.*
 import android.net.Uri
 import android.util.TypedValue
 import android.view.Gravity
@@ -24,6 +23,7 @@ class CaveArtXposedModule : XposedModule() {
         var bcSmartspaceId = 0
         var topMarginPx = 300
         var bottomMarginPx = 30
+        var gapPx = 20
     }
 
     override fun onPackageLoaded(param: XposedModuleInterface.PackageLoadedParam) {
@@ -56,50 +56,108 @@ class CaveArtXposedModule : XposedModule() {
                         keyguardSliceViewId = context.resources.getIdentifier("keyguard_slice_view", "id", context.packageName)
                         bcSmartspaceId = context.resources.getIdentifier("bc_smartspace_view", "id", context.packageName)
                         
-                        topMarginPx = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 110f, context.resources.displayMetrics).toInt()
-                        bottomMarginPx = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 20f, context.resources.displayMetrics).toInt()
+                        gapPx = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 8f, context.resources.displayMetrics).toInt()
 
                         if (rootLayout.findViewById<View>(customClockId) == null) {
-                        	
-                            var initialSize = 95f
+                            
+                            var initialX = 0f
+                            var initialY = 110f
+                            var hSize = 100f
+                            var mSize = 75f
+                            var sWidth = 8f
+                            var cRound = 30f
+                            
                             try {
-                                val uri = Uri.parse("content://com.android.CaveArt.settings/clock_size")
-                                context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-                                    if (cursor.moveToFirst()) initialSize = cursor.getFloat(0)
-                                }
+                                val cr = context.contentResolver
+                                cr.query(Uri.parse("content://com.android.CaveArt.settings/clock_x"), null, null, null, null)?.use { if (it.moveToFirst()) initialX = it.getFloat(0) }
+                                cr.query(Uri.parse("content://com.android.CaveArt.settings/clock_y"), null, null, null, null)?.use { if (it.moveToFirst()) initialY = it.getFloat(0) }
+                                cr.query(Uri.parse("content://com.android.CaveArt.settings/clock_hour_size"), null, null, null, null)?.use { if (it.moveToFirst()) hSize = it.getFloat(0) }
+                                cr.query(Uri.parse("content://com.android.CaveArt.settings/clock_minute_size"), null, null, null, null)?.use { if (it.moveToFirst()) mSize = it.getFloat(0) }
+                                cr.query(Uri.parse("content://com.android.CaveArt.settings/clock_stroke_width"), null, null, null, null)?.use { if (it.moveToFirst()) sWidth = it.getFloat(0) }
+                                cr.query(Uri.parse("content://com.android.CaveArt.settings/clock_roundness"), null, null, null, null)?.use { if (it.moveToFirst()) cRound = it.getFloat(0) }
                             } catch (e: Exception) {}
 
-                            val myCustomClock = TextClock(context).apply {
+                            topMarginPx = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, initialY, context.resources.displayMetrics).toInt()
+                            val initialXPx = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, initialX, context.resources.displayMetrics)
+                            
+                            val myCustomClock = VectorTextClock(context).apply {
                                 id = customClockId 
                                 tag = "CAVE_ART_CLOCK"
                                 format12Hour = "hh:mm"
                                 format24Hour = "HH:mm"
                                 
-                                setTextSize(TypedValue.COMPLEX_UNIT_DIP, initialSize) 
-                                setTextColor(Color.WHITE)
-                                gravity = Gravity.CENTER
-                                typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
-                                setShadowLayer(15f, 0f, 5f, Color.argb(160, 0, 0, 0))
+                                hourSizeDp = hSize
+                                minuteSizeDp = mSize
+                                strokeW = sWidth
+                                curveRound = cRound
+                                
+                                translationX = initialXPx
                             }
-                            
+
+                            myCustomClock.viewTreeObserver.addOnPreDrawListener {
+                                val root = myCustomClock.parent as? ViewGroup
+                                if (root != null) {
+                                    val currentX = myCustomClock.translationX
+                                    val currentY = myCustomClock.translationY
+                                    
+                                    if (dateSmartspaceId != 0) {
+                                        root.findViewById<View>(dateSmartspaceId)?.apply {
+                                            translationX = currentX
+                                            translationY = currentY
+                                        }
+                                    }
+                                    if (keyguardSliceViewId != 0) {
+                                        root.findViewById<View>(keyguardSliceViewId)?.apply {
+                                            translationX = currentX
+                                            translationY = currentY
+                                        }
+                                    }
+                                    if (bcSmartspaceId != 0) {
+                                        root.findViewById<View>(bcSmartspaceId)?.apply {
+                                            translationX = currentX
+                                            translationY = currentY
+                                        }
+                                    }
+                                }
+                                true
+                            }
+
                             myCustomClock.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
-                                var receiver: BroadcastReceiver? = null
+                                var receiverStyle: BroadcastReceiver? = null
+                                var receiverPos: BroadcastReceiver? = null
                                 
                                 override fun onViewAttachedToWindow(v: View) {
-                                    receiver = object : BroadcastReceiver() {
+                                    receiverStyle = object : BroadcastReceiver() {
                                         override fun onReceive(ctx: Context?, intent: Intent?) {
-                                            if (intent?.action == "com.android.CaveArt.UPDATE_CLOCK_SIZE") {
-                                                val newSize = intent.getFloatExtra("clock_size", 95f)
-                                                (v as TextClock).setTextSize(TypedValue.COMPLEX_UNIT_DIP, newSize)
+                                            if (intent?.action == "com.android.CaveArt.UPDATE_CLOCK_STYLE") {
+                                            	
+                                                val clock = v as VectorTextClock
+                                                clock.hourSizeDp = intent.getFloatExtra("clock_hour_size", 100f)
+                                                clock.minuteSizeDp = intent.getFloatExtra("clock_minute_size", 75f)
+                                                clock.strokeW = intent.getFloatExtra("clock_stroke_width", 8f)
+                                                clock.curveRound = intent.getFloatExtra("clock_roundness", 30f)
+                                                clock.requestLayout() 
+                                                clock.invalidate()    
                                             }
                                         }
                                     }
                                     
-                                    context.registerReceiver(receiver, IntentFilter("com.android.CaveArt.UPDATE_CLOCK_SIZE"), Context.RECEIVER_EXPORTED)
+                                    receiverPos = object : BroadcastReceiver() {
+                                        override fun onReceive(ctx: Context?, intent: Intent?) {
+                                            val newX = intent?.getFloatExtra("clock_x", 0f) ?: 0f
+                                            val newY = intent?.getFloatExtra("clock_y", 110f) ?: 110f
+                                            
+                                            v.translationX = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, newX, context.resources.displayMetrics)
+                                            topMarginPx = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, newY, context.resources.displayMetrics).toInt()
+                                        }
+                                    }
+                                    context.registerReceiver(receiverStyle, IntentFilter("com.android.CaveArt.UPDATE_CLOCK_STYLE"), Context.RECEIVER_EXPORTED)
+                                    context.registerReceiver(receiverPos, IntentFilter("com.android.CaveArt.UPDATE_CLOCK_POSITION"), Context.RECEIVER_EXPORTED)
                                 }
 
                                 override fun onViewDetachedFromWindow(v: View) {
-                                    receiver?.let { context.unregisterReceiver(it) }
+                                    receiverStyle?.let { context.unregisterReceiver(it) }
+                                    receiverPos?.let { context.unregisterReceiver(it) }
                                 }
                             })
 
@@ -167,14 +225,12 @@ class CaveArtXposedModule : XposedModule() {
 
                         if (dateSmartspaceId != 0) {
                             clearAnchorMethod.invoke(constraintSet, dateSmartspaceId, 3) 
-                            connectMethod.invoke(constraintSet, dateSmartspaceId, 3, customClockId, 4, bottomMarginPx) 
+                            connectMethod.invoke(constraintSet, dateSmartspaceId, 3, customClockId, 4, gapPx) 
                         }
-
                         if (keyguardSliceViewId != 0) {
                             clearAnchorMethod.invoke(constraintSet, keyguardSliceViewId, 3) 
-                            connectMethod.invoke(constraintSet, keyguardSliceViewId, 3, customClockId, 4, bottomMarginPx) 
+                            connectMethod.invoke(constraintSet, keyguardSliceViewId, 3, customClockId, 4, gapPx) 
                         }
-
                         if (bcSmartspaceId != 0) {
                             clearAnchorMethod.invoke(constraintSet, bcSmartspaceId, 3) 
                             if (dateSmartspaceId != 0) {
@@ -187,5 +243,68 @@ class CaveArtXposedModule : XposedModule() {
                 }
             } catch (e: Exception) {}
         }
+    }
+}
+
+class VectorTextClock(context: Context) : TextClock(context) {
+    var hourSizeDp = 100f
+    var minuteSizeDp = 75f
+    var strokeW = 8f
+    var curveRound = 30f
+    
+    val penPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        style = Paint.Style.STROKE 
+        strokeCap = Paint.Cap.ROUND 
+        strokeJoin = Paint.Join.ROUND 
+        typeface = Typeface.create("sans-serif-black", Typeface.NORMAL)
+        setShadowLayer(15f, 0f, 5f, Color.argb(160, 0, 0, 0))
+    }
+
+    init {
+        setTextColor(Color.TRANSPARENT)
+        gravity = Gravity.CENTER
+    }
+
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val maxSize = maxOf(hourSizeDp, minuteSizeDp)
+        setTextSize(TypedValue.COMPLEX_UNIT_DIP, maxSize)
+        super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        val timeString = text.toString()
+        if (timeString.isEmpty()) return
+
+        penPaint.strokeWidth = strokeW * resources.displayMetrics.density
+        penPaint.pathEffect = CornerPathEffect(curveRound * resources.displayMetrics.density)
+        
+        val hPx = hourSizeDp * resources.displayMetrics.density
+        val mPx = minuteSizeDp * resources.displayMetrics.density
+
+        var totalWidth = 0f
+        val parts = timeString.split(":")
+        val hoursStr = parts.getOrNull(0) ?: ""
+        val minsStr = parts.getOrNull(1) ?: ""
+
+        penPaint.textSize = hPx
+        totalWidth += penPaint.measureText(hoursStr)
+        penPaint.textSize = mPx
+        totalWidth += penPaint.measureText(":$minsStr")
+        
+        var startX = (width - totalWidth) / 2f
+        val baseY = height / 2f + (maxOf(hPx, mPx) / 3f)
+        
+        penPaint.textSize = hPx
+        val hourPath = Path()
+        penPaint.getTextPath(hoursStr, 0, hoursStr.length, startX, baseY, hourPath)
+        canvas.drawPath(hourPath, penPaint)
+        startX += penPaint.measureText(hoursStr)
+        
+        penPaint.textSize = mPx
+        val minPath = Path()
+        val minText = ":$minsStr"
+        penPaint.getTextPath(minText, 0, minText.length, startX, baseY, minPath)
+        canvas.drawPath(minPath, penPaint)
     }
 }
