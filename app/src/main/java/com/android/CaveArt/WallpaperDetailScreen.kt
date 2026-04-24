@@ -13,6 +13,7 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -30,6 +31,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.asComposePath
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
@@ -37,12 +39,16 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import com.android.CaveArt.animations.AnimationFactory
@@ -59,6 +65,9 @@ import kotlin.random.Random
 import com.materialkolor.quantize.QuantizerCelebi
 import com.materialkolor.score.Score
 import com.materialkolor.hct.Hct
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 import com.google.android.filament.Camera
 import com.google.android.filament.Engine as FilamentEngineCore
@@ -113,8 +122,7 @@ fun EffectsControlsSheet(
 
     var extractedColors by remember { mutableStateOf(listOf<Int>()) }
     var sliderPosition by remember { mutableFloatStateOf(viewModel.magicScale) }
-    
-    var selectedTab by remember { mutableStateOf(if (viewModel.isMagicShapeEnabled) "Shape" else if (viewModel.isFilamentEnabled) "3D Engine" else "Animation") }
+    var selectedTab by remember { mutableStateOf("Clock") }
     
     val currentAnim = remember(viewModel.currentAnimationStyle) { 
         AnimationFactory.getAnimation(viewModel.currentAnimationStyle) 
@@ -122,24 +130,22 @@ fun EffectsControlsSheet(
     
     val tabs = remember(viewModel.isMagicShapeEnabled, viewModel.isAnimationEnabled, viewModel.isFilamentEnabled, currentAnim) {
         val list = mutableListOf<String>()
+        list.add("Clock") 
         if (viewModel.isMagicShapeEnabled) {
             list.add("Shape")
             list.add("Style") 
         }
         if (viewModel.isAnimationEnabled) {
             list.add("Animation")
-            
             val hasStandard = currentAnim.supports3DPop() || currentAnim.supportsCenter() || currentAnim.supportsScale()
-            val hasCustom = currentAnim.hasCustomUI()
-            
-            if (hasStandard || hasCustom) {
-                list.add("Style")
-            }
+            if (hasStandard || currentAnim.hasCustomUI()) list.add("Style")
         }
-        if (viewModel.isFilamentEnabled) {
-            list.add("3D Engine")
-        }
+        if (viewModel.isFilamentEnabled) list.add("3D Engine")
         list
+    }
+
+    LaunchedEffect(selectedTab) {
+        viewModel.isLockscreenClockPreviewVisible = (selectedTab == "Clock")
     }
 
     LaunchedEffect(tabs) {
@@ -155,16 +161,12 @@ fun EffectsControlsSheet(
                 val scaledBitmap = Bitmap.createScaledBitmap(bitmap, 112, 112, true)
                 val pixels = IntArray(scaledBitmap.width * scaledBitmap.height)
                 scaledBitmap.getPixels(pixels, 0, scaledBitmap.width, 0, 0, scaledBitmap.width, scaledBitmap.height)
-                
                 val quantizerResult = QuantizerCelebi.quantize(pixels, 128)
-                val rankedColors: List<Int> = Score.score(quantizerResult)
+                val rankedColors = Score.score(quantizerResult)
                 
                 var finalColors = rankedColors.distinct().take(5)
-                
                 if (finalColors.size < 5 && finalColors.isNotEmpty()) {
-                    val seed = finalColors.first()
-                    val hct = Hct.fromInt(seed)
-                    
+                    val hct = Hct.fromInt(finalColors.first())
                     val generated = listOf(
                         Hct.from(hct.hue + 60.0, hct.chroma, hct.tone).toInt(),
                         Hct.from(hct.hue - 60.0, hct.chroma, hct.tone).toInt(),
@@ -174,13 +176,7 @@ fun EffectsControlsSheet(
                     )
                     finalColors = (finalColors + generated).distinct().take(5)
                 } else if (finalColors.isEmpty()) {
-                    finalColors = listOf(
-                        android.graphics.Color.parseColor("#4CAF50"),
-                        android.graphics.Color.parseColor("#2196F3"),
-                        android.graphics.Color.parseColor("#FF9800"),
-                        android.graphics.Color.parseColor("#E91E63"),
-                        android.graphics.Color.parseColor("#9C27B0")
-                    )
+                    finalColors = listOf(android.graphics.Color.parseColor("#4CAF50"), android.graphics.Color.parseColor("#2196F3"), android.graphics.Color.parseColor("#FF9800"), android.graphics.Color.parseColor("#E91E63"), android.graphics.Color.parseColor("#9C27B0"))
                 }
                 
                 withContext(Dispatchers.Main) {
@@ -195,12 +191,9 @@ fun EffectsControlsSheet(
         }
     }
     
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
+    Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
         
-        if (tabs.isNotEmpty()) {
+        if (tabs.isNotEmpty() && selectedTab != "Clock") {
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(48.dp),
@@ -218,71 +211,38 @@ fun EffectsControlsSheet(
                                     MagicShape.values().take(5).forEach { shape ->
                                         val isSelected = viewModel.currentMagicShape == shape
                                         Box(
-                                            modifier = Modifier
-                                                .weight(1f) 
-                                                .aspectRatio(1f) 
-                                                .clip(RoundedCornerShape(16.dp))
+                                            modifier = Modifier.weight(1f).aspectRatio(1f).clip(RoundedCornerShape(16.dp))
                                                 .background(if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant)
                                                 .clickable { viewModel.updateMagicConfig(shape, viewModel.currentBackgroundColor) },
                                             contentAlignment = Alignment.Center
-                                        ) {
-                                            ShapeIcon(
-                                                shape = shape, 
-                                                color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant, 
-                                                modifier = Modifier.fillMaxSize(0.45f)
-                                            )
-                                        }
+                                        ) { ShapeIcon(shape = shape, color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.fillMaxSize(0.45f)) }
                                     }
                                 }
-                                
                                 Spacer(Modifier.height(28.dp))
-                                
                                 Row(
                                     modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
                                     horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally)
                                 ) {
                                     extractedColors.forEach { colorInt ->
                                         val isSelected = viewModel.currentBackgroundColor == colorInt
-                                        Box(
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .aspectRatio(1f),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            if (isSelected) {
-                                                Box(modifier = Modifier.fillMaxSize().border(3.dp, Color(colorInt), CircleShape))
-                                            }
-                                            
-                                            Box(
-                                                modifier = Modifier
-                                                    .fillMaxSize(if (isSelected) 0.65f else 1f) 
-                                                    .clip(CircleShape)
-                                                    .background(Color(colorInt))
-                                                    .clickable { viewModel.updateMagicConfig(viewModel.currentMagicShape, colorInt) }
-                                            )
+                                        Box(modifier = Modifier.weight(1f).aspectRatio(1f), contentAlignment = Alignment.Center) {
+                                            if (isSelected) Box(modifier = Modifier.fillMaxSize().border(3.dp, Color(colorInt), CircleShape))
+                                            Box(modifier = Modifier.fillMaxSize(if (isSelected) 0.65f else 1f).clip(CircleShape).background(Color(colorInt)).clickable { viewModel.updateMagicConfig(viewModel.currentMagicShape, colorInt) })
                                         }
                                     }
                                 }
                             }
                         }
                         "Animation" -> {
-                            Column(
-                                modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
+                            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                                 Text("Animation Style", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 Spacer(Modifier.height(16.dp))
-                                Row(
-                                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                ) {
+                                Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                     AnimationStyle.values().forEach { style ->
                                         val isSelected = viewModel.currentAnimationStyle == style
                                         FilterChip(
-                                            selected = isSelected,
-                                            onClick = { viewModel.updateAnimationStyle(style) },
-                                            label = { Text(style.label, fontWeight = FontWeight.Bold) },
-                                            shape = RoundedCornerShape(16.dp),
+                                            selected = isSelected, onClick = { viewModel.updateAnimationStyle(style) },
+                                            label = { Text(style.label, fontWeight = FontWeight.Bold) }, shape = RoundedCornerShape(16.dp),
                                             colors = FilterChipDefaults.filterChipColors(selectedContainerColor = MaterialTheme.colorScheme.primaryContainer, selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer),
                                             border = FilterChipDefaults.filterChipBorder(enabled = true, selected = isSelected, borderColor = Color.Transparent)
                                         )
@@ -291,19 +251,13 @@ fun EffectsControlsSheet(
                             }
                         }
                         "3D Engine" -> {
-                            Column(
-                                modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
+                            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                                 Text("Filament Engine Active", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
                                 Spacer(Modifier.height(8.dp))
                                 Text("Applies a physical 3D scene to your background. Import a .glb file to render it.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-                                
                                 Spacer(Modifier.height(16.dp))
-                                
                                 Button(
-                                    onClick = { modelPickerLauncher.launch("*/*") },
-                                    shape = RoundedCornerShape(16.dp),
+                                    onClick = { modelPickerLauncher.launch("*/*") }, shape = RoundedCornerShape(16.dp),
                                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primaryContainer, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
                                 ) {
                                     Icon(Icons.Default.FolderOpen, contentDescription = "Import")
@@ -320,24 +274,8 @@ fun EffectsControlsSheet(
                                 
                                 if (showPop || showCenter) {
                                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                        if (showPop) {
-                                            FilterChip(
-                                                selected = viewModel.is3DPopEnabled, 
-                                                onClick = { viewModel.toggle3DPop() }, 
-                                                label = { Text("3D Pop", fontWeight = FontWeight.Bold) }, 
-                                                leadingIcon = { Icon(Icons.Default.Layers, null, Modifier.size(18.dp)) }, 
-                                                shape = RoundedCornerShape(16.dp), border = null
-                                            )
-                                        }
-                                        if (showCenter) {
-                                            FilterChip(
-                                                selected = viewModel.isCentered, 
-                                                onClick = { viewModel.toggleCentered() }, 
-                                                label = { Text("Center", fontWeight = FontWeight.Bold) }, 
-                                                leadingIcon = { Icon(Icons.Default.FilterCenterFocus, null, Modifier.size(18.dp)) }, 
-                                                shape = RoundedCornerShape(16.dp), border = null
-                                            )
-                                        }
+                                        if (showPop) FilterChip(selected = viewModel.is3DPopEnabled, onClick = { viewModel.toggle3DPop() }, label = { Text("3D Pop", fontWeight = FontWeight.Bold) }, leadingIcon = { Icon(Icons.Default.Layers, null, Modifier.size(18.dp)) }, shape = RoundedCornerShape(16.dp), border = null)
+                                        if (showCenter) FilterChip(selected = viewModel.isCentered, onClick = { viewModel.toggleCentered() }, label = { Text("Center", fontWeight = FontWeight.Bold) }, leadingIcon = { Icon(Icons.Default.FilterCenterFocus, null, Modifier.size(18.dp)) }, shape = RoundedCornerShape(16.dp), border = null)
                                     }
                                 }
                                 
@@ -356,81 +294,94 @@ fun EffectsControlsSheet(
                                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                                         Spacer(Modifier.height(16.dp))
                                     }
-                                    
-                                    currentAnim.CustomUI(
-                                        params = viewModel.currentAnimParams,
-                                        onUpdateParam = { id, value -> viewModel.updateAnimParam(id, value) }
-                                    )
+                                    currentAnim.CustomUI(params = viewModel.currentAnimParams, onUpdateParam = { id, value -> viewModel.updateAnimParam(id, value) })
                                 }
                             }
                         }
                     }
                 }
             }
-
             Spacer(Modifier.height(16.dp))
+        } else if (selectedTab == "Clock") {
             
-            Surface(
-                modifier = Modifier.navigationBarsPadding().padding(bottom = 12.dp).height(64.dp),
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.background,
-                shadowElevation = 0.dp
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(48.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.background), 
+                elevation = CardDefaults.cardElevation(0.dp)
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(vertical = 28.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
+                    Text("Vector Pen Clock", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.height(4.dp))
+                    Text("Pinch/Drag the wallpaper to position. Use sliders to customize the pen engine.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                    
+                    Spacer(Modifier.height(24.dp))
+
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Hour Size", style = MaterialTheme.typography.labelMedium)
+                        Text("${viewModel.clockHourSize.toInt()}", style = MaterialTheme.typography.labelMedium)
+                    }
+                    Slider(value = viewModel.clockHourSize, onValueChange = { viewModel.updateClockStyle(context, it, viewModel.clockMinuteSize, viewModel.clockStrokeWidth, viewModel.clockRoundness) }, valueRange = 40f..200f)
+
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Minute Size", style = MaterialTheme.typography.labelMedium)
+                        Text("${viewModel.clockMinuteSize.toInt()}", style = MaterialTheme.typography.labelMedium)
+                    }
+                    Slider(value = viewModel.clockMinuteSize, onValueChange = { viewModel.updateClockStyle(context, viewModel.clockHourSize, it, viewModel.clockStrokeWidth, viewModel.clockRoundness) }, valueRange = 40f..200f)
+
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Pen Thickness", style = MaterialTheme.typography.labelMedium)
+                        Text(String.format("%.1f", viewModel.clockStrokeWidth), style = MaterialTheme.typography.labelMedium)
+                    }
+                    Slider(value = viewModel.clockStrokeWidth, onValueChange = { viewModel.updateClockStyle(context, viewModel.clockHourSize, viewModel.clockMinuteSize, it, viewModel.clockRoundness) }, valueRange = 1f..25f)
+
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Curve Roundness", style = MaterialTheme.typography.labelMedium)
+                        Text("${viewModel.clockRoundness.toInt()}", style = MaterialTheme.typography.labelMedium)
+                    }
+                    Slider(value = viewModel.clockRoundness, onValueChange = { viewModel.updateClockStyle(context, viewModel.clockHourSize, viewModel.clockMinuteSize, viewModel.clockStrokeWidth, it) }, valueRange = 0f..80f)
+                }
+            }
+            Spacer(Modifier.height(16.dp))
+        }
+
+        if (tabs.isNotEmpty()) {
+            Surface(
+                modifier = Modifier.navigationBarsPadding().padding(bottom = 12.dp).height(64.dp), shape = CircleShape,
+                color = MaterialTheme.colorScheme.background, shadowElevation = 0.dp
+            ) {
+                Row(modifier = Modifier.padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
                     tabs.forEach { tab ->
                         val isSelected = selectedTab == tab
                         val tabIcon = when (tab) {
+                            "Clock" -> Icons.Default.Lock
                             "Shape" -> Icons.Default.Category
                             "Animation" -> Icons.Default.Animation
                             "3D Engine" -> Icons.Default.ViewInAr
                             else -> Icons.Default.Palette
                         }
-
                         Box(
-                            modifier = Modifier
-                                .height(48.dp)
-                                .clip(CircleShape)
-                                .background(if (isSelected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
-                                .clickable { selectedTab = tab }
-                                .padding(horizontal = if (isSelected) 20.dp else 16.dp),
+                            modifier = Modifier.height(48.dp).clip(CircleShape).background(if (isSelected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent).clickable { selectedTab = tab }.padding(horizontal = if (isSelected) 20.dp else 16.dp),
                             contentAlignment = Alignment.Center
                         ) {
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                if (isSelected) {
-                                    Icon(
-                                        imageVector = tabIcon, 
-                                        contentDescription = null, 
-                                        modifier = Modifier.size(18.dp), 
-                                        tint = MaterialTheme.colorScheme.onSecondaryContainer
-                                    )
-                                }
-                                Text(
-                                    text = tab,
-                                    style = MaterialTheme.typography.labelLarge,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (isSelected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                if (isSelected) Icon(imageVector = tabIcon, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSecondaryContainer)
+                                Text(text = tab, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = if (isSelected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                     }
                 }
             }
-        } else {
-            Spacer(Modifier.navigationBarsPadding().padding(bottom = 12.dp))
         }
     }
 }
 
 @Composable
 fun ShapeIcon(shape: MagicShape, color: Color, modifier: Modifier = Modifier) {
-    Canvas(modifier = modifier) {
+    androidx.compose.foundation.Canvas(modifier = modifier) {
         val rect = RectF(0f, 0f, size.width, size.height)
         drawPath(path = ShapePathProvider.getPathForShape(shape, rect).asComposePath(), color = color)
     }
@@ -456,16 +407,9 @@ fun LiveEffectImage(
     }
 
     LaunchedEffect(
-        wallpaper, 
-        viewModel.isAnimationEnabled, 
-        viewModel.isMagicShapeEnabled,
-        viewModel.isFilamentEnabled,
-        viewModel.currentMagicShape, 
-        viewModel.currentBackgroundColor, 
-        viewModel.is3DPopEnabled, 
-        viewModel.magicScale, 
-        viewModel.isCentered, 
-        viewModel.currentAnimationStyle
+        wallpaper, viewModel.isAnimationEnabled, viewModel.isMagicShapeEnabled,
+        viewModel.isFilamentEnabled, viewModel.currentMagicShape, viewModel.currentBackgroundColor, 
+        viewModel.is3DPopEnabled, viewModel.magicScale, viewModel.isCentered, viewModel.currentAnimationStyle
     ) {
         if (viewModel.isFilamentEnabled) {
             currentBitmap = null
@@ -492,35 +436,25 @@ fun LiveEffectImage(
         if (currentBitmap == null && viewModel.isFilamentEnabled) {
             AndroidView(
                 modifier = Modifier.fillMaxSize(),
-                factory = { ctx ->
-                    TextureView(ctx).apply {
-                        FilamentTextureController(this)
-                    }
-                }
+                factory = { ctx -> TextureView(ctx).apply { FilamentTextureController(this) } }
             )
         } else if (currentBitmap == null) {
-            if (wallpaper.uri != null) {
-                Image(painter = rememberAsyncImagePainter(wallpaper.uri), contentDescription = null, modifier = Modifier.fillMaxSize().blur(25.dp), contentScale = ContentScale.Crop)
-            } else {
-                Image(painter = painterResource(id = wallpaper.resourceId), contentDescription = null, modifier = Modifier.fillMaxSize().blur(25.dp), contentScale = ContentScale.Crop)
-            }
+            if (wallpaper.uri != null) Image(painter = rememberAsyncImagePainter(wallpaper.uri), contentDescription = null, modifier = Modifier.fillMaxSize().blur(25.dp), contentScale = ContentScale.Crop)
+            else Image(painter = painterResource(id = wallpaper.resourceId), contentDescription = null, modifier = Modifier.fillMaxSize().blur(25.dp), contentScale = ContentScale.Crop)
             Spacer(modifier = Modifier.fillMaxSize().background(overlayColor))
             ParticleLoadingOverlay(color = particleColor)
             val infiniteTransition = rememberInfiniteTransition(label = "IconPulse")
             val scale by infiniteTransition.animateFloat(initialValue = 1f, targetValue = 1.15f, animationSpec = infiniteRepeatable(tween(1200), RepeatMode.Reverse), label = "Scale")
             val glowAlpha by infiniteTransition.animateFloat(initialValue = 0.3f, targetValue = 0.7f, animationSpec = infiniteRepeatable(tween(1200), RepeatMode.Reverse), label = "Glow")
             Box(contentAlignment = Alignment.Center) {
-                Canvas(modifier = Modifier.size(100.dp).scale(scale)) { drawCircle(brush = Brush.radialGradient(colors = listOf(particleColor.copy(alpha = glowAlpha), Color.Transparent), center = center, radius = size.width / 2)) }
+                androidx.compose.foundation.Canvas(modifier = Modifier.size(100.dp).scale(scale)) { drawCircle(brush = Brush.radialGradient(colors = listOf(particleColor.copy(alpha = glowAlpha), Color.Transparent), center = center, radius = size.width / 2)) }
                 Icon(Icons.Default.AutoAwesome, "Processing", tint = iconColor, modifier = Modifier.size(48.dp).scale(scale))
             }
         }
         
         if (currentBitmap != null) {
             if (viewModel.isAnimationEnabled && previewOriginal != null) {
-                val currentAnim = remember(viewModel.currentAnimationStyle) { 
-                    AnimationFactory.getAnimation(viewModel.currentAnimationStyle).apply { onUnlock() } 
-                }
-                
+                val currentAnim = remember(viewModel.currentAnimationStyle) { AnimationFactory.getAnimation(viewModel.currentAnimationStyle).apply { onUnlock() } }
                 var frameTimeNanos by remember { mutableLongStateOf(0L) }
                 
                 LaunchedEffect(currentAnim) {
@@ -535,11 +469,7 @@ fun LiveEffectImage(
                 }
 
                 val paint = remember { android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG or android.graphics.Paint.FILTER_BITMAP_FLAG) }
-                val maskXferPaint = remember { 
-                    android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { 
-                        xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.SRC_IN) 
-                    } 
-                }
+                val maskXferPaint = remember { android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.SRC_IN) } }
                 val clipPath = remember { android.graphics.Path() }
                 val screenShapeRect = remember { android.graphics.RectF() }
                 
@@ -557,114 +487,104 @@ fun LiveEffectImage(
                         }
                 ) {
                     frameTimeNanos.let {} 
-                    
-                    val config = LiveWallpaperConfig(
-                        shapeName = viewModel.currentMagicShape.name,
-                        backgroundColor = viewModel.currentBackgroundColor,
-                        is3DPopEnabled = viewModel.is3DPopEnabled,
-                        scale = viewModel.magicScale,
-                        isCentered = viewModel.isCentered,
-                        animationStyle = viewModel.currentAnimationStyle.name,
-                        isMagicShapeEnabled = false,
-                        isAnimationEnabled = true,
-                        isFilamentEnabled = false,
-                        animParams = viewModel.currentAnimParams
-                    )
-
-                    val geo = ShapeEffectHelper.getUnifiedGeometry(
-                        previewOriginal!!.width, previewOriginal!!.height,
-                        size.width, size.height,
-                        previewMask, config
-                    )
-                    
-                    drawIntoCanvas { canvas ->
-                        currentAnim.draw(
-                            canvas.nativeCanvas,
-                            previewOriginal!!,
-                            previewMask,
-                            geo,
-                            config,
-                            paint,
-                            maskXferPaint,
-                            clipPath,
-                            screenShapeRect
-                        )
-                    }
+                    val config = LiveWallpaperConfig(shapeName = viewModel.currentMagicShape.name, backgroundColor = viewModel.currentBackgroundColor, is3DPopEnabled = viewModel.is3DPopEnabled, scale = viewModel.magicScale, isCentered = viewModel.isCentered, animationStyle = viewModel.currentAnimationStyle.name, isMagicShapeEnabled = false, isAnimationEnabled = true, isFilamentEnabled = false, animParams = viewModel.currentAnimParams)
+                    val geo = ShapeEffectHelper.getUnifiedGeometry(previewOriginal!!.width, previewOriginal!!.height, size.width, size.height, previewMask, config)
+                    drawIntoCanvas { canvas -> currentAnim.draw(canvas.nativeCanvas, previewOriginal!!, previewMask, geo, config, paint, maskXferPaint, clipPath, screenShapeRect) }
                 }
-
-                var showHint by remember { mutableStateOf(true) }
-                
-                LaunchedEffect(Unit) {
-                    delay(4000)
-                    showHint = false
-                }
-
-                androidx.compose.animation.AnimatedVisibility(
-                    visible = showHint,
-                    enter = fadeIn(tween(500)),
-                    exit = fadeOut(tween(800)),
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .padding(top = 24.dp)
-                ) {
-                    Surface(
-                        color = Color.Black.copy(alpha = 0.55f),
-                        shape = RoundedCornerShape(20.dp),
-                        modifier = Modifier.padding(horizontal = 16.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Icon(
-                                Icons.Default.TouchApp, 
-                                contentDescription = null, 
-                                tint = Color.White, 
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Text(
-                                "Press & hold to test lock screen",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.SemiBold,
-                                color = Color.White
-                            )
-                        }
-                    }
-                }
-
             } else {
-                
                 val infiniteTransition = rememberInfiniteTransition(label = "LivePreview")
-                val finalScale by infiniteTransition.animateFloat(
-                    initialValue = 1f, targetValue = 1.03f,
-                    animationSpec = infiniteRepeatable(tween(3000, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "animScale"
-                )
+                val finalScale by infiniteTransition.animateFloat(initialValue = 1f, targetValue = 1.03f, animationSpec = infiniteRepeatable(tween(3000, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "animScale")
 
                 AnimatedContent(
-                    targetState = currentBitmap, 
-                    label = "LiveDepthAnim", 
-                    transitionSpec = { 
-                        (fadeIn(animationSpec = tween(500)) + scaleIn(initialScale = 0.95f, animationSpec = tween(500, easing = LinearOutSlowInEasing)))
-                        .togetherWith(fadeOut(animationSpec = tween(300)) + scaleOut(targetScale = 1.15f, animationSpec = tween(400, easing = FastOutSlowInEasing))) 
-                    }
+                    targetState = currentBitmap, label = "LiveDepthAnim", 
+                    transitionSpec = { (fadeIn(animationSpec = tween(500)) + scaleIn(initialScale = 0.95f, animationSpec = tween(500, easing = LinearOutSlowInEasing))).togetherWith(fadeOut(animationSpec = tween(300)) + scaleOut(targetScale = 1.15f, animationSpec = tween(400, easing = FastOutSlowInEasing))) }
                 ) { bitmap ->
                     if (bitmap != null) {
-                        Image(
-                            bitmap = bitmap.asImageBitmap(), 
-                            contentDescription = null, 
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .graphicsLayer {
-                                    scaleX = finalScale
-                                    scaleY = finalScale
-                                }, 
-                            contentScale = ContentScale.Crop
-                        )
+                        Image(bitmap = bitmap.asImageBitmap(), contentDescription = null, modifier = Modifier.fillMaxSize().graphicsLayer { scaleX = finalScale; scaleY = finalScale }, contentScale = ContentScale.Crop)
                     }
                 }
             }
         }
+
+        if (viewModel.isLockscreenClockPreviewVisible) {
+            val density = LocalDensity.current
+            val config = LocalConfiguration.current
+            
+            val vectorPaint = remember {
+                android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                    color = android.graphics.Color.WHITE
+                    style = android.graphics.Paint.Style.STROKE
+                    strokeCap = android.graphics.Paint.Cap.ROUND
+                    strokeJoin = android.graphics.Paint.Join.ROUND
+                    typeface = android.graphics.Typeface.create("sans-serif-black", android.graphics.Typeface.NORMAL)
+                    setShadowLayer(15f, 0f, 5f, android.graphics.Color.argb(160, 0, 0, 0))
+                }
+            }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(Unit) {
+                        detectTransformGestures { _, pan, zoom, _ ->
+                            
+                            val newHour = (viewModel.clockHourSize * zoom).coerceIn(40f, 200f)
+                            val newMinute = (viewModel.clockMinuteSize * zoom).coerceIn(40f, 200f)
+                            
+                            val newX = viewModel.lockscreenClockOffsetX + with(density) { pan.x.toDp().value }
+                            val newY = (viewModel.lockscreenClockOffsetY + with(density) { pan.y.toDp().value }).coerceIn(0f, config.screenHeightDp.toFloat())
+                            
+                            viewModel.updateClockStyle(context, newHour, newMinute, viewModel.clockStrokeWidth, viewModel.clockRoundness)
+                            viewModel.updateLockscreenClockPosition(context, newX, newY)
+                        }
+                    },
+                contentAlignment = Alignment.TopCenter 
+            ) {
+                
+                Box(modifier = Modifier.fillMaxWidth().height(250.dp).background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.5f), Color.Transparent))))
+
+                androidx.compose.foundation.Canvas(
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    val hPx = with(density) { viewModel.clockHourSize.dp.toPx() }
+                    val mPx = with(density) { viewModel.clockMinuteSize.dp.toPx() }
+                    
+                    vectorPaint.strokeWidth = with(density) { viewModel.clockStrokeWidth.dp.toPx() }
+                    vectorPaint.pathEffect = android.graphics.CornerPathEffect(with(density) { viewModel.clockRoundness.dp.toPx() })
+
+                    val timeString = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
+                    val parts = timeString.split(":")
+                    val hoursStr = parts.getOrNull(0) ?: ""
+                    val minsStr = parts.getOrNull(1) ?: ""
+
+                    var totalWidth = 0f
+                    vectorPaint.textSize = hPx
+                    totalWidth += vectorPaint.measureText(hoursStr)
+                    vectorPaint.textSize = mPx
+                    totalWidth += vectorPaint.measureText(":$minsStr")
+                    
+                    val centerX = (size.width / 2f) + with(density) { viewModel.lockscreenClockOffsetX.dp.toPx() }
+                    var startX = centerX - (totalWidth / 2f)
+                    
+                    val baseY = with(density) { viewModel.lockscreenClockOffsetY.dp.toPx() } + maxOf(hPx, mPx)
+
+                    drawIntoCanvas { canvas ->
+                        
+                        vectorPaint.textSize = hPx
+                        val hourPath = android.graphics.Path()
+                        vectorPaint.getTextPath(hoursStr, 0, hoursStr.length, startX, baseY, hourPath)
+                        canvas.nativeCanvas.drawPath(hourPath, vectorPaint)
+                        startX += vectorPaint.measureText(hoursStr)
+                        
+                        vectorPaint.textSize = mPx
+                        val minPath = android.graphics.Path()
+                        val minText = ":$minsStr"
+                        vectorPaint.getTextPath(minText, 0, minText.length, startX, baseY, minPath)
+                        canvas.nativeCanvas.drawPath(minPath, vectorPaint)
+                    }
+                }
+            }
+        }
+        
     }
 }
 
@@ -675,7 +595,7 @@ fun ParticleLoadingOverlay(color: Color) {
     var time by remember { mutableFloatStateOf(0f) }
     LaunchedEffect(Unit) { val startTime = withFrameNanos { it }; while (true) { withFrameNanos { frameTime -> time = (frameTime - startTime) / 1_000_000_000f } } }
 
-    Canvas(modifier = Modifier.fillMaxSize()) {
+    androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
         val width = size.width
         val height = size.height
         val swayPx = 15.dp.toPx()
@@ -698,12 +618,10 @@ class FilamentTextureController(val textureView: android.view.TextureView) : and
     private var camera: com.google.android.filament.Camera? = null
     private var view: com.google.android.filament.View? = null
     private var swapChain: com.google.android.filament.SwapChain? = null
-    
     private var assetLoader: com.google.android.filament.gltfio.AssetLoader? = null
     private var resourceLoader: com.google.android.filament.gltfio.ResourceLoader? = null
     private var filamentAsset: com.google.android.filament.gltfio.FilamentAsset? = null
     private var light: Int = 0
-    
     private val choreographer = android.view.Choreographer.getInstance()
     private var androidSurface: android.view.Surface? = null
     private var rotationAngle = 0f
@@ -712,7 +630,6 @@ class FilamentTextureController(val textureView: android.view.TextureView) : and
         runCatching { com.google.android.filament.Filament.init() }
         runCatching { com.google.android.filament.gltfio.Gltfio.init() }
         runCatching { System.loadLibrary("gltfio-jni") }
-        
         textureView.surfaceTextureListener = this
         textureView.isOpaque = false
     }
@@ -723,25 +640,14 @@ class FilamentTextureController(val textureView: android.view.TextureView) : and
         scene = engine.createScene()
         camera = engine.createCamera(engine.entityManager.create())
         view = engine.createView()
-        
         view?.scene = scene
         view?.camera = camera
-        
-        val skybox = com.google.android.filament.Skybox.Builder().color(0.1f, 0.12f, 0.15f, 1.0f).build(engine)
-        scene?.skybox = skybox
-        
+        scene?.skybox = com.google.android.filament.Skybox.Builder().color(0.1f, 0.12f, 0.15f, 1.0f).build(engine)
         light = com.google.android.filament.EntityManager.get().create()
-        com.google.android.filament.LightManager.Builder(com.google.android.filament.LightManager.Type.DIRECTIONAL)
-            .color(1.0f, 1.0f, 0.95f)
-            .intensity(50000.0f)
-            .direction(-1.0f, -1.0f, -1.0f)
-            .castShadows(true)
-            .build(engine, light)
+        com.google.android.filament.LightManager.Builder(com.google.android.filament.LightManager.Type.DIRECTIONAL).color(1.0f, 1.0f, 0.95f).intensity(50000.0f).direction(-1.0f, -1.0f, -1.0f).castShadows(true).build(engine, light)
         scene?.addEntity(light)
-        
         assetLoader = com.google.android.filament.gltfio.AssetLoader(engine, com.google.android.filament.gltfio.UbershaderProvider(engine), com.google.android.filament.EntityManager.get())
         resourceLoader = com.google.android.filament.gltfio.ResourceLoader(engine)
-
         try {
             val customFile = java.io.File(textureView.context.filesDir, "custom_model.glb")
             if (customFile.exists()) {
@@ -749,35 +655,21 @@ class FilamentTextureController(val textureView: android.view.TextureView) : and
                 val buffer = java.nio.ByteBuffer.allocateDirect(bytes.size)
                 buffer.put(bytes)
                 buffer.rewind()
-
                 filamentAsset = assetLoader?.createAsset(buffer)
-                filamentAsset?.let { asset ->
-                    resourceLoader?.loadResources(asset)
-                    asset.releaseSourceData()
-                    scene?.addEntities(asset.entities)
-                }
-            } else {
-                android.util.Log.w("CaveArt3D", "No custom model found in UI Preview.")
+                filamentAsset?.let { asset -> resourceLoader?.loadResources(asset); asset.releaseSourceData(); scene?.addEntities(asset.entities) }
             }
-        } catch (e: Exception) {
-            android.util.Log.e("CaveArt3D", "Failed to load model in UI Preview", e)
-        }
-
+        } catch (e: Exception) { }
         androidSurface = android.view.Surface(surface)
         swapChain = engine.createSwapChain(androidSurface!!)
-        
         view?.viewport = com.google.android.filament.Viewport(0, 0, width, height)
-        val aspect = width.toDouble() / height.toDouble()
-        camera?.setProjection(45.0, aspect, 0.1, 100.0, com.google.android.filament.Camera.Fov.VERTICAL)
+        camera?.setProjection(45.0, width.toDouble() / height.toDouble(), 0.1, 100.0, com.google.android.filament.Camera.Fov.VERTICAL)
         camera?.lookAt(0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0)
-
         choreographer.postFrameCallback(this)
     }
 
     override fun onSurfaceTextureSizeChanged(surface: android.graphics.SurfaceTexture, width: Int, height: Int) {
         view?.viewport = com.google.android.filament.Viewport(0, 0, width, height)
-        val aspect = width.toDouble() / height.toDouble()
-        camera?.setProjection(45.0, aspect, 0.1, 100.0, com.google.android.filament.Camera.Fov.VERTICAL)
+        camera?.setProjection(45.0, width.toDouble() / height.toDouble(), 0.1, 100.0, com.google.android.filament.Camera.Fov.VERTICAL)
     }
 
     override fun onSurfaceTextureDestroyed(surface: android.graphics.SurfaceTexture): Boolean {
@@ -787,7 +679,6 @@ class FilamentTextureController(val textureView: android.view.TextureView) : and
             assetLoader?.destroy()
             resourceLoader?.destroy()
             engine.destroyEntity(light)
-            
             swapChain?.let { engine.destroySwapChain(it) }
             renderer?.let { engine.destroyRenderer(it) }
             view?.let { engine.destroyView(it) }
@@ -805,28 +696,22 @@ class FilamentTextureController(val textureView: android.view.TextureView) : and
     override fun doFrame(frameTimeNanos: Long) {
         if (filamentEngine != null && swapChain != null) {
             choreographer.postFrameCallback(this)
-            
             filamentAsset?.let { asset ->
                 val tm = filamentEngine?.transformManager
                 val instance = tm?.getInstance(asset.root)
                 if (instance != null && instance != 0) {
-                    val center = asset.boundingBox.center
                     val halfExtent = asset.boundingBox.halfExtent
                     val maxExtent = kotlin.math.max(halfExtent[0], kotlin.math.max(halfExtent[1], halfExtent[2]))
-                    
                     val scaleFactor = if (maxExtent > 0f) 2.0f / maxExtent else 1.0f
-
                     val transform = FloatArray(16)
                     android.opengl.Matrix.setIdentityM(transform, 0)
                     android.opengl.Matrix.rotateM(transform, 0, rotationAngle, 0f, 1f, 0f)
                     android.opengl.Matrix.scaleM(transform, 0, scaleFactor, scaleFactor, scaleFactor)
-                    android.opengl.Matrix.translateM(transform, 0, -center[0], -center[1], -center[2])
-                    
+                    android.opengl.Matrix.translateM(transform, 0, -asset.boundingBox.center[0], -asset.boundingBox.center[1], -asset.boundingBox.center[2])
                     tm.setTransform(instance, transform)
                     rotationAngle += 0.3f 
                 }
             }
-            
             if (renderer?.beginFrame(swapChain!!, frameTimeNanos) == true) {
                 renderer?.render(view!!)
                 renderer?.endFrame()
