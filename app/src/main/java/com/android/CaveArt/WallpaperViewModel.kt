@@ -41,6 +41,7 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     private val refineHelper = ForegroundEstimationHelper(application)
     private val mattingHelper = DeepMattingHelper(application)
     private val prefs = application.getSharedPreferences("cave_art_settings", Context.MODE_PRIVATE)
+    private val clockPrefs = application.getSharedPreferences("cave_art_clock_prefs", Context.MODE_PRIVATE)
 
     var isLoading by mutableStateOf(true)
         private set
@@ -76,18 +77,46 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         _isAmbientBlurEnabled.value = enabled 
         prefs.edit().putBoolean("ambient_blur", enabled).apply()
     }
+    
+    var isLockscreenClockPreviewVisible by mutableStateOf(false)
 
-    var lockscreenClockSize by mutableFloatStateOf(
-        application.getSharedPreferences("cave_art_clock_prefs", Context.MODE_PRIVATE).getFloat("clock_size", 95f)
-    )
+    var lockscreenClockOffsetX by mutableFloatStateOf(clockPrefs.getFloat("clock_x", 0f))
+    var lockscreenClockOffsetY by mutableFloatStateOf(clockPrefs.getFloat("clock_y", 110f))
+    
+    var clockHourSize by mutableFloatStateOf(clockPrefs.getFloat("clock_hour_size", 100f))
+    var clockMinuteSize by mutableFloatStateOf(clockPrefs.getFloat("clock_minute_size", 75f))
+    var clockStrokeWidth by mutableFloatStateOf(clockPrefs.getFloat("clock_stroke_width", 8f))
+    var clockRoundness by mutableFloatStateOf(clockPrefs.getFloat("clock_roundness", 30f))
 
-    fun updateLockscreenClockSize(context: Context, size: Float) {
-        lockscreenClockSize = size
-        context.getSharedPreferences("cave_art_clock_prefs", Context.MODE_PRIVATE)
-            .edit().putFloat("clock_size", size).apply()
-            
-        val intent = android.content.Intent("com.android.CaveArt.UPDATE_CLOCK_SIZE")
-        intent.putExtra("clock_size", size)
+    fun updateLockscreenClockPosition(context: Context, x: Float, y: Float) {
+        lockscreenClockOffsetX = x
+        lockscreenClockOffsetY = y
+        clockPrefs.edit().putFloat("clock_x", x).putFloat("clock_y", y).apply()
+        
+        val intent = android.content.Intent("com.android.CaveArt.UPDATE_CLOCK_POSITION")
+        intent.putExtra("clock_x", x)
+        intent.putExtra("clock_y", y)
+        context.sendBroadcast(intent)
+    }
+
+    fun updateClockStyle(context: Context, hourSize: Float, minuteSize: Float, strokeWidth: Float, roundness: Float) {
+        clockHourSize = hourSize
+        clockMinuteSize = minuteSize
+        clockStrokeWidth = strokeWidth
+        clockRoundness = roundness
+        
+        clockPrefs.edit()
+            .putFloat("clock_hour_size", hourSize)
+            .putFloat("clock_minute_size", minuteSize)
+            .putFloat("clock_stroke_width", strokeWidth)
+            .putFloat("clock_roundness", roundness)
+            .apply()
+
+        val intent = android.content.Intent("com.android.CaveArt.UPDATE_CLOCK_STYLE")
+        intent.putExtra("clock_hour_size", hourSize)
+        intent.putExtra("clock_minute_size", minuteSize)
+        intent.putExtra("clock_stroke_width", strokeWidth)
+        intent.putExtra("clock_roundness", roundness)
         context.sendBroadcast(intent)
     }
     
@@ -278,7 +307,7 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
             Pair(null, null)
         }
     }
-    
+
     suspend fun getOrCreateProcessedBitmap(
         context: Context, 
         wallpaper: Wallpaper, 

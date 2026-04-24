@@ -19,7 +19,12 @@ class CaveArtSettingsProvider : ContentProvider() {
         
         val cursor = MatrixCursor(arrayOf("value"))
         when (uri.lastPathSegment) {
-            "clock_size" -> cursor.addRow(arrayOf(prefs.getFloat("clock_size", 95f)))
+            "clock_x" -> cursor.addRow(arrayOf(prefs.getFloat("clock_x", 0f)))
+            "clock_y" -> cursor.addRow(arrayOf(prefs.getFloat("clock_y", 110f)))
+            "clock_hour_size" -> cursor.addRow(arrayOf(prefs.getFloat("clock_hour_size", 100f)))
+            "clock_minute_size" -> cursor.addRow(arrayOf(prefs.getFloat("clock_minute_size", 75f)))
+            "clock_stroke_width" -> cursor.addRow(arrayOf(prefs.getFloat("clock_stroke_width", 8f)))
+            "clock_roundness" -> cursor.addRow(arrayOf(prefs.getFloat("clock_roundness", 30f)))
         }
         return cursor
     }
