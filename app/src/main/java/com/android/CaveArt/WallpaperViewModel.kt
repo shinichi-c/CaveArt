@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.RectF
 import android.net.Uri
 import android.util.LruCache
 import androidx.compose.runtime.derivedStateOf
@@ -307,6 +308,15 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
             Pair(null, null)
         }
     }
+    
+    suspend fun getMaskForClock(context: Context, wallpaper: Wallpaper): Bitmap? = withContext(Dispatchers.Default) {
+        try {
+            val original = getCachedOriginal(context, wallpaper, 1024) ?: return@withContext null
+            cutoutCache.get(wallpaper.id) ?: generateCutoutInternal(original)?.also { 
+                cutoutCache.put(wallpaper.id, it) 
+            }
+        } catch (e: Exception) { null }
+    }
 
     suspend fun getOrCreateProcessedBitmap(
         context: Context, 
@@ -443,6 +453,55 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) { isRunningDebug = false }
+            }
+        }
+    }
+    
+    fun autoFitClockToSubject(context: Context, mask: Bitmap?, screenW: Float, screenH: Float) {
+        if (mask == null) return
+        
+        viewModelScope.launch(Dispatchers.Default) {
+            val rawBounds = Geometric.getTightSubjectBounds(mask) ?: return@launch
+            
+            val fillScale = kotlin.math.max(screenW / mask.width, screenH / mask.height)
+            val matrix = android.graphics.Matrix()
+            
+            matrix.postTranslate(-mask.width / 2f, -mask.height / 2f)
+            matrix.postScale(fillScale, fillScale)
+            matrix.postTranslate(screenW / 2f, screenH / 2f)
+
+            val screenBounds = RectF(rawBounds)
+            matrix.mapRect(screenBounds)
+
+            val density = context.resources.displayMetrics.density
+            val topSpacePx = screenBounds.top
+            val paddingPx = 20f * density
+            val availableHeightPx = topSpacePx - paddingPx
+
+            withContext(Dispatchers.Main) {
+                if (availableHeightPx > 40f * density) {
+                    val currentMaxDp = kotlin.math.max(clockHourSize, clockMinuteSize)
+                    val currentMaxPx = currentMaxDp * density
+                    
+                    var scaleRatio = 1.0f
+                    if (currentMaxPx > availableHeightPx) {
+                        scaleRatio = availableHeightPx / currentMaxPx
+                    }
+                    
+                    val newHourSize = (clockHourSize * scaleRatio).coerceIn(40f, 200f)
+                    val newMinSize = (clockMinuteSize * scaleRatio).coerceIn(40f, 200f)
+                    val newMaxPx = kotlin.math.max(newHourSize, newMinSize) * density
+                    
+                    val newYPx = (topSpacePx / 2f) - (newMaxPx / 2f)
+                    val newYDp = (newYPx / density).coerceAtLeast(20f)
+
+                    updateClockStyle(context, newHourSize, newMinSize, clockStrokeWidth, clockRoundness)
+                    updateLockscreenClockPosition(context, 0f, newYDp)
+                } else {
+                	
+                    updateClockStyle(context, 50f, 40f, clockStrokeWidth, clockRoundness)
+                    updateLockscreenClockPosition(context, 0f, 30f)
+                }
             }
         }
     }
