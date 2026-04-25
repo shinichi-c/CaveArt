@@ -69,4 +69,34 @@ object Geometric {
             return RectF(cx - r, cy - r, cx + r, cy + r)
         }
     }
+    
+    fun getTightSubjectBounds(bitmap: Bitmap): RectF? {
+        val w = bitmap.width
+        val h = bitmap.height
+        val pixels = IntArray(w * h)
+        bitmap.getPixels(pixels, 0, w, 0, 0, w, h)
+
+        var minX = w
+        var maxX = 0
+        var minY = h
+        var maxY = 0
+        var found = false
+
+        for (y in 0 until h) {
+            val rowOffset = y * w
+            for (x in 0 until w) {
+                val alpha = (pixels[rowOffset + x] ushr 24) and 0xFF
+                if (alpha > 40) {
+                    if (x < minX) minX = x
+                    if (x > maxX) maxX = x
+                    if (y < minY) minY = y
+                    if (y > maxY) maxY = y
+                    found = true
+                }
+            }
+        }
+
+        if (!found) return null
+        return RectF(minX.toFloat(), minY.toFloat(), maxX.toFloat(), maxY.toFloat())
+    }
 }
