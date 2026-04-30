@@ -25,6 +25,8 @@ class CaveArtSettingsProvider : ContentProvider() {
             "clock_minute_size" -> cursor.addRow(arrayOf(prefs.getFloat("clock_minute_size", 75f)))
             "clock_stroke_width" -> cursor.addRow(arrayOf(prefs.getFloat("clock_stroke_width", 8f)))
             "clock_roundness" -> cursor.addRow(arrayOf(prefs.getFloat("clock_roundness", 30f)))
+            "clock_stretch" -> cursor.addRow(arrayOf(if (prefs.getBoolean("clock_stretch", false)) 1 else 0))
+            "clock_collision_map" -> cursor.addRow(arrayOf(prefs.getString("clock_collision_map", "")))
         }
         return cursor
     }

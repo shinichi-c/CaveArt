@@ -11,6 +11,7 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.TextClock
+import com.android.CaveArt.AdaptiveClockHelper
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
 
@@ -22,8 +23,9 @@ class CaveArtXposedModule : XposedModule() {
         var keyguardSliceViewId = 0
         var bcSmartspaceId = 0
         var topMarginPx = 300
-        var bottomMarginPx = 30
         var gapPx = 20
+        var screenW = 1080f
+        var screenH = 2400f
     }
 
     override fun onPackageLoaded(param: XposedModuleInterface.PackageLoadedParam) {
@@ -52,6 +54,9 @@ class CaveArtXposedModule : XposedModule() {
                     if (rootLayout != null) {
                         val context = rootLayout.context
                         
+                        screenW = context.resources.displayMetrics.widthPixels.toFloat()
+                        screenH = context.resources.displayMetrics.heightPixels.toFloat()
+
                         dateSmartspaceId = context.resources.getIdentifier("date_smartspace_view", "id", context.packageName)
                         keyguardSliceViewId = context.resources.getIdentifier("keyguard_slice_view", "id", context.packageName)
                         bcSmartspaceId = context.resources.getIdentifier("bc_smartspace_view", "id", context.packageName)
@@ -66,6 +71,8 @@ class CaveArtXposedModule : XposedModule() {
                             var mSize = 75f
                             var sWidth = 8f
                             var cRound = 30f
+                            var isStretch = false
+                            var collMap = ""
                             
                             try {
                                 val cr = context.contentResolver
@@ -75,11 +82,13 @@ class CaveArtXposedModule : XposedModule() {
                                 cr.query(Uri.parse("content://com.android.CaveArt.settings/clock_minute_size"), null, null, null, null)?.use { if (it.moveToFirst()) mSize = it.getFloat(0) }
                                 cr.query(Uri.parse("content://com.android.CaveArt.settings/clock_stroke_width"), null, null, null, null)?.use { if (it.moveToFirst()) sWidth = it.getFloat(0) }
                                 cr.query(Uri.parse("content://com.android.CaveArt.settings/clock_roundness"), null, null, null, null)?.use { if (it.moveToFirst()) cRound = it.getFloat(0) }
+                                cr.query(Uri.parse("content://com.android.CaveArt.settings/clock_stretch"), null, null, null, null)?.use { if (it.moveToFirst()) isStretch = it.getInt(0) == 1 }
+                                cr.query(Uri.parse("content://com.android.CaveArt.settings/clock_collision_map"), null, null, null, null)?.use { if (it.moveToFirst()) collMap = it.getString(0) ?: "" }
                             } catch (e: Exception) {}
 
                             topMarginPx = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, initialY, context.resources.displayMetrics).toInt()
                             val initialXPx = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, initialX, context.resources.displayMetrics)
-                            
+
                             val myCustomClock = VectorTextClock(context).apply {
                                 id = customClockId 
                                 tag = "CAVE_ART_CLOCK"
@@ -90,6 +99,8 @@ class CaveArtXposedModule : XposedModule() {
                                 minuteSizeDp = mSize
                                 strokeW = sWidth
                                 curveRound = cRound
+                                stretchEnabled = isStretch
+                                collisionMap = if (collMap.isNotEmpty()) collMap.split(",").mapNotNull { it.toFloatOrNull() }.toFloatArray() else null
                                 
                                 translationX = initialXPx
                             }
@@ -99,25 +110,9 @@ class CaveArtXposedModule : XposedModule() {
                                 if (root != null) {
                                     val currentX = myCustomClock.translationX
                                     val currentY = myCustomClock.translationY
-                                    
-                                    if (dateSmartspaceId != 0) {
-                                        root.findViewById<View>(dateSmartspaceId)?.apply {
-                                            translationX = currentX
-                                            translationY = currentY
-                                        }
-                                    }
-                                    if (keyguardSliceViewId != 0) {
-                                        root.findViewById<View>(keyguardSliceViewId)?.apply {
-                                            translationX = currentX
-                                            translationY = currentY
-                                        }
-                                    }
-                                    if (bcSmartspaceId != 0) {
-                                        root.findViewById<View>(bcSmartspaceId)?.apply {
-                                            translationX = currentX
-                                            translationY = currentY
-                                        }
-                                    }
+                                    if (dateSmartspaceId != 0) root.findViewById<View>(dateSmartspaceId)?.apply { translationX = currentX; translationY = currentY }
+                                    if (keyguardSliceViewId != 0) root.findViewById<View>(keyguardSliceViewId)?.apply { translationX = currentX; translationY = currentY }
+                                    if (bcSmartspaceId != 0) root.findViewById<View>(bcSmartspaceId)?.apply { translationX = currentX; translationY = currentY }
                                 }
                                 true
                             }
@@ -125,19 +120,18 @@ class CaveArtXposedModule : XposedModule() {
                             myCustomClock.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
                                 var receiverStyle: BroadcastReceiver? = null
                                 var receiverPos: BroadcastReceiver? = null
+                                var receiverML: BroadcastReceiver? = null
                                 
                                 override fun onViewAttachedToWindow(v: View) {
                                     receiverStyle = object : BroadcastReceiver() {
                                         override fun onReceive(ctx: Context?, intent: Intent?) {
                                             if (intent?.action == "com.android.CaveArt.UPDATE_CLOCK_STYLE") {
-                                            	
                                                 val clock = v as VectorTextClock
                                                 clock.hourSizeDp = intent.getFloatExtra("clock_hour_size", 100f)
                                                 clock.minuteSizeDp = intent.getFloatExtra("clock_minute_size", 75f)
                                                 clock.strokeW = intent.getFloatExtra("clock_stroke_width", 8f)
                                                 clock.curveRound = intent.getFloatExtra("clock_roundness", 30f)
-                                                clock.requestLayout() 
-                                                clock.invalidate()    
+                                                clock.requestLayout(); clock.invalidate()    
                                             }
                                         }
                                     }
@@ -146,18 +140,47 @@ class CaveArtXposedModule : XposedModule() {
                                         override fun onReceive(ctx: Context?, intent: Intent?) {
                                             val newX = intent?.getFloatExtra("clock_x", 0f) ?: 0f
                                             val newY = intent?.getFloatExtra("clock_y", 110f) ?: 110f
-                                            
                                             v.translationX = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, newX, context.resources.displayMetrics)
                                             topMarginPx = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, newY, context.resources.displayMetrics).toInt()
+                                            
+                                            val root = v.parent as? ViewGroup
+                                            if (root != null) {
+                                                try {
+                                                    val constraintSetClass = classLoader.loadClass("androidx.constraintlayout.widget.ConstraintSet")
+                                                    val constraintLayoutClass = classLoader.loadClass("androidx.constraintlayout.widget.ConstraintLayout")
+                                                    if (constraintLayoutClass.isInstance(root)) {
+                                                        val set = constraintSetClass.getDeclaredConstructor().newInstance()
+                                                        constraintSetClass.getMethod("clone", constraintLayoutClass).invoke(set, root)
+                                                        constraintSetClass.getMethod("setMargin", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType, Int::class.javaPrimitiveType).invoke(set, customClockId, 3, topMarginPx)
+                                                        constraintSetClass.getMethod("applyTo", constraintLayoutClass).invoke(set, root)
+                                                    }
+                                                } catch (e: Exception) {}
+                                            }
                                         }
                                     }
+
+                                    receiverML = object : BroadcastReceiver() {
+                                        override fun onReceive(ctx: Context?, intent: Intent?) {
+                                            val clock = v as VectorTextClock
+                                            if (intent?.action == "com.android.CaveArt.UPDATE_CLOCK_STRETCH") {
+                                                clock.stretchEnabled = intent.getBooleanExtra("clock_stretch", false)
+                                            } else if (intent?.action == "com.android.CaveArt.UPDATE_COLLISION_MAP") {
+                                                val mapStr = intent.getStringExtra("collision_map") ?: ""
+                                                clock.collisionMap = if (mapStr.isNotEmpty()) mapStr.split(",").mapNotNull { it.toFloatOrNull() }.toFloatArray() else null
+                                            }
+                                            clock.requestLayout(); clock.invalidate()
+                                        }
+                                    }
+
                                     context.registerReceiver(receiverStyle, IntentFilter("com.android.CaveArt.UPDATE_CLOCK_STYLE"), Context.RECEIVER_EXPORTED)
                                     context.registerReceiver(receiverPos, IntentFilter("com.android.CaveArt.UPDATE_CLOCK_POSITION"), Context.RECEIVER_EXPORTED)
+                                    context.registerReceiver(receiverML, IntentFilter("com.android.CaveArt.UPDATE_CLOCK_STRETCH").apply { addAction("com.android.CaveArt.UPDATE_COLLISION_MAP") }, Context.RECEIVER_EXPORTED)
                                 }
 
                                 override fun onViewDetachedFromWindow(v: View) {
                                     receiverStyle?.let { context.unregisterReceiver(it) }
                                     receiverPos?.let { context.unregisterReceiver(it) }
+                                    receiverML?.let { context.unregisterReceiver(it) }
                                 }
                             })
 
@@ -251,18 +274,19 @@ class VectorTextClock(context: Context) : TextClock(context) {
     var minuteSizeDp = 75f
     var strokeW = 8f
     var curveRound = 30f
+    var stretchEnabled = false
+    var collisionMap: FloatArray? = null
     
     val penPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
         style = Paint.Style.STROKE 
         strokeCap = Paint.Cap.ROUND 
         strokeJoin = Paint.Join.ROUND 
-        typeface = Typeface.create("sans-serif-black", Typeface.NORMAL)
         setShadowLayer(15f, 0f, 5f, Color.argb(160, 0, 0, 0))
     }
 
     init {
-        setTextColor(Color.TRANSPARENT)
+        setTextColor(Color.TRANSPARENT) 
         gravity = Gravity.CENTER
     }
 
@@ -270,6 +294,10 @@ class VectorTextClock(context: Context) : TextClock(context) {
         val maxSize = maxOf(hourSizeDp, minuteSizeDp)
         setTextSize(TypedValue.COMPLEX_UNIT_DIP, maxSize)
         super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+        
+        if (stretchEnabled) {
+            setMeasuredDimension(measuredWidth, CaveArtXposedModule.screenH.toInt())
+        }
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -281,30 +309,40 @@ class VectorTextClock(context: Context) : TextClock(context) {
         
         val hPx = hourSizeDp * resources.displayMetrics.density
         val mPx = minuteSizeDp * resources.displayMetrics.density
+        
+        val hourW = hPx * 0.55f
+        val minW = mPx * 0.55f
+        val gap = hPx * 0.15f
 
-        var totalWidth = 0f
         val parts = timeString.split(":")
-        val hoursStr = parts.getOrNull(0) ?: ""
-        val minsStr = parts.getOrNull(1) ?: ""
+        val hCount = (parts.getOrNull(0) ?: "00").length
+        val mCount = (parts.getOrNull(1) ?: "00").length
+        val totalWidth = (hCount * hourW) + (mCount * minW) + (gap * (hCount + mCount))
 
-        penPaint.textSize = hPx
-        totalWidth += penPaint.measureText(hoursStr)
-        penPaint.textSize = mPx
-        totalWidth += penPaint.measureText(":$minsStr")
+        val startX = (width - totalWidth) / 2f
+        val startY = 0f 
+
+        val screenPos = IntArray(2)
+        getLocationOnScreen(screenPos)
+        val trueAbsoluteX = screenPos[0].toFloat()
+        val trueAbsoluteY = screenPos[1].toFloat()
+
+        val path = AdaptiveClockHelper.buildPath(
+            timeString = timeString,
+            startX = startX,
+            startY = startY,
+            absoluteClockX = trueAbsoluteX,
+            absoluteClockY = trueAbsoluteY,
+            hourH = hPx,
+            minH = mPx,
+            screenW = CaveArtXposedModule.screenW,
+            screenH = CaveArtXposedModule.screenH,
+            isStretchEnabled = stretchEnabled,
+            collisionMap = collisionMap,
+            density = resources.displayMetrics.density,
+            strokeWidth = strokeW
+        )
         
-        var startX = (width - totalWidth) / 2f
-        val baseY = height / 2f + (maxOf(hPx, mPx) / 3f)
-        
-        penPaint.textSize = hPx
-        val hourPath = Path()
-        penPaint.getTextPath(hoursStr, 0, hoursStr.length, startX, baseY, hourPath)
-        canvas.drawPath(hourPath, penPaint)
-        startX += penPaint.measureText(hoursStr)
-        
-        penPaint.textSize = mPx
-        val minPath = Path()
-        val minText = ":$minsStr"
-        penPaint.getTextPath(minText, 0, minText.length, startX, baseY, minPath)
-        canvas.drawPath(minPath, penPaint)
+        canvas.drawPath(path, penPaint)
     }
 }
