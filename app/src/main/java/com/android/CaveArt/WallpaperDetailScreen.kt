@@ -35,6 +35,7 @@ import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.asComposePath
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -47,6 +48,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import com.android.CaveArt.animations.AnimationFactory
@@ -90,10 +92,21 @@ private data class Particle(
 @Composable
 fun EffectsControlsSheet(
     wallpaper: Wallpaper,
-    viewModel: WallpaperViewModel
+    viewModel: WallpaperViewModel,
+    previewMask: Bitmap? = null
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    
+    val config = LocalConfiguration.current
+    val density = LocalDensity.current.density
+    
+    var localMask by remember { mutableStateOf(previewMask) }
+    LaunchedEffect(wallpaper, previewMask) {
+        if (previewMask != null) localMask = previewMask
+        else localMask = viewModel.getMaskForClock(context, wallpaper)
+    }
+
     val modelPickerLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
     ) { uri ->
@@ -109,8 +122,9 @@ fun EffectsControlsSheet(
                         viewModel.setFilamentEnabled(false)
                         delay(100)
                         viewModel.setFilamentEnabled(true)
+                        android.widget.Toast.makeText(context, "3D Model Imported!", android.widget.Toast.LENGTH_SHORT).show()
                     }
-                } catch (e: Exception) {}
+                } catch (e: Exception) { e.printStackTrace() }
             }
         }
     }
@@ -124,10 +138,7 @@ fun EffectsControlsSheet(
     val tabs = remember(viewModel.isMagicShapeEnabled, viewModel.isAnimationEnabled, viewModel.isFilamentEnabled, currentAnim) {
         val list = mutableListOf<String>()
         list.add("Clock") 
-        if (viewModel.isMagicShapeEnabled) {
-            list.add("Shape")
-            list.add("Style") 
-        }
+        if (viewModel.isMagicShapeEnabled) { list.add("Shape"); list.add("Style") }
         if (viewModel.isAnimationEnabled) {
             list.add("Animation")
             if (currentAnim.supports3DPop() || currentAnim.supportsCenter() || currentAnim.supportsScale() || currentAnim.hasCustomUI()) list.add("Style")
@@ -177,7 +188,7 @@ fun EffectsControlsSheet(
     }
     
     Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-    	
+        
         if (tabs.isNotEmpty() && selectedTab != "Clock") {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -252,7 +263,13 @@ fun EffectsControlsSheet(
                             }
                         }
                         "Style" -> {
-                            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(max = 280.dp)
+                                    .verticalScroll(rememberScrollState())
+                                    .padding(horizontal = 24.dp)
+                            ) {
                                 val showPop = viewModel.isMagicShapeEnabled || (viewModel.isAnimationEnabled && currentAnim.supports3DPop())
                                 val showCenter = viewModel.isMagicShapeEnabled || (viewModel.isAnimationEnabled && currentAnim.supportsCenter())
                                 val showScale = viewModel.isMagicShapeEnabled || (viewModel.isAnimationEnabled && currentAnim.supportsScale())
@@ -335,64 +352,76 @@ fun LiveEffectImage(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    var previewMask by remember { mutableStateOf<Bitmap?>(null) }
     
+    LaunchedEffect(wallpaper) {
+        previewMask = viewModel.getMaskForClock(context, wallpaper)
+    }
+
     if (viewModel.isLockscreenClockPreviewVisible) {
-        ClockEditorPreview(wallpaper, viewModel, modifier)
+        ClockEditorPreview(wallpaper, viewModel, previewMask, modifier)
     } else {
-        AnimatedWallpaperEngine(wallpaper, viewModel, modifier)
+        AnimatedWallpaperEngine(wallpaper, viewModel, previewMask, modifier)
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ClockEditorPreview(
     wallpaper: Wallpaper,
     viewModel: WallpaperViewModel,
+    previewMask: Bitmap?,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    var mask by remember { mutableStateOf<Bitmap?>(null) }
+    val metrics = context.resources.displayMetrics
+    val realScreenW = metrics.widthPixels.toFloat()
+    val realScreenH = metrics.heightPixels.toFloat()
+    val densityVal = metrics.density
+    val config = LocalConfiguration.current
     
-    LaunchedEffect(wallpaper) {
-        mask = viewModel.getMaskForClock(context, wallpaper)
+    LaunchedEffect(previewMask, viewModel.isClockStretchEnabled) {
+        if (viewModel.isClockStretchEnabled && previewMask != null) {
+            viewModel.generateCollisionMap(context, previewMask, realScreenW, realScreenH)
+        }
     }
 
-    val densityVal = LocalDensity.current.density
-    val config = LocalConfiguration.current
-    val screenW = config.screenWidthDp * densityVal
-    val screenH = config.screenHeightDp * densityVal
+    var showFloatingPanel by remember { mutableStateOf(true) }
+    var hybridMode by remember { mutableStateOf("Thickness") }
 
     Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
-    	
-        AsyncWallpaperImage(
-            wallpaper = wallpaper, 
-            contentDescription = null, 
-            viewModel = viewModel, 
-            modifier = Modifier.fillMaxSize(), 
-            contentScale = ContentScale.Crop, 
-            allowMagic = false
-        )
         
-        Box(modifier = Modifier.fillMaxWidth().height(250.dp).background(Brush.verticalGradient(listOf(Color.Black.copy(alpha=0.5f), Color.Transparent))))
+        AsyncWallpaperImage(wallpaper = wallpaper, contentDescription = null, viewModel = viewModel, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop, allowMagic = false)
         
-        Box(modifier = Modifier.fillMaxSize().pointerInput(Unit) {
-            detectTransformGestures { _, pan, zoom, _ ->
-                val newHour = (viewModel.clockHourSize * zoom).coerceIn(40f, 200f)
-                val newMin = (viewModel.clockMinuteSize * zoom).coerceIn(40f, 200f)
-                
-                val newX = viewModel.lockscreenClockOffsetX + (pan.x / densityVal)
-                val newY = (viewModel.lockscreenClockOffsetY + (pan.y / densityVal)).coerceIn(0f, config.screenHeightDp.toFloat())
-                
-                viewModel.updateClockStyle(context, newHour, newMin, viewModel.clockStrokeWidth, viewModel.clockRoundness)
-                viewModel.updateLockscreenClockPosition(context, newX, newY)
+        Box(modifier = Modifier.fillMaxWidth().height(300.dp).background(Brush.verticalGradient(listOf(Color.Black.copy(alpha=0.6f), Color.Transparent))))
+
+        Box(modifier = Modifier
+            .fillMaxSize()
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onTap = { showFloatingPanel = !showFloatingPanel }
+                )
             }
-        }) {
+            .pointerInput(Unit) {
+                detectTransformGestures { _, pan, zoom, _ ->
+                    val scale = maxOf(size.width / realScreenW, size.height / realScreenH)
+                    val newHour = (viewModel.clockHourSize * zoom).coerceIn(40f, 200f)
+                    val newMin = (viewModel.clockMinuteSize * zoom).coerceIn(40f, 200f)
+                    
+                    val newX = viewModel.lockscreenClockOffsetX + ((pan.x / scale) / densityVal)
+                    val newY = (viewModel.lockscreenClockOffsetY + ((pan.y / scale) / densityVal)).coerceIn(0f, config.screenHeightDp.toFloat())
+                    
+                    viewModel.updateClockStyle(context, newHour, newMin, viewModel.clockStrokeWidth, viewModel.clockRoundness)
+                    viewModel.updateLockscreenClockPosition(context, newX, newY)
+                }
+            }
+        ) {
             val vectorPaint = remember {
                 android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
                     color = android.graphics.Color.WHITE
                     style = android.graphics.Paint.Style.STROKE
                     strokeCap = android.graphics.Paint.Cap.ROUND
                     strokeJoin = android.graphics.Paint.Join.ROUND
-                    typeface = android.graphics.Typeface.create("sans-serif-black", android.graphics.Typeface.NORMAL)
                     setShadowLayer(15f, 0f, 5f, android.graphics.Color.argb(160, 0, 0, 0))
                 }
             }
@@ -401,50 +430,157 @@ fun ClockEditorPreview(
                 val hPx = viewModel.clockHourSize * densityVal
                 val mPx = viewModel.clockMinuteSize * densityVal
                 
-                vectorPaint.strokeWidth = viewModel.clockStrokeWidth * densityVal
-                vectorPaint.pathEffect = android.graphics.CornerPathEffect(viewModel.clockRoundness * densityVal)
-
                 val timeString = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date())
+                
+                val hourW = hPx * 0.55f
+                val minW = mPx * 0.55f
+                val gap = hPx * 0.15f
                 val parts = timeString.split(":")
-                val hoursStr = parts.getOrNull(0) ?: ""
-                val minsStr = parts.getOrNull(1) ?: ""
+                val hCount = (parts.getOrNull(0) ?: "00").length
+                val mCount = (parts.getOrNull(1) ?: "00").length
+                val totalWidth = (hCount * hourW) + (mCount * minW) + (gap * (hCount + mCount))
 
-                var totalWidth = 0f
-                vectorPaint.textSize = hPx
-                totalWidth += vectorPaint.measureText(hoursStr)
-                vectorPaint.textSize = mPx
-                totalWidth += vectorPaint.measureText(":$minsStr")
+                val realCenterX = (realScreenW / 2f) + (viewModel.lockscreenClockOffsetX * densityVal)
+                val realStartX = realCenterX - (totalWidth / 2f)
+                val realStartY = viewModel.lockscreenClockOffsetY * densityVal
 
-                val centerX = (size.width / 2f) + (viewModel.lockscreenClockOffsetX * densityVal)
-                var startX = centerX - (totalWidth / 2f)
-                val baseY = (viewModel.lockscreenClockOffsetY * densityVal) + maxOf(hPx, mPx)
+                val collisionMapArray = if (viewModel.clockCollisionMap.isNotEmpty()) viewModel.clockCollisionMap.split(",").mapNotNull { it.toFloatOrNull() }.toFloatArray() else null
 
                 drawIntoCanvas { canvas ->
-                    vectorPaint.textSize = hPx
-                    val hourPath = android.graphics.Path()
-                    vectorPaint.getTextPath(hoursStr, 0, hoursStr.length, startX, baseY, hourPath)
-                    canvas.nativeCanvas.drawPath(hourPath, vectorPaint)
-                    startX += vectorPaint.measureText(hoursStr)
+                    val path = AdaptiveClockHelper.buildPath(
+                        timeString = timeString,
+                        startX = realStartX,
+                        startY = realStartY,
+                        absoluteClockX = 0f, 
+                        absoluteClockY = 0f, 
+                        hourH = hPx,
+                        minH = mPx,
+                        screenW = realScreenW,
+                        screenH = realScreenH,
+                        isStretchEnabled = viewModel.isClockStretchEnabled,
+                        collisionMap = collisionMapArray,
+                        density = densityVal,
+                        strokeWidth = viewModel.clockStrokeWidth
+                    )
 
-                    vectorPaint.textSize = mPx
-                    val minPath = android.graphics.Path()
-                    val minText = ":$minsStr"
-                    vectorPaint.getTextPath(minText, 0, minText.length, startX, baseY, minPath)
-                    canvas.nativeCanvas.drawPath(minPath, vectorPaint)
+                    val scale = maxOf(size.width / realScreenW, size.height / realScreenH)
+                    val dx = (size.width - realScreenW * scale) / 2f
+                    val dy = (size.height - realScreenH * scale) / 2f
+
+                    val matrix = android.graphics.Matrix()
+                    matrix.postScale(scale, scale)
+                    matrix.postTranslate(dx, dy)
+                    path.transform(matrix) 
+
+                    vectorPaint.strokeWidth = viewModel.clockStrokeWidth * densityVal * scale
+                    vectorPaint.pathEffect = android.graphics.CornerPathEffect(viewModel.clockRoundness * densityVal * scale)
+
+                    canvas.nativeCanvas.drawPath(path, vectorPaint)
                 }
             }
             
-            if (mask != null) {
-                ExtendedFloatingActionButton(
-                    onClick = { viewModel.autoFitClockToSubject(context, mask, screenW, screenH) },
-                    modifier = Modifier.align(Alignment.BottomEnd).padding(24.dp).padding(bottom = 80.dp),
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                    elevation = FloatingActionButtonDefaults.elevation(8.dp)
+            AnimatedVisibility(
+                visible = showFloatingPanel,
+                enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+                modifier = Modifier.align(Alignment.BottomCenter)
+            ) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 24.dp),
+                    shape = RoundedCornerShape(32.dp),
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
+                    shadowElevation = 12.dp
                 ) {
-                    Icon(Icons.Default.AutoFixHigh, "Smart Fit")
-                    Spacer(Modifier.width(8.dp))
-                    Text("Smart Fit", fontWeight = FontWeight.Bold)
+                    Column(
+                        modifier = Modifier.padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .width(40.dp)
+                                .height(4.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
+                        )
+                        
+                        Spacer(Modifier.height(16.dp))
+                        
+                        Text(
+                            text = "Pinch & drag to edit clock",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        
+                        Spacer(Modifier.height(24.dp))
+                        
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.FormatSize, contentDescription = "Thickness", modifier = Modifier.size(24.dp), tint = MaterialTheme.colorScheme.onSurface)
+                                Spacer(Modifier.width(16.dp))
+                                Slider(
+                                    value = viewModel.clockStrokeWidth,
+                                    onValueChange = { viewModel.updateClockStyle(context, viewModel.clockHourSize, viewModel.clockMinuteSize, it, viewModel.clockRoundness) },
+                                    valueRange = 1f..25f,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                            Spacer(Modifier.height(8.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.DonutLarge, contentDescription = "Roundness", modifier = Modifier.size(24.dp), tint = MaterialTheme.colorScheme.onSurface)
+                                Spacer(Modifier.width(16.dp))
+                                Slider(
+                                    value = viewModel.clockRoundness,
+                                    onValueChange = { viewModel.updateClockStyle(context, viewModel.clockHourSize, viewModel.clockMinuteSize, viewModel.clockStrokeWidth, it) },
+                                    valueRange = 0f..80f,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+                        
+                        Spacer(Modifier.height(24.dp))
+                        
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Surface(
+                                onClick = { 
+                                    if (previewMask != null) viewModel.autoFitClockToSubject(context, previewMask, realScreenW, realScreenH) 
+                                },
+                                shape = RoundedCornerShape(20.dp),
+                                color = if (previewMask != null) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                                modifier = Modifier.weight(1f).height(64.dp)
+                            ) {
+                                Column(
+                                    verticalArrangement = Arrangement.Center,
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Icon(Icons.Default.AutoFixHigh, contentDescription = null, tint = if (previewMask != null) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Spacer(Modifier.height(4.dp))
+                                    Text("Smart Fit", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = if (previewMask != null) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+
+                            val isAdaptive = viewModel.isClockStretchEnabled
+                            Surface(
+                                onClick = { viewModel.toggleClockStretch(context, !isAdaptive, previewMask, realScreenW, realScreenH) },
+                                shape = RoundedCornerShape(20.dp),
+                                color = if (isAdaptive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondaryContainer,
+                                modifier = Modifier.weight(1f).height(64.dp)
+                            ) {
+                                Column(
+                                    verticalArrangement = Arrangement.Center,
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Icon(Icons.Default.Transform, contentDescription = null, tint = if (isAdaptive) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSecondaryContainer)
+                                    Spacer(Modifier.height(4.dp))
+                                    Text("Adaptive", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = if (isAdaptive) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSecondaryContainer)
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -455,18 +591,17 @@ fun ClockEditorPreview(
 fun AnimatedWallpaperEngine(
     wallpaper: Wallpaper,
     viewModel: WallpaperViewModel,
+    previewMask: Bitmap?,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     var currentBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var previewOriginal by remember { mutableStateOf<Bitmap?>(null) }
-    var previewMask by remember { mutableStateOf<Bitmap?>(null) }
     var activeWallpaperId by remember { mutableStateOf(wallpaper.id) }
 
     if (activeWallpaperId != wallpaper.id) {
         currentBitmap = null
         previewOriginal = null
-        previewMask = null
         activeWallpaperId = wallpaper.id
     }
 
@@ -480,7 +615,6 @@ fun AnimatedWallpaperEngine(
         } else if (viewModel.isAnimationEnabled) {
             val components = viewModel.getPreviewAnimationComponents(context, wallpaper)
             previewOriginal = components.first
-            previewMask = components.second
             if (components.first != null) currentBitmap = components.first 
         } else {
             val useMagic = viewModel.isMagicShapeEnabled
