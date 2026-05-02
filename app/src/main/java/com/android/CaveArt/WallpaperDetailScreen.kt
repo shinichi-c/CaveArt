@@ -387,7 +387,6 @@ fun ClockEditorPreview(
     }
 
     var showFloatingPanel by remember { mutableStateOf(true) }
-    var hybridMode by remember { mutableStateOf("Thickness") }
 
     Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
         
@@ -460,7 +459,7 @@ fun ClockEditorPreview(
                         isStretchEnabled = viewModel.isClockStretchEnabled,
                         collisionMap = collisionMapArray,
                         density = densityVal,
-                        strokeWidth = viewModel.clockStrokeWidth
+                        strokeWidth = viewModel.clockStrokeWidth 
                     )
 
                     val scale = maxOf(size.width / realScreenW, size.height / realScreenH)
