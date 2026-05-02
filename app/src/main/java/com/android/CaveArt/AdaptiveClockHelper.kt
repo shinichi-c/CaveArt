@@ -26,7 +26,8 @@ object AdaptiveClockHelper {
         isStretchEnabled: Boolean,
         collisionMap: FloatArray?,
         density: Float,
-        strokeWidth: Float
+        strokeWidth: Float,
+        stretchProgress: Float = 1f 
     ): Path {
         val path = Path()
         val hourW = hourH * 0.55f
@@ -39,7 +40,9 @@ object AdaptiveClockHelper {
         val mins = parts.getOrNull(1) ?: "00"
 
         fun getDropY(cx: Float, cw: Float, defaultH: Float): Float {
-            if (!isStretchEnabled || collisionMap == null || collisionMap.isEmpty()) return startY + defaultH
+            val normalY = startY + defaultH
+            
+            if (!isStretchEnabled || collisionMap == null || collisionMap.isEmpty()) return normalY
             
             val absoluteX = cx + absoluteClockX
             val idxLeft = ((absoluteX / screenW) * 100f).toInt().coerceIn(0, 99)
@@ -55,7 +58,7 @@ object AdaptiveClockHelper {
             val padding = (20f * density) + ((strokeWidth * density) / 2f) 
             val exactSurfaceY = minHitY - absoluteClockY - padding
             
-            val maxStretchLimit = startY + (defaultH * 2.2f)
+            val maxStretchLimit = startY + (defaultH * 2.2f) 
             val minCarHeight = startY + (defaultH * 0.4f)
             
             var finalY = exactSurfaceY
@@ -64,7 +67,9 @@ object AdaptiveClockHelper {
                 finalY = maxStretchLimit
             }
             
-            return finalY.coerceIn(minCarHeight, maxStretchLimit)
+            val fullyStretchedY = finalY.coerceIn(minCarHeight, maxStretchLimit)
+            
+            return normalY + (fullyStretchedY - normalY) * stretchProgress
         }
 
         fun drawDigit(digit: Char, x: Float, w: Float, h: Float, dropY: Float) {
