@@ -12,6 +12,10 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
@@ -38,6 +42,7 @@ import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -58,6 +63,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
+import kotlin.math.abs
 import kotlin.math.sin
 import kotlin.math.pow
 import coil3.compose.rememberAsyncImagePainter
@@ -397,21 +403,52 @@ fun ClockEditorPreview(
         Box(modifier = Modifier
             .fillMaxSize()
             .pointerInput(Unit) {
-                detectTapGestures(
-                    onTap = { showFloatingPanel = !showFloatingPanel }
-                )
-            }
-            .pointerInput(Unit) {
-                detectTransformGestures { _, pan, zoom, _ ->
+                awaitEachGesture {
+                    
+                    val down = awaitFirstDown(requireUnconsumed = true)
+                    if (down.isConsumed) return@awaitEachGesture
+                    
+                    var dragged = false
                     val scale = maxOf(size.width / realScreenW, size.height / realScreenH)
-                    val newHour = (viewModel.clockHourSize * zoom).coerceIn(40f, 200f)
-                    val newMin = (viewModel.clockMinuteSize * zoom).coerceIn(40f, 200f)
+                    val dy = (size.height - realScreenH * scale) / 2f
                     
-                    val newX = viewModel.lockscreenClockOffsetX + ((pan.x / scale) / densityVal)
-                    val newY = (viewModel.lockscreenClockOffsetY + ((pan.y / scale) / densityVal)).coerceIn(0f, config.screenHeightDp.toFloat())
+                    val scaledDateY = (viewModel.lockscreenDateOffsetY * densityVal + (20f * densityVal)) * scale + dy
+                    val scaledClockY = (viewModel.lockscreenClockOffsetY * densityVal) * scale + dy
                     
-                    viewModel.updateClockStyle(context, newHour, newMin, viewModel.clockStrokeWidth, viewModel.clockRoundness)
-                    viewModel.updateLockscreenClockPosition(context, newX, newY)
+                    val distToDate = abs(down.position.y - scaledDateY)
+                    val distToClock = abs(down.position.y - scaledClockY)
+                    
+                    val activeDrag = if (distToDate < distToClock && distToDate < 300f) "DATE" else "CLOCK"
+                    
+                    do {
+                        val event = awaitPointerEvent()
+                        val pan = event.calculatePan()
+                        val zoom = event.calculateZoom()
+                        
+                        if (pan.getDistance() > 3f || abs(zoom - 1f) > 0.01f) {
+                            dragged = true
+                        }
+                        
+                        if (dragged) {
+                            if (activeDrag == "DATE") {
+                                val newX = viewModel.lockscreenDateOffsetX + ((pan.x / scale) / densityVal)
+                                val newY = (viewModel.lockscreenDateOffsetY + ((pan.y / scale) / densityVal)).coerceIn(0f, config.screenHeightDp.toFloat())
+                                viewModel.updateLockscreenDatePosition(context, newX, newY)
+                            } else {
+                                val newHour = (viewModel.clockHourSize * zoom).coerceIn(40f, 200f)
+                                val newMin = (viewModel.clockMinuteSize * zoom).coerceIn(40f, 200f)
+                                val newX = viewModel.lockscreenClockOffsetX + ((pan.x / scale) / densityVal)
+                                val newY = (viewModel.lockscreenClockOffsetY + ((pan.y / scale) / densityVal)).coerceIn(0f, config.screenHeightDp.toFloat())
+                                viewModel.updateClockStyle(context, newHour, newMin, viewModel.clockStrokeWidth, viewModel.clockRoundness)
+                                viewModel.updateLockscreenClockPosition(context, newX, newY)
+                            }
+                            event.changes.forEach { if (it.positionChanged()) it.consume() }
+                        }
+                    } while (event.changes.any { it.pressed })
+                    
+                    if (!dragged) {
+                        showFloatingPanel = !showFloatingPanel
+                    }
                 }
             }
         ) {
@@ -422,6 +459,17 @@ fun ClockEditorPreview(
                     strokeCap = android.graphics.Paint.Cap.ROUND
                     strokeJoin = android.graphics.Paint.Join.ROUND
                     setShadowLayer(15f, 0f, 5f, android.graphics.Color.argb(160, 0, 0, 0))
+                }
+            }
+
+            val dateText = java.text.SimpleDateFormat("EEE, d MMMM", java.util.Locale.getDefault()).format(java.util.Date())
+            val datePaint = remember {
+                android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                    color = android.graphics.Color.WHITE
+                    textSize = 20f * densityVal
+                    textAlign = android.graphics.Paint.Align.CENTER
+                    setShadowLayer(10f, 0f, 3f, android.graphics.Color.argb(160, 0, 0, 0))
+                    typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
                 }
             }
 
@@ -475,6 +523,16 @@ fun ClockEditorPreview(
                     vectorPaint.pathEffect = android.graphics.CornerPathEffect(viewModel.clockRoundness * densityVal * scale)
 
                     canvas.nativeCanvas.drawPath(path, vectorPaint)
+
+                    val scaledDateY = (viewModel.lockscreenDateOffsetY * densityVal + (20f * densityVal)) * scale + dy
+                    val scaledDateX = (realScreenW / 2f) * scale + dx + (viewModel.lockscreenDateOffsetX * densityVal) * scale
+
+                    canvas.nativeCanvas.drawText(
+                        dateText,
+                        scaledDateX,
+                        scaledDateY,
+                        datePaint.apply { textSize = 20f * densityVal * scale }
+                    )
                 }
             }
             
@@ -484,10 +542,12 @@ fun ClockEditorPreview(
                 exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
                 modifier = Modifier.align(Alignment.BottomCenter)
             ) {
+                
                 Surface(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 24.dp),
+                        .padding(horizontal = 16.dp, vertical = 24.dp)
+                        .pointerInput(Unit) { detectTapGestures { } },
                     shape = RoundedCornerShape(32.dp),
                     color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
                     shadowElevation = 12.dp
@@ -507,7 +567,7 @@ fun ClockEditorPreview(
                         Spacer(Modifier.height(16.dp))
                         
                         Text(
-                            text = "Pinch & drag to edit clock",
+                            text = "Tap & drag to edit Clock and Date",
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
