@@ -85,6 +85,9 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     var lockscreenClockOffsetX by mutableFloatStateOf(clockPrefs.getFloat("clock_x", 0f))
     var lockscreenClockOffsetY by mutableFloatStateOf(clockPrefs.getFloat("clock_y", 110f))
     
+    var lockscreenDateOffsetX by mutableFloatStateOf(clockPrefs.getFloat("date_x", 0f))
+    var lockscreenDateOffsetY by mutableFloatStateOf(clockPrefs.getFloat("date_y", 75f))
+    
     var clockHourSize by mutableFloatStateOf(clockPrefs.getFloat("clock_hour_size", 100f))
     var clockMinuteSize by mutableFloatStateOf(clockPrefs.getFloat("clock_minute_size", 75f))
     var clockStrokeWidth by mutableFloatStateOf(clockPrefs.getFloat("clock_stroke_width", 8f))
@@ -101,6 +104,17 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         val intent = android.content.Intent("com.android.CaveArt.UPDATE_CLOCK_POSITION")
         intent.putExtra("clock_x", x)
         intent.putExtra("clock_y", y)
+        context.sendBroadcast(intent)
+    }
+    
+    fun updateLockscreenDatePosition(context: Context, x: Float, y: Float) {
+        lockscreenDateOffsetX = x
+        lockscreenDateOffsetY = y
+        clockPrefs.edit().putFloat("date_x", x).putFloat("date_y", y).apply()
+        
+        val intent = android.content.Intent("com.android.CaveArt.UPDATE_DATE_POSITION")
+        intent.putExtra("date_x", x)
+        intent.putExtra("date_y", y)
         context.sendBroadcast(intent)
     }
 

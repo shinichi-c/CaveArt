@@ -21,12 +21,9 @@ class CaveArtXposedModule : XposedModule() {
 
     companion object {
         val customClockId = View.generateViewId()
-        var dateSmartspaceId = 0
-        var keyguardSliceViewId = 0
-        var bcSmartspaceId = 0
-        var nsslId = 0 
+        val customDateId = View.generateViewId() 
         var topMarginPx = 300
-        var gapPx = 20
+        var dateTopMarginPx = 150 
         var screenW = 1080f
         var screenH = 2400f
         
@@ -64,17 +61,16 @@ class CaveArtXposedModule : XposedModule() {
                         val context = rootLayout.context
                         screenW = context.resources.displayMetrics.widthPixels.toFloat()
                         screenH = context.resources.displayMetrics.heightPixels.toFloat()
-
-                        dateSmartspaceId = context.resources.getIdentifier("date_smartspace_view", "id", context.packageName)
-                        keyguardSliceViewId = context.resources.getIdentifier("keyguard_slice_view", "id", context.packageName)
-                        bcSmartspaceId = context.resources.getIdentifier("bc_smartspace_view", "id", context.packageName)
-                        nsslId = context.resources.getIdentifier("notification_stack_scroller", "id", context.packageName)
                         
-                        gapPx = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 16f, context.resources.displayMetrics).toInt()
+                        SystemUIHider.initIds(context)
+                        OverlapPreventionHelper.initIds(context)
 
                         if (rootLayout.findViewById<View>(customClockId) == null) {
                             var initialX = 0f
                             var initialY = 110f
+                            var dateX = 0f
+                            var dateY = 75f
+                            var dateSize = 20f
                             var hSize = 100f
                             var mSize = 75f
                             var sWidth = 8f
@@ -86,6 +82,9 @@ class CaveArtXposedModule : XposedModule() {
                                 val cr = context.contentResolver
                                 cr.query(Uri.parse("content://com.android.CaveArt.settings/clock_x"), null, null, null, null)?.use { if (it.moveToFirst()) initialX = it.getFloat(0) }
                                 cr.query(Uri.parse("content://com.android.CaveArt.settings/clock_y"), null, null, null, null)?.use { if (it.moveToFirst()) initialY = it.getFloat(0) }
+                                cr.query(Uri.parse("content://com.android.CaveArt.settings/date_x"), null, null, null, null)?.use { if (it.moveToFirst()) dateX = it.getFloat(0) }
+                                cr.query(Uri.parse("content://com.android.CaveArt.settings/date_y"), null, null, null, null)?.use { if (it.moveToFirst()) dateY = it.getFloat(0) }
+                                cr.query(Uri.parse("content://com.android.CaveArt.settings/date_size"), null, null, null, null)?.use { if (it.moveToFirst()) dateSize = it.getFloat(0) }
                                 cr.query(Uri.parse("content://com.android.CaveArt.settings/clock_hour_size"), null, null, null, null)?.use { if (it.moveToFirst()) hSize = it.getFloat(0) }
                                 cr.query(Uri.parse("content://com.android.CaveArt.settings/clock_minute_size"), null, null, null, null)?.use { if (it.moveToFirst()) mSize = it.getFloat(0) }
                                 cr.query(Uri.parse("content://com.android.CaveArt.settings/clock_stroke_width"), null, null, null, null)?.use { if (it.moveToFirst()) sWidth = it.getFloat(0) }
@@ -95,7 +94,9 @@ class CaveArtXposedModule : XposedModule() {
                             } catch (e: Exception) {}
 
                             topMarginPx = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, initialY, context.resources.displayMetrics).toInt()
+                            dateTopMarginPx = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, dateY, context.resources.displayMetrics).toInt()
                             val initialXPx = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, initialX, context.resources.displayMetrics)
+                            val dateXPx = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, dateX, context.resources.displayMetrics)
 
                             val myCustomClock = VectorTextClock(context).apply {
                                 id = customClockId 
@@ -105,34 +106,44 @@ class CaveArtXposedModule : XposedModule() {
                                 stretchEnabled = isStretch
                                 collisionMap = if (collMap.isNotEmpty()) collMap.split(",").mapNotNull { it.toFloatOrNull() }.toFloatArray() else null
                                 translationX = initialXPx
+                                translationZ = 50f
+                                elevation = 50f
                             }
                             activeClock = myCustomClock
+                            
+                            val myCustomDate = IndependentDateView(context).apply {
+                                id = customDateId
+                                setTextSize(TypedValue.COMPLEX_UNIT_SP, dateSize)
+                                translationX = dateXPx
+                                translationZ = 60f
+                                elevation = 60f
+                            }
 
                             rootLayout.viewTreeObserver.addOnPreDrawListener {
                                 if (largeId != 0) rootLayout.findViewById<View>(largeId)?.apply { alpha = 0f; visibility = View.GONE }
                                 if (smallId != 0) rootLayout.findViewById<View>(smallId)?.apply { alpha = 0f; visibility = View.GONE }
-                                
-                                val root = myCustomClock.parent as? ViewGroup
-                                if (root != null) {
-                                    val currentX = myCustomClock.translationX
-                                    if (dateSmartspaceId != 0) root.findViewById<View>(dateSmartspaceId)?.apply { translationX = currentX }
-                                    if (keyguardSliceViewId != 0) root.findViewById<View>(keyguardSliceViewId)?.apply { translationX = currentX }
-                                    if (bcSmartspaceId != 0) root.findViewById<View>(bcSmartspaceId)?.apply { translationX = currentX }
-                                }
+                                SystemUIHider.forceHideOnPreDraw(rootLayout)
+                                myCustomDate.bringToFront() 
                                 true
                             }
 
                             val lpClass = classLoader.loadClass("androidx.constraintlayout.widget.ConstraintLayout\$LayoutParams")
                             val lpConstructor = lpClass.getConstructor(Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
-                            rootLayout.addView(myCustomClock, lpConstructor.newInstance(-2, -2) as ViewGroup.LayoutParams)
                             
+                            rootLayout.addView(myCustomClock, lpConstructor.newInstance(-2, -2) as ViewGroup.LayoutParams)
+                            rootLayout.addView(myCustomDate, lpConstructor.newInstance(-2, -2) as ViewGroup.LayoutParams)
+                            
+                            OverlapPreventionHelper.forceElementsBelow(rootLayout, myCustomClock, myCustomDate)
+
                             val filter = IntentFilter().apply {
                                 addAction("com.android.CaveArt.UPDATE_CLOCK_STYLE")
                                 addAction("com.android.CaveArt.UPDATE_CLOCK_POSITION")
+                                addAction("com.android.CaveArt.UPDATE_DATE_POSITION")
                                 addAction("com.android.CaveArt.UPDATE_CLOCK_STRETCH")
                                 addAction("com.android.CaveArt.UPDATE_COLLISION_MAP")
                                 addAction(Intent.ACTION_USER_PRESENT)
                                 addAction(Intent.ACTION_SCREEN_ON) 
+                                addAction(Intent.ACTION_TIME_TICK) 
                             }
 
                             context.registerReceiver(object : BroadcastReceiver() {
@@ -145,6 +156,26 @@ class CaveArtXposedModule : XposedModule() {
                                             myCustomClock.curveRound = intent.getFloatExtra("clock_roundness", 30f)
                                             myCustomClock.requestLayout()
                                             myCustomClock.invalidate()
+                                        }
+                                        "com.android.CaveArt.UPDATE_DATE_POSITION" -> {
+                                            val newX = intent.getFloatExtra("date_x", 0f)
+                                            val newY = intent.getFloatExtra("date_y", 75f)
+                                            myCustomDate.translationX = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, newX, context.resources.displayMetrics)
+                                            dateTopMarginPx = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, newY, context.resources.displayMetrics).toInt()
+                                            
+                                            try {
+                                                val constraintSetClass = classLoader.loadClass("androidx.constraintlayout.widget.ConstraintSet")
+                                                val constraintLayoutClass = classLoader.loadClass("androidx.constraintlayout.widget.ConstraintLayout")
+                                                if (constraintLayoutClass.isInstance(rootLayout)) {
+                                                    val set = constraintSetClass.getDeclaredConstructor().newInstance()
+                                                    constraintSetClass.getMethod("clone", constraintLayoutClass).invoke(set, rootLayout)
+                                                    constraintSetClass.getMethod("setMargin", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType, Int::class.javaPrimitiveType).invoke(set, customDateId, 3, dateTopMarginPx)
+                                                    constraintSetClass.getMethod("applyTo", constraintLayoutClass).invoke(set, rootLayout)
+                                                }
+                                            } catch (e: Exception) {}
+                                            
+                                            myCustomDate.requestLayout()
+                                            myCustomDate.invalidate()
                                         }
                                         "com.android.CaveArt.UPDATE_CLOCK_POSITION" -> {
                                             val newX = intent.getFloatExtra("clock_x", 0f)
@@ -174,24 +205,9 @@ class CaveArtXposedModule : XposedModule() {
                                             myCustomClock.requestLayout()
                                             myCustomClock.invalidate()
                                         }
-                                        Intent.ACTION_USER_PRESENT, Intent.ACTION_SCREEN_ON -> {
-                                            
-                                            try {
-                                                val cr = context.contentResolver
-                                                cr.query(Uri.parse("content://com.android.CaveArt.settings/clock_hour_size"), null, null, null, null)?.use { if (it.moveToFirst()) myCustomClock.hourSizeDp = it.getFloat(0) }
-                                                cr.query(Uri.parse("content://com.android.CaveArt.settings/clock_minute_size"), null, null, null, null)?.use { if (it.moveToFirst()) myCustomClock.minuteSizeDp = it.getFloat(0) }
-                                                cr.query(Uri.parse("content://com.android.CaveArt.settings/clock_stroke_width"), null, null, null, null)?.use { if (it.moveToFirst()) myCustomClock.strokeW = it.getFloat(0) }
-                                                cr.query(Uri.parse("content://com.android.CaveArt.settings/clock_roundness"), null, null, null, null)?.use { if (it.moveToFirst()) myCustomClock.curveRound = it.getFloat(0) }
-                                                cr.query(Uri.parse("content://com.android.CaveArt.settings/clock_stretch"), null, null, null, null)?.use { if (it.moveToFirst()) myCustomClock.stretchEnabled = it.getInt(0) == 1 }
-                                                cr.query(Uri.parse("content://com.android.CaveArt.settings/clock_collision_map"), null, null, null, null)?.use { 
-                                                    if (it.moveToFirst()) {
-                                                        val mapStr = it.getString(0) ?: ""
-                                                        myCustomClock.collisionMap = if (mapStr.isNotEmpty()) mapStr.split(",").mapNotNull { v -> v.toFloatOrNull() }.toFloatArray() else null
-                                                    }
-                                                }
-                                                myCustomClock.requestLayout()
-                                                myCustomClock.invalidate()
-                                            } catch (e: Exception) {}
+                                        Intent.ACTION_TIME_TICK, Intent.ACTION_USER_PRESENT, Intent.ACTION_SCREEN_ON -> {
+                                            myCustomClock.refreshSettings()
+                                            myCustomDate.refreshSettings()
                                         }
                                     }
                                 }
@@ -216,10 +232,11 @@ class CaveArtXposedModule : XposedModule() {
                     hook(applyMethod).intercept { chain ->
                         chain.proceed()
                         val cs = chain.args[0]
-                        val clear = constraintSetClass.getMethod("clear", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
                         val connect = constraintSetClass.getMethod("connect", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType, Int::class.javaPrimitiveType, Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
                         val setVisibility = constraintSetClass.getMethod("setVisibility", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
                         val setAlpha = try { constraintSetClass.getMethod("setAlpha", Int::class.javaPrimitiveType, Float::class.javaPrimitiveType) } catch (e: Exception) { null }
+                        val constrainWidth = try { constraintSetClass.getMethod("constrainWidth", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType) } catch (e: Exception) { null }
+                        val constrainHeight = try { constraintSetClass.getMethod("constrainHeight", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType) } catch (e: Exception) { null }
 
                         try {
                             if (largeId != 0) {
@@ -237,21 +254,58 @@ class CaveArtXposedModule : XposedModule() {
                         connect.invoke(cs, customClockId, 6, 0, 6, 0) 
                         connect.invoke(cs, customClockId, 7, 0, 7, 0)
                         setVisibility.invoke(cs, customClockId, 0)
+                        setAlpha?.invoke(cs, customClockId, 1f)
                         
-                        val weatherViews = listOf(dateSmartspaceId, keyguardSliceViewId, bcSmartspaceId)
-                        weatherViews.filter { it != 0 }.forEach { viewId ->
-                            clear.invoke(cs, viewId, 3) 
-                            connect.invoke(cs, viewId, 3, customClockId, 4, gapPx) 
-                        }
+                        constrainWidth?.invoke(cs, customDateId, -2)
+                        constrainHeight?.invoke(cs, customDateId, -2)
+
+                        connect.invoke(cs, customDateId, 3, 0, 3, dateTopMarginPx) 
+                        connect.invoke(cs, customDateId, 6, 0, 6, 0) 
+                        connect.invoke(cs, customDateId, 7, 0, 7, 0)
+                        setVisibility.invoke(cs, customDateId, 0)
+                        setAlpha?.invoke(cs, customDateId, 1f)
                         
-                        if (nsslId != 0) {
-                            clear.invoke(cs, nsslId, 3) 
-                            val anchorTo = if (bcSmartspaceId != 0) bcSmartspaceId else if (dateSmartspaceId != 0) dateSmartspaceId else customClockId
-                            connect.invoke(cs, nsslId, 3, anchorTo, 4, gapPx) 
-                        }
+                        SystemUIHider.hideInConstraintSet(cs, constraintSetClass)
                     }
                 } catch (e: Exception) {}
             }
+        }
+    }
+}
+
+class IndependentDateView(context: Context) : TextClock(context) {
+    init {
+        format12Hour = "EEE, d MMMM"
+        format24Hour = "EEE, d MMMM"
+        setTextColor(Color.WHITE)
+        gravity = Gravity.CENTER
+        typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+        setShadowLayer(10f, 0f, 3f, Color.argb(160, 0, 0, 0))
+        isSingleLine = true
+    }
+
+    fun refreshSettings() {
+        try {
+            val cr = context.contentResolver
+            cr.query(Uri.parse("content://com.android.CaveArt.settings/date_size"), null, null, null, null)?.use { 
+                if (it.moveToFirst()) setTextSize(TypedValue.COMPLEX_UNIT_SP, it.getFloat(0)) 
+            }
+            requestLayout()
+            invalidate()
+        } catch (e: Exception) {}
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        refreshSettings() 
+    }
+
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+        if (measuredWidth == 0 || measuredHeight == 0) {
+            val fallbackW = MeasureSpec.makeMeasureSpec(800, MeasureSpec.AT_MOST)
+            val fallbackH = MeasureSpec.makeMeasureSpec(200, MeasureSpec.AT_MOST)
+            super.onMeasure(fallbackW, fallbackH)
         }
     }
 }
@@ -277,6 +331,30 @@ class VectorTextClock(context: Context) : TextClock(context) {
     init {
         setTextColor(Color.TRANSPARENT) 
         gravity = Gravity.CENTER
+    }
+
+    fun refreshSettings() {
+        try {
+            val cr = context.contentResolver
+            cr.query(Uri.parse("content://com.android.CaveArt.settings/clock_hour_size"), null, null, null, null)?.use { if (it.moveToFirst()) hourSizeDp = it.getFloat(0) }
+            cr.query(Uri.parse("content://com.android.CaveArt.settings/clock_minute_size"), null, null, null, null)?.use { if (it.moveToFirst()) minuteSizeDp = it.getFloat(0) }
+            cr.query(Uri.parse("content://com.android.CaveArt.settings/clock_stroke_width"), null, null, null, null)?.use { if (it.moveToFirst()) strokeW = it.getFloat(0) }
+            cr.query(Uri.parse("content://com.android.CaveArt.settings/clock_roundness"), null, null, null, null)?.use { if (it.moveToFirst()) curveRound = it.getFloat(0) }
+            cr.query(Uri.parse("content://com.android.CaveArt.settings/clock_stretch"), null, null, null, null)?.use { if (it.moveToFirst()) stretchEnabled = it.getInt(0) == 1 }
+            cr.query(Uri.parse("content://com.android.CaveArt.settings/clock_collision_map"), null, null, null, null)?.use { 
+                if (it.moveToFirst()) {
+                    val mapStr = it.getString(0) ?: ""
+                    collisionMap = if (mapStr.isNotEmpty()) mapStr.split(",").mapNotNull { v -> v.toFloatOrNull() }.toFloatArray() else null
+                }
+            }
+            requestLayout()
+            invalidate()
+        } catch (e: Exception) {}
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        refreshSettings()
     }
 
     fun setClockState(hasNotifications: Boolean) {

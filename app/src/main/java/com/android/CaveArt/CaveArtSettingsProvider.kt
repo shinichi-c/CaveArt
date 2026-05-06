@@ -21,6 +21,9 @@ class CaveArtSettingsProvider : ContentProvider() {
         when (uri.lastPathSegment) {
             "clock_x" -> cursor.addRow(arrayOf(prefs.getFloat("clock_x", 0f)))
             "clock_y" -> cursor.addRow(arrayOf(prefs.getFloat("clock_y", 110f)))
+            "date_x" -> cursor.addRow(arrayOf(prefs.getFloat("date_x", 0f)))
+            "date_y" -> cursor.addRow(arrayOf(prefs.getFloat("date_y", 75f)))
+            "date_size" -> cursor.addRow(arrayOf(prefs.getFloat("date_size", 20f)))
             "clock_hour_size" -> cursor.addRow(arrayOf(prefs.getFloat("clock_hour_size", 100f)))
             "clock_minute_size" -> cursor.addRow(arrayOf(prefs.getFloat("clock_minute_size", 75f)))
             "clock_stroke_width" -> cursor.addRow(arrayOf(prefs.getFloat("clock_stroke_width", 8f)))
