@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.RectF
 import android.graphics.SurfaceTexture
+import android.text.format.DateFormat
 import android.view.Choreographer
 import android.view.Surface
 import android.view.TextureView
@@ -404,7 +405,6 @@ fun ClockEditorPreview(
             .fillMaxSize()
             .pointerInput(Unit) {
                 awaitEachGesture {
-                    
                     val down = awaitFirstDown(requireUnconsumed = true)
                     if (down.isConsumed) return@awaitEachGesture
                     
@@ -477,7 +477,9 @@ fun ClockEditorPreview(
                 val hPx = viewModel.clockHourSize * densityVal
                 val mPx = viewModel.clockMinuteSize * densityVal
                 
-                val timeString = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date())
+                val is24Hour = DateFormat.is24HourFormat(context)
+                val timePattern = if (is24Hour) "HH:mm" else "hh:mm"
+                val timeString = java.text.SimpleDateFormat(timePattern, java.util.Locale.getDefault()).format(java.util.Date())
                 
                 val hourW = hPx * 0.55f
                 val minW = mPx * 0.55f
@@ -542,12 +544,11 @@ fun ClockEditorPreview(
                 exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
                 modifier = Modifier.align(Alignment.BottomCenter)
             ) {
-                
                 Surface(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 24.dp)
-                        .pointerInput(Unit) { detectTapGestures { } },
+                        .pointerInput(Unit) { detectTapGestures { } }, 
                     shape = RoundedCornerShape(32.dp),
                     color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
                     shadowElevation = 12.dp
