@@ -9,6 +9,7 @@ import android.text.format.DateFormat
 import android.view.Choreographer
 import android.view.Surface
 import android.view.TextureView
+import android.view.HapticFeedbackConstants
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
@@ -34,11 +35,15 @@ import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.asComposePath
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
@@ -138,13 +143,11 @@ fun EffectsControlsSheet(
 
     var extractedColors by remember { mutableStateOf(listOf<Int>()) }
     var sliderPosition by remember { mutableFloatStateOf(viewModel.magicScale) }
-    var selectedTab by remember { mutableStateOf("Clock") }
     
     val currentAnim = remember(viewModel.currentAnimationStyle) { AnimationFactory.getAnimation(viewModel.currentAnimationStyle) }
     
     val tabs = remember(viewModel.isMagicShapeEnabled, viewModel.isAnimationEnabled, viewModel.isFilamentEnabled, currentAnim) {
         val list = mutableListOf<String>()
-        list.add("Clock") 
         if (viewModel.isMagicShapeEnabled) { list.add("Shape"); list.add("Style") }
         if (viewModel.isAnimationEnabled) {
             list.add("Animation")
@@ -154,7 +157,7 @@ fun EffectsControlsSheet(
         list
     }
 
-    LaunchedEffect(selectedTab) { viewModel.isLockscreenClockPreviewVisible = (selectedTab == "Clock") }
+    var selectedTab by remember { mutableStateOf("") }
     LaunchedEffect(tabs) { if (!tabs.contains(selectedTab) && tabs.isNotEmpty()) selectedTab = tabs.first() }
 
     LaunchedEffect(wallpaper) {
@@ -196,7 +199,7 @@ fun EffectsControlsSheet(
     
     Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
         
-        if (tabs.isNotEmpty() && selectedTab != "Clock") {
+        if (tabs.isNotEmpty()) {
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(48.dp),
@@ -322,7 +325,6 @@ fun EffectsControlsSheet(
                     tabs.forEach { tab ->
                         val isSelected = selectedTab == tab
                         val tabIcon = when (tab) {
-                            "Clock" -> Icons.Default.Lock
                             "Shape" -> Icons.Default.Category
                             "Animation" -> Icons.Default.Animation
                             "3D Engine" -> Icons.Default.ViewInAr
@@ -356,7 +358,8 @@ fun ShapeIcon(shape: MagicShape, color: Color, modifier: Modifier = Modifier) {
 fun LiveEffectImage(
     wallpaper: Wallpaper,
     viewModel: WallpaperViewModel,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onApplyClockAndWallpaperClick: () -> Unit = {}
 ) {
     val context = LocalContext.current
     var previewMask by remember { mutableStateOf<Bitmap?>(null) }
@@ -366,7 +369,7 @@ fun LiveEffectImage(
     }
 
     if (viewModel.isLockscreenClockPreviewVisible) {
-        ClockEditorPreview(wallpaper, viewModel, previewMask, modifier)
+        ClockEditorPreview(wallpaper, viewModel, previewMask, modifier, onApplyClockAndWallpaperClick)
     } else {
         AnimatedWallpaperEngine(wallpaper, viewModel, previewMask, modifier)
     }
@@ -378,124 +381,188 @@ fun ClockEditorPreview(
     wallpaper: Wallpaper,
     viewModel: WallpaperViewModel,
     previewMask: Bitmap?,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onApplyClockAndWallpaperClick: () -> Unit = {}
 ) {
     val context = LocalContext.current
+    val view = LocalView.current
+    val scope = rememberCoroutineScope()
     val metrics = context.resources.displayMetrics
     val realScreenW = metrics.widthPixels.toFloat()
     val realScreenH = metrics.heightPixels.toFloat()
     val densityVal = metrics.density
     val config = LocalConfiguration.current
     
-    LaunchedEffect(previewMask, viewModel.isClockStretchEnabled) {
-        if (viewModel.isClockStretchEnabled && previewMask != null) {
-            viewModel.generateCollisionMap(context, previewMask, realScreenW, realScreenH)
+    var showCustomizeSheet by remember { mutableStateOf(false) }
+    var showApplyOptions by remember { mutableStateOf(false) }
+    
+    var isDraggingClock by remember { mutableStateOf(false) }
+    var isDraggingDate by remember { mutableStateOf(false) }
+
+    var previewClockX by remember { mutableFloatStateOf(viewModel.lockscreenClockOffsetX) }
+    var previewClockY by remember { mutableFloatStateOf(viewModel.lockscreenClockOffsetY) }
+    var previewDateX by remember { mutableFloatStateOf(viewModel.lockscreenDateOffsetX) }
+    var previewDateY by remember { mutableFloatStateOf(viewModel.lockscreenDateOffsetY) }
+    var previewHourSize by remember { mutableFloatStateOf(viewModel.clockHourSize) }
+    var previewMinSize by remember { mutableFloatStateOf(viewModel.clockMinuteSize) }
+    var previewStrokeWidth by remember { mutableFloatStateOf(viewModel.clockStrokeWidth) }
+    var previewRoundness by remember { mutableFloatStateOf(viewModel.clockRoundness) }
+    var previewStretchEnabled by remember { mutableStateOf(viewModel.isClockStretchEnabled) }
+    var previewCollisionMap by remember { mutableStateOf(viewModel.clockCollisionMap) }
+
+    LaunchedEffect(previewMask, previewStretchEnabled) {
+        if (previewStretchEnabled && previewMask != null) {
+            withContext(Dispatchers.Default) {
+                val mapStr = AdaptiveClockHelper.generateCollisionMap(previewMask, realScreenW, realScreenH)
+                withContext(Dispatchers.Main) {
+                    previewCollisionMap = mapStr
+                }
+            }
+        } else {
+            previewCollisionMap = ""
         }
     }
 
-    var showFloatingPanel by remember { mutableStateOf(true) }
-
-    Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+    Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         
-        AsyncWallpaperImage(wallpaper = wallpaper, contentDescription = null, viewModel = viewModel, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop, allowMagic = false)
-        
-        Box(modifier = Modifier.fillMaxWidth().height(300.dp).background(Brush.verticalGradient(listOf(Color.Black.copy(alpha=0.6f), Color.Transparent))))
+        Box(modifier = Modifier.fillMaxSize()) {
+            AsyncWallpaperImage(wallpaper = wallpaper, contentDescription = null, viewModel = viewModel, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop, allowMagic = false)
+            
+            Box(modifier = Modifier.fillMaxWidth().height(300.dp).background(Brush.verticalGradient(listOf(Color.Black.copy(alpha=0.6f), Color.Transparent))))
 
-        Box(modifier = Modifier
-            .fillMaxSize()
-            .pointerInput(Unit) {
-                awaitEachGesture {
-                    val down = awaitFirstDown(requireUnconsumed = true)
-                    if (down.isConsumed) return@awaitEachGesture
-                    
-                    var dragged = false
-                    val scale = maxOf(size.width / realScreenW, size.height / realScreenH)
-                    val dy = (size.height - realScreenH * scale) / 2f
-                    
-                    val scaledDateY = (viewModel.lockscreenDateOffsetY * densityVal + (20f * densityVal)) * scale + dy
-                    val scaledClockY = (viewModel.lockscreenClockOffsetY * densityVal) * scale + dy
-                    
-                    val distToDate = abs(down.position.y - scaledDateY)
-                    val distToClock = abs(down.position.y - scaledClockY)
-                    
-                    val activeDrag = if (distToDate < distToClock && distToDate < 300f) "DATE" else "CLOCK"
-                    
-                    do {
-                        val event = awaitPointerEvent()
-                        val pan = event.calculatePan()
-                        val zoom = event.calculateZoom()
+            Box(modifier = Modifier
+                .fillMaxSize()
+                .pointerInput(Unit) {
+                    var rawClockX = previewClockX
+                    var rawClockY = previewClockY
+                    var rawDateX = previewDateX
+                    var rawDateY = previewDateY
+
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = true)
+                        if (down.isConsumed) return@awaitEachGesture
                         
-                        if (pan.getDistance() > 3f || abs(zoom - 1f) > 0.01f) {
-                            dragged = true
-                        }
+                        var dragged = false
+                        val scale = maxOf(size.width / realScreenW, size.height / realScreenH)
+                        val dy = (size.height - realScreenH * scale) / 2f
                         
-                        if (dragged) {
-                            if (activeDrag == "DATE") {
-                                val newX = viewModel.lockscreenDateOffsetX + ((pan.x / scale) / densityVal)
-                                val newY = (viewModel.lockscreenDateOffsetY + ((pan.y / scale) / densityVal)).coerceIn(0f, config.screenHeightDp.toFloat())
-                                viewModel.updateLockscreenDatePosition(context, newX, newY)
-                            } else {
-                                val newHour = (viewModel.clockHourSize * zoom).coerceIn(40f, 200f)
-                                val newMin = (viewModel.clockMinuteSize * zoom).coerceIn(40f, 200f)
-                                val newX = viewModel.lockscreenClockOffsetX + ((pan.x / scale) / densityVal)
-                                val newY = (viewModel.lockscreenClockOffsetY + ((pan.y / scale) / densityVal)).coerceIn(0f, config.screenHeightDp.toFloat())
-                                viewModel.updateClockStyle(context, newHour, newMin, viewModel.clockStrokeWidth, viewModel.clockRoundness)
-                                viewModel.updateLockscreenClockPosition(context, newX, newY)
+                        val scaledDateY = (previewDateY * densityVal + (20f * densityVal)) * scale + dy
+                        val scaledClockY = (previewClockY * densityVal) * scale + dy
+                        
+                        val distToDate = abs(down.position.y - scaledDateY)
+                        val distToClock = abs(down.position.y - scaledClockY)
+                        
+                        val activeDrag = if (distToDate < distToClock && distToDate < 300f) "DATE" else "CLOCK"
+                        
+                        rawClockX = previewClockX
+                        rawClockY = previewClockY
+                        rawDateX = previewDateX
+                        rawDateY = previewDateY
+
+                        var hasChangedClock = false
+                        var hasChangedDate = false
+
+                        do {
+                            val event = awaitPointerEvent()
+                            val pan = event.calculatePan()
+                            val zoom = event.calculateZoom()
+                            
+                            if (pan.getDistance() > 3f || abs(zoom - 1f) > 0.01f) {
+                                dragged = true
                             }
-                            event.changes.forEach { if (it.positionChanged()) it.consume() }
+                            
+                            if (dragged) {
+                                if (activeDrag == "DATE") {
+                                    isDraggingDate = true
+                                    hasChangedDate = true
+                                    rawDateX += (pan.x / scale) / densityVal
+                                    rawDateY += (pan.y / scale) / densityVal
+                                    
+                                    previewDateX = rawDateX
+                                    previewDateY = rawDateY.coerceIn(0f, config.screenHeightDp.toFloat())
+                                } else {
+                                    isDraggingClock = true
+                                    hasChangedClock = true
+                                    val newHour = (previewHourSize * zoom).coerceIn(40f, 200f)
+                                    val newMin = (previewMinSize * zoom).coerceIn(40f, 200f)
+                                    
+                                    rawClockX += (pan.x / scale) / densityVal
+                                    rawClockY += (pan.y / scale) / densityVal
+                                    
+                                    previewHourSize = newHour
+                                    previewMinSize = newMin
+                                    previewClockX = rawClockX
+                                    previewClockY = rawClockY.coerceIn(0f, config.screenHeightDp.toFloat())
+                                }
+                                event.changes.forEach { if (it.positionChanged()) it.consume() }
+                            }
+                        } while (event.changes.any { it.pressed })
+                        
+                        isDraggingClock = false
+                        isDraggingDate = false
+                        
+                        if (hasChangedClock) {
+                            if (abs(previewClockX) < 15f) {
+                                previewClockX = 0f
+                                view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                            }
                         }
-                    } while (event.changes.any { it.pressed })
-                    
-                    if (!dragged) {
-                        showFloatingPanel = !showFloatingPanel
+                        if (hasChangedDate) {
+                            if (abs(previewDateX) < 15f) {
+                                previewDateX = 0f
+                                view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                            }
+                        }
                     }
                 }
-            }
-        ) {
-            val vectorPaint = remember {
-                android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-                    color = android.graphics.Color.WHITE
-                    style = android.graphics.Paint.Style.STROKE
-                    strokeCap = android.graphics.Paint.Cap.ROUND
-                    strokeJoin = android.graphics.Paint.Join.ROUND
-                    setShadowLayer(15f, 0f, 5f, android.graphics.Color.argb(160, 0, 0, 0))
+            ) {
+                val vectorPaint = remember {
+                    android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                        color = android.graphics.Color.WHITE
+                        style = android.graphics.Paint.Style.STROKE
+                        strokeCap = android.graphics.Paint.Cap.ROUND
+                        strokeJoin = android.graphics.Paint.Join.ROUND
+                        setShadowLayer(15f, 0f, 5f, android.graphics.Color.argb(160, 0, 0, 0))
+                    }
                 }
-            }
 
-            val dateText = java.text.SimpleDateFormat("EEE, d MMMM", java.util.Locale.getDefault()).format(java.util.Date())
-            val datePaint = remember {
-                android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-                    color = android.graphics.Color.WHITE
-                    textSize = 20f * densityVal
-                    textAlign = android.graphics.Paint.Align.CENTER
-                    setShadowLayer(10f, 0f, 3f, android.graphics.Color.argb(160, 0, 0, 0))
-                    typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+                val dateText = java.text.SimpleDateFormat("EEE, MMM d", java.util.Locale.getDefault()).format(java.util.Date())
+                val datePaint = remember {
+                    android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                        color = android.graphics.Color.WHITE
+                        textSize = 20f * densityVal
+                        textAlign = android.graphics.Paint.Align.CENTER
+                        setShadowLayer(10f, 0f, 3f, android.graphics.Color.argb(160, 0, 0, 0))
+                        typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+                    }
                 }
-            }
 
-            androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
-                val hPx = viewModel.clockHourSize * densityVal
-                val mPx = viewModel.clockMinuteSize * densityVal
-                
-                val is24Hour = DateFormat.is24HourFormat(context)
-                val timePattern = if (is24Hour) "HH:mm" else "hh:mm"
-                val timeString = java.text.SimpleDateFormat(timePattern, java.util.Locale.getDefault()).format(java.util.Date())
-                
-                val hourW = hPx * 0.55f
-                val minW = mPx * 0.55f
-                val gap = hPx * 0.15f
-                val parts = timeString.split(":")
-                val hCount = (parts.getOrNull(0) ?: "00").length
-                val mCount = (parts.getOrNull(1) ?: "00").length
-                val totalWidth = (hCount * hourW) + (mCount * minW) + (gap * (hCount + mCount))
+                androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
+                    val hPx = previewHourSize * densityVal
+                    val mPx = previewMinSize * densityVal
+                    
+                    val is24Hour = DateFormat.is24HourFormat(context)
+                    val timePattern = if (is24Hour) "HH:mm" else "hh:mm"
+                    val timeString = java.text.SimpleDateFormat(timePattern, java.util.Locale.getDefault()).format(java.util.Date())
+                    
+                    val hourW = hPx * 0.55f
+                    val minW = mPx * 0.55f
+                    val gap = hPx * 0.15f
+                    val parts = timeString.split(":")
+                    val hCount = (parts.getOrNull(0) ?: "00").length
+                    val mCount = (parts.getOrNull(1) ?: "00").length
+                    val totalWidth = (hCount * hourW) + (mCount * minW) + (gap * (hCount + mCount))
 
-                val realCenterX = (realScreenW / 2f) + (viewModel.lockscreenClockOffsetX * densityVal)
-                val realStartX = realCenterX - (totalWidth / 2f)
-                val realStartY = viewModel.lockscreenClockOffsetY * densityVal
+                    val realCenterX = (realScreenW / 2f) + (previewClockX * densityVal)
+                    val realStartX = realCenterX - (totalWidth / 2f)
+                    val realStartY = previewClockY * densityVal
 
-                val collisionMapArray = if (viewModel.clockCollisionMap.isNotEmpty()) viewModel.clockCollisionMap.split(",").mapNotNull { it.toFloatOrNull() }.toFloatArray() else null
+                    val collisionMapArray = if (previewCollisionMap.isNotEmpty()) previewCollisionMap.split(",").mapNotNull { it.toFloatOrNull() }.toFloatArray() else null
 
-                drawIntoCanvas { canvas ->
+                    val scale = maxOf(size.width / realScreenW, size.height / realScreenH)
+                    val dx = (size.width - realScreenW * scale) / 2f
+                    val dy = (size.height - realScreenH * scale) / 2f
+
                     val path = AdaptiveClockHelper.buildPath(
                         timeString = timeString,
                         startX = realStartX,
@@ -506,141 +573,219 @@ fun ClockEditorPreview(
                         minH = mPx,
                         screenW = realScreenW,
                         screenH = realScreenH,
-                        isStretchEnabled = viewModel.isClockStretchEnabled,
+                        isStretchEnabled = previewStretchEnabled,
                         collisionMap = collisionMapArray,
                         density = densityVal,
-                        strokeWidth = viewModel.clockStrokeWidth 
+                        strokeWidth = previewStrokeWidth 
                     )
 
-                    val scale = maxOf(size.width / realScreenW, size.height / realScreenH)
-                    val dx = (size.width - realScreenW * scale) / 2f
-                    val dy = (size.height - realScreenH * scale) / 2f
+                    val pathBounds = android.graphics.RectF()
+                    path.computeBounds(pathBounds, true)
 
-                    val matrix = android.graphics.Matrix()
-                    matrix.postScale(scale, scale)
-                    matrix.postTranslate(dx, dy)
-                    path.transform(matrix) 
+                    if (isDraggingClock) {
+                        drawRoundRect(
+                            color = Color.White.copy(alpha = 0.3f),
+                            topLeft = Offset(pathBounds.left * scale + dx - 40f, pathBounds.top * scale + dy - 40f),
+                            size = Size(pathBounds.width() * scale + 80f, pathBounds.height() * scale + 80f),
+                            cornerRadius = CornerRadius(32f, 32f),
+                            style = Stroke(width = 4f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(20f, 20f), 0f))
+                        )
+                    }
 
-                    vectorPaint.strokeWidth = viewModel.clockStrokeWidth * densityVal * scale
-                    vectorPaint.pathEffect = android.graphics.CornerPathEffect(viewModel.clockRoundness * densityVal * scale)
+                    val scaledDateY = (previewDateY * densityVal + (20f * densityVal)) * scale + dy
+                    val scaledDateX = (realScreenW / 2f) * scale + dx + (previewDateX * densityVal) * scale
 
-                    canvas.nativeCanvas.drawPath(path, vectorPaint)
+                    if (isDraggingDate) {
+                        drawRoundRect(
+                            color = Color.White.copy(alpha = 0.3f),
+                            topLeft = Offset(scaledDateX - 250f, scaledDateY - 60f),
+                            size = Size(500f, 100f),
+                            cornerRadius = CornerRadius(32f, 32f),
+                            style = Stroke(width = 4f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(20f, 20f), 0f))
+                        )
+                    }
 
-                    val scaledDateY = (viewModel.lockscreenDateOffsetY * densityVal + (20f * densityVal)) * scale + dy
-                    val scaledDateX = (realScreenW / 2f) * scale + dx + (viewModel.lockscreenDateOffsetX * densityVal) * scale
+                    drawIntoCanvas { canvas ->
+                        val matrix = android.graphics.Matrix()
+                        matrix.postScale(scale, scale)
+                        matrix.postTranslate(dx, dy)
+                        path.transform(matrix) 
 
-                    canvas.nativeCanvas.drawText(
-                        dateText,
-                        scaledDateX,
-                        scaledDateY,
-                        datePaint.apply { textSize = 20f * densityVal * scale }
-                    )
+                        vectorPaint.strokeWidth = previewStrokeWidth * densityVal * scale
+                        vectorPaint.pathEffect = android.graphics.CornerPathEffect(previewRoundness * densityVal * scale)
+
+                        canvas.nativeCanvas.drawPath(path, vectorPaint)
+
+                        canvas.nativeCanvas.drawText(
+                            dateText,
+                            scaledDateX,
+                            scaledDateY,
+                            datePaint.apply { textSize = 20f * densityVal * scale }
+                        )
+                    }
                 }
             }
-            
-            AnimatedVisibility(
-                visible = showFloatingPanel,
-                enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
-                exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
-                modifier = Modifier.align(Alignment.BottomCenter)
+        }
+
+        Row(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 24.dp)
+                .fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            ExtendedFloatingActionButton(
+                onClick = { showCustomizeSheet = true },
+                icon = { Icon(Icons.Default.Palette, null) },
+                text = { Text("Customize") },
+                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                shape = RoundedCornerShape(24.dp)
+            )
+            Spacer(Modifier.width(16.dp))
+            ExtendedFloatingActionButton(
+                onClick = { showApplyOptions = true },
+                icon = { Icon(Icons.Default.Check, null) },
+                text = { Text("Done") },
+                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                shape = RoundedCornerShape(24.dp)
+            )
+        }
+
+        if (showCustomizeSheet) {
+            val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+            AmbientBottomSheet(
+                onDismissRequest = { showCustomizeSheet = false },
+                sheetState = sheetState,
+                viewModel = viewModel,
+                currentWallpaper = wallpaper
             ) {
-                Surface(
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 24.dp)
-                        .pointerInput(Unit) { detectTapGestures { } }, 
-                    shape = RoundedCornerShape(32.dp),
-                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
-                    shadowElevation = 12.dp
+                        .padding(horizontal = 24.dp)
+                        .padding(bottom = 32.dp)
                 ) {
-                    Column(
-                        modifier = Modifier.padding(24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .width(40.dp)
-                                .height(4.dp)
-                                .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
-                        )
-                        
-                        Spacer(Modifier.height(16.dp))
-                        
-                        Text(
-                            text = "Tap & drag to edit Clock and Date",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        
-                        Spacer(Modifier.height(24.dp))
-                        
-                        Column(modifier = Modifier.fillMaxWidth()) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.FormatSize, contentDescription = "Thickness", modifier = Modifier.size(24.dp), tint = MaterialTheme.colorScheme.onSurface)
-                                Spacer(Modifier.width(16.dp))
-                                Slider(
-                                    value = viewModel.clockStrokeWidth,
-                                    onValueChange = { viewModel.updateClockStyle(context, viewModel.clockHourSize, viewModel.clockMinuteSize, it, viewModel.clockRoundness) },
-                                    valueRange = 1f..25f,
-                                    modifier = Modifier.weight(1f)
-                                )
-                            }
-                            Spacer(Modifier.height(8.dp))
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.DonutLarge, contentDescription = "Roundness", modifier = Modifier.size(24.dp), tint = MaterialTheme.colorScheme.onSurface)
-                                Spacer(Modifier.width(16.dp))
-                                Slider(
-                                    value = viewModel.clockRoundness,
-                                    onValueChange = { viewModel.updateClockStyle(context, viewModel.clockHourSize, viewModel.clockMinuteSize, viewModel.clockStrokeWidth, it) },
-                                    valueRange = 0f..80f,
-                                    modifier = Modifier.weight(1f)
-                                )
-                            }
-                        }
-                        
-                        Spacer(Modifier.height(24.dp))
-                        
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            Surface(
-                                onClick = { 
-                                    if (previewMask != null) viewModel.autoFitClockToSubject(context, previewMask, realScreenW, realScreenH) 
-                                },
-                                shape = RoundedCornerShape(20.dp),
-                                color = if (previewMask != null) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
-                                modifier = Modifier.weight(1f).height(64.dp)
-                            ) {
-                                Column(
-                                    verticalArrangement = Arrangement.Center,
-                                    horizontalAlignment = Alignment.CenterHorizontally
-                                ) {
-                                    Icon(Icons.Default.AutoFixHigh, contentDescription = null, tint = if (previewMask != null) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant)
-                                    Spacer(Modifier.height(4.dp))
-                                    Text("Smart Fit", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = if (previewMask != null) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
-                            }
+                    Text("Clock Style", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+                    Spacer(Modifier.height(24.dp))
 
-                            val isAdaptive = viewModel.isClockStretchEnabled
-                            Surface(
-                                onClick = { viewModel.toggleClockStretch(context, !isAdaptive, previewMask, realScreenW, realScreenH) },
-                                shape = RoundedCornerShape(20.dp),
-                                color = if (isAdaptive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondaryContainer,
-                                modifier = Modifier.weight(1f).height(64.dp)
-                            ) {
-                                Column(
-                                    verticalArrangement = Arrangement.Center,
-                                    horizontalAlignment = Alignment.CenterHorizontally
-                                ) {
-                                    Icon(Icons.Default.Transform, contentDescription = null, tint = if (isAdaptive) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSecondaryContainer)
-                                    Spacer(Modifier.height(4.dp))
-                                    Text("Adaptive", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = if (isAdaptive) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSecondaryContainer)
+                    Text("Thickness", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.LineWeight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.width(16.dp))
+                        Slider(
+                            value = previewStrokeWidth,
+                            onValueChange = { previewStrokeWidth = it },
+                            valueRange = 1f..25f,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+
+                    Spacer(Modifier.height(16.dp))
+
+                    Text("Corner Roundness", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.RoundedCorner, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.width(16.dp))
+                        Slider(
+                            value = previewRoundness,
+                            onValueChange = { previewRoundness = it },
+                            valueRange = 0f..80f,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+
+                    Spacer(Modifier.height(32.dp))
+
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        FilledTonalButton(
+                            onClick = { 
+                                if (previewMask != null) {
+                                    scope.launch(Dispatchers.Default) {
+                                        val result = AdaptiveClockHelper.calculateAutoFit(
+                                            previewMask, realScreenW, realScreenH, previewHourSize, previewMinSize, densityVal,
+                                            viewModel.isMagicShapeEnabled, viewModel.magicScale, viewModel.isCentered
+                                        )
+                                        if (result != null) {
+                                            withContext(Dispatchers.Main) {
+                                                previewHourSize = result.hourSize
+                                                previewMinSize = result.minSize
+                                                previewClockX = 0f
+                                                previewClockY = result.yDp
+                                            }
+                                        }
+                                    }
                                 }
-                            }
+                            },
+                            modifier = Modifier.weight(1f).height(56.dp),
+                            shape = RoundedCornerShape(16.dp),
+                            enabled = previewMask != null
+                        ) {
+                            Icon(Icons.Default.AutoFixHigh, null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Smart Fit", fontWeight = FontWeight.Bold)
+                        }
+
+                        Button(
+                            onClick = { previewStretchEnabled = !previewStretchEnabled },
+                            modifier = Modifier.weight(1f).height(56.dp),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = if (previewStretchEnabled) ButtonDefaults.buttonColors() else ButtonDefaults.filledTonalButtonColors()
+                        ) {
+                            Icon(Icons.Default.Transform, null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Adaptive", fontWeight = FontWeight.Bold)
                         }
                     }
+                }
+            }
+        }
+
+        if (showApplyOptions) {
+            val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+            AmbientBottomSheet(
+                onDismissRequest = { showApplyOptions = false },
+                sheetState = sheetState,
+                viewModel = viewModel,
+                currentWallpaper = wallpaper
+            ) {
+                Column(modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp).navigationBarsPadding()) {
+                    Text("Apply Lockscreen", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black, modifier = Modifier.padding(bottom = 24.dp))
+                    
+                    DestinationButton(
+                        icon = Icons.Default.ScreenLockPortrait, 
+                        title = "Clock Layout Only", 
+                        subtitle = "Update clock position and style", 
+                        isSetting = false
+                    ) {
+                        showApplyOptions = false
+                        viewModel.updateClockStyle(context, previewHourSize, previewMinSize, previewStrokeWidth, previewRoundness)
+                        viewModel.updateLockscreenClockPosition(context, previewClockX, previewClockY)
+                        viewModel.updateLockscreenDatePosition(context, previewDateX, previewDateY)
+                        viewModel.toggleClockStretch(context, previewStretchEnabled, previewMask, realScreenW, realScreenH)
+                        viewModel.isLockscreenClockPreviewVisible = false
+                        android.widget.Toast.makeText(context, "Clock Layout Applied", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                    
+                    Spacer(Modifier.height(12.dp))
+                    
+                    DestinationButton(
+                        icon = Icons.Default.Wallpaper, 
+                        title = "Clock + Wallpaper", 
+                        subtitle = "Update layout and set static wallpaper", 
+                        isSetting = false
+                    ) {
+                        showApplyOptions = false
+                        viewModel.updateClockStyle(context, previewHourSize, previewMinSize, previewStrokeWidth, previewRoundness)
+                        viewModel.updateLockscreenClockPosition(context, previewClockX, previewClockY)
+                        viewModel.updateLockscreenDatePosition(context, previewDateX, previewDateY)
+                        viewModel.toggleClockStretch(context, previewStretchEnabled, previewMask, realScreenW, realScreenH)
+                        onApplyClockAndWallpaperClick() 
+                    }
+                    
+                    Spacer(Modifier.height(16.dp))
                 }
             }
         }

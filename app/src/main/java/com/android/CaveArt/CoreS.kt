@@ -3,6 +3,7 @@ package com.android.CaveArt
 
 import android.app.Activity
 import android.graphics.Bitmap
+import android.view.HapticFeedbackConstants
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -49,6 +50,7 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LocalOffer
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Wallpaper
 import androidx.compose.material.icons.filled.ViewInAr
@@ -77,7 +79,9 @@ import androidx.compose.ui.util.lerp
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.compose.rememberAsyncImagePainter
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.absoluteValue
 
 @Composable
@@ -194,14 +198,17 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
     var isCarouselVisible by rememberSaveable { mutableStateOf(true) }
     
     val isEffectActive = viewModel.isMagicShapeEnabled || viewModel.isAnimationEnabled || viewModel.isFilamentEnabled
+    val isClockActive = viewModel.isLockscreenClockPreviewVisible
+    val isAnyEditorActive = isEffectActive || isClockActive
     
-    val onHaptics = { if (viewModel.isHapticsEnabled) view.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY) }
+    val onHaptics = { if (viewModel.isHapticsEnabled) view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY) }
 
     BackHandler(enabled = isImmersiveMode) { isImmersiveMode = false }
-    BackHandler(enabled = isEffectActive) { 
+    BackHandler(enabled = isAnyEditorActive) { 
         viewModel.setMagicShapeEnabled(false)
         viewModel.setAnimationEnabled(false)
         viewModel.setFilamentEnabled(false)
+        viewModel.isLockscreenClockPreviewVisible = false
     }
     
     LaunchedEffect(mainPagerState.currentPage, mainPagerState.isScrollInProgress) {
@@ -250,7 +257,7 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
             ) {
                 
                 AnimatedVisibility(
-                    visible = !isImmersiveMode,
+                    visible = !isImmersiveMode && !isClockActive, 
                     enter = slideInVertically { -it } + fadeIn(),
                     exit = slideOutVertically { -it } + fadeOut()
                 ) {
@@ -258,7 +265,7 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                         modifier = Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 8.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        if (isEffectActive) {
+                        if (isAnyEditorActive) {
                             
                             Surface(
                                 modifier = Modifier.align(Alignment.CenterStart),
@@ -271,6 +278,7 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                                         viewModel.setMagicShapeEnabled(false)
                                         viewModel.setAnimationEnabled(false)
                                         viewModel.setFilamentEnabled(false)
+                                        viewModel.isLockscreenClockPreviewVisible = false
                                     }, 
                                     modifier = Modifier.size(44.dp)
                                 ) {
@@ -279,7 +287,7 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                             }
 
                             Text(
-                                text = "Effects",
+                                text = if (isClockActive) "Lockscreen Editor" else "Effects",
                                 style = MaterialTheme.typography.titleLarge,
                                 fontWeight = FontWeight.Black, 
                                 color = MaterialTheme.colorScheme.onSurface
@@ -351,7 +359,7 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                         HorizontalPager(
                             state = mainPagerState,
                             modifier = Modifier.fillMaxSize(),
-                            userScrollEnabled = !isEffectActive
+                            userScrollEnabled = !isAnyEditorActive
                         ) { pageIndex ->
                             val wp = filteredWallpapers[pageIndex]
                             val isCurrentPage = pageIndex == mainPagerState.currentPage
@@ -365,15 +373,26 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                                 normalPageAlpha = alpha,
                                 normalPageScale = scale,
                                 onTap = { 
-                                    if (!isEffectActive) {
+                                    if (!isAnyEditorActive) {
                                         isCarouselVisible = false
                                     }
                                 },
                                 onLongPress = {
-                                    if (!isEffectActive) {
+                                    if (!isAnyEditorActive) {
                                         isCarouselVisible = true
                                         if (viewModel.isHapticsEnabled) {
-                                            view.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+                                            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                        }
+                                    }
+                                },
+                                onApplyClockAndWallpaperClick = {
+                                    isSettingWallpaper = true
+                                    scope.launch {
+                                        setDeviceWallpaper(context, wp, WallpaperDestinations.FLAG_BOTH, viewModel.isFixedAlignmentEnabled, viewModel)
+                                        isSettingWallpaper = false
+                                        viewModel.isLockscreenClockPreviewVisible = false
+                                        withContext(Dispatchers.Main) {
+                                            Toast.makeText(context, "Clock & Wallpaper Applied", Toast.LENGTH_SHORT).show()
                                         }
                                     }
                                 },
@@ -391,7 +410,7 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                     Box(contentAlignment = Alignment.BottomCenter) {
                         
                         androidx.compose.animation.AnimatedVisibility(
-                            visible = !isEffectActive,
+                            visible = !isAnyEditorActive,
                             enter = slideInVertically { it } + fadeIn(),
                             exit = slideOutVertically { it } + fadeOut()
                         ) {
@@ -425,6 +444,7 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                                         onMagicClick = { viewModel.setMagicShapeEnabled(true) },
                                         onAnimationClick = { viewModel.setAnimationEnabled(true) },
                                         onFilamentClick = { viewModel.setFilamentEnabled(true) },
+                                        onLockscreenClick = { viewModel.isLockscreenClockPreviewVisible = true },
                                         onAddClick = { galleryLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
                                     )
                                 }
@@ -513,6 +533,7 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                             viewModel.setMagicShapeEnabled(false)
                             viewModel.setAnimationEnabled(false)
                             viewModel.setFilamentEnabled(false)
+                            viewModel.isLockscreenClockPreviewVisible = false
                         }
                     }
 
@@ -522,7 +543,7 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                     Spacer(Modifier.height(12.dp))
                     DestinationButton(Icons.Default.Lock, "Lock Screen Only", "Set on lock screen", isSettingWallpaper) { applyAction(WallpaperDestinations.FLAG_LOCK_SCREEN) }
                     
-                    if (isEffectActive) {
+                    if (isEffectActive || isClockActive) {
                         Spacer(Modifier.height(12.dp))
                         DestinationButton(Icons.Default.AutoAwesome, "Live Wallpaper", "Animated interactive wallpaper", isSettingWallpaper) {
                             isSettingWallpaper = true
@@ -534,6 +555,7 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                                 viewModel.setMagicShapeEnabled(false)
                                 viewModel.setAnimationEnabled(false)
                                 viewModel.setFilamentEnabled(false)
+                                viewModel.isLockscreenClockPreviewVisible = false
                             }
                         }
                     }
@@ -558,11 +580,13 @@ fun WallpaperPreviewCard(
     isCurrentPage: Boolean,
     onTap: () -> Unit,
     onLongPress: () -> Unit,
+    onApplyClockAndWallpaperClick: () -> Unit,
     viewModel: WallpaperViewModel,
     normalPageAlpha: Float,
     normalPageScale: Float
 ) {
-    val isLiveActive = (viewModel.isMagicShapeEnabled || viewModel.isAnimationEnabled || viewModel.isFilamentEnabled) && isCurrentPage
+    val isLiveActive = (viewModel.isMagicShapeEnabled || viewModel.isAnimationEnabled || viewModel.isFilamentEnabled || viewModel.isLockscreenClockPreviewVisible) && isCurrentPage
+    val heightFraction = if (viewModel.isLockscreenClockPreviewVisible && isCurrentPage) 0.96f else 1f
 
     Box(
         modifier = Modifier
@@ -577,20 +601,21 @@ fun WallpaperPreviewCard(
     ) {
         Card(
             modifier = Modifier
-                .fillMaxHeight()
+                .fillMaxHeight(heightFraction)
                 .aspectRatio(10.5f / 19.5f)
                 .combinedClickable(
                     onClick = onTap,
                     onLongClick = onLongPress
                 ),
-            shape = RoundedCornerShape(20.dp),
+            shape = RoundedCornerShape(if (viewModel.isLockscreenClockPreviewVisible && isCurrentPage) 36.dp else 20.dp),
             elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
         ) {
             if (isLiveActive) {
                 LiveEffectImage(
                     wallpaper = wallpaper,
                     viewModel = viewModel,
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier.fillMaxSize(),
+                    onApplyClockAndWallpaperClick = onApplyClockAndWallpaperClick
                 )
             } else {
                 AsyncWallpaperImage(
@@ -612,6 +637,7 @@ fun ConnectedWallpaperActions(
     onMagicClick: () -> Unit,
     onAnimationClick: () -> Unit,
     onFilamentClick: () -> Unit,
+    onLockscreenClick: () -> Unit,
     onAddClick: () -> Unit
 ) {
     val enabled = currentWallpaper != null
@@ -638,6 +664,9 @@ fun ConnectedWallpaperActions(
     ) {
         IconButton(onClick = onAddClick) { 
             Icon(Icons.Default.AddPhotoAlternate, "Add", tint = MaterialTheme.colorScheme.onPrimaryContainer) 
+        }
+        IconButton(onClick = onLockscreenClick) {
+            Icon(Icons.Default.AccessTime, "Lockscreen", tint = MaterialTheme.colorScheme.onPrimaryContainer)
         }
         IconButton(onClick = onFilamentClick) {
             Icon(Icons.Default.ViewInAr, "3D Filament", tint = MaterialTheme.colorScheme.onPrimaryContainer)
