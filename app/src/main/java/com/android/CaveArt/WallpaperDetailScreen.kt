@@ -409,6 +409,19 @@ fun ClockEditorPreview(
     var previewRoundness by remember { mutableFloatStateOf(viewModel.clockRoundness) }
     var previewStretchEnabled by remember { mutableStateOf(viewModel.isClockStretchEnabled) }
     var previewCollisionMap by remember { mutableStateOf(viewModel.clockCollisionMap) }
+    
+    var timeString by remember { mutableStateOf("") }
+    var dateText by remember { mutableStateOf("") }
+    
+    LaunchedEffect(Unit) {
+        while (true) {
+            val is24Hour = DateFormat.is24HourFormat(context)
+            val timePattern = if (is24Hour) "HH:mm" else "hh:mm"
+            timeString = java.text.SimpleDateFormat(timePattern, java.util.Locale.getDefault()).format(java.util.Date())
+            dateText = java.text.SimpleDateFormat("EEE, MMM d", java.util.Locale.getDefault()).format(java.util.Date())
+            delay(1000L)
+        }
+    }
 
     LaunchedEffect(previewMask, previewStretchEnabled) {
         if (previewStretchEnabled && previewMask != null) {
@@ -420,6 +433,38 @@ fun ClockEditorPreview(
             }
         } else {
             previewCollisionMap = ""
+        }
+    }
+    
+    val collisionMapArray = remember(previewCollisionMap) {
+        if (previewCollisionMap.isNotEmpty()) previewCollisionMap.split(",").mapNotNull { it.toFloatOrNull() }.toFloatArray() else null
+    }
+    
+    val sharedPath = remember { android.graphics.Path() }
+    val sharedPathBounds = remember { android.graphics.RectF() }
+    val sharedMatrix = remember { android.graphics.Matrix() }
+    var currentScale by remember { mutableFloatStateOf(1f) }
+    
+    val cornerEffect = remember(previewRoundness, densityVal, currentScale) {
+        android.graphics.CornerPathEffect(previewRoundness * densityVal * currentScale)
+    }
+
+    val vectorPaint = remember {
+        android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            color = android.graphics.Color.WHITE
+            style = android.graphics.Paint.Style.STROKE
+            strokeCap = android.graphics.Paint.Cap.ROUND
+            strokeJoin = android.graphics.Paint.Join.ROUND
+            setShadowLayer(15f, 0f, 5f, android.graphics.Color.argb(160, 0, 0, 0))
+        }
+    }
+
+    val datePaint = remember {
+        android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            color = android.graphics.Color.WHITE
+            textAlign = android.graphics.Paint.Align.CENTER
+            setShadowLayer(10f, 0f, 3f, android.graphics.Color.argb(160, 0, 0, 0))
+            typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
         }
     }
 
@@ -516,54 +561,31 @@ fun ClockEditorPreview(
                     }
                 }
             ) {
-                val vectorPaint = remember {
-                    android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-                        color = android.graphics.Color.WHITE
-                        style = android.graphics.Paint.Style.STROKE
-                        strokeCap = android.graphics.Paint.Cap.ROUND
-                        strokeJoin = android.graphics.Paint.Join.ROUND
-                        setShadowLayer(15f, 0f, 5f, android.graphics.Color.argb(160, 0, 0, 0))
-                    }
-                }
-
-                val dateText = java.text.SimpleDateFormat("EEE, MMM d", java.util.Locale.getDefault()).format(java.util.Date())
-                val datePaint = remember {
-                    android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-                        color = android.graphics.Color.WHITE
-                        textSize = 20f * densityVal
-                        textAlign = android.graphics.Paint.Align.CENTER
-                        setShadowLayer(10f, 0f, 3f, android.graphics.Color.argb(160, 0, 0, 0))
-                        typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
-                    }
-                }
-
                 androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
+                    if (timeString.isEmpty()) return@Canvas
+
                     val hPx = previewHourSize * densityVal
                     val mPx = previewMinSize * densityVal
-                    
-                    val is24Hour = DateFormat.is24HourFormat(context)
-                    val timePattern = if (is24Hour) "HH:mm" else "hh:mm"
-                    val timeString = java.text.SimpleDateFormat(timePattern, java.util.Locale.getDefault()).format(java.util.Date())
                     
                     val hourW = hPx * 0.55f
                     val minW = mPx * 0.55f
                     val gap = hPx * 0.15f
-                    val parts = timeString.split(":")
-                    val hCount = (parts.getOrNull(0) ?: "00").length
-                    val mCount = (parts.getOrNull(1) ?: "00").length
+                    val colonIdx = timeString.indexOf(':')
+                    val hCount = if (colonIdx != -1) colonIdx else timeString.length
+                    val mCount = if (colonIdx != -1) timeString.length - colonIdx - 1 else 0
                     val totalWidth = (hCount * hourW) + (mCount * minW) + (gap * (hCount + mCount))
 
                     val realCenterX = (realScreenW / 2f) + (previewClockX * densityVal)
                     val realStartX = realCenterX - (totalWidth / 2f)
                     val realStartY = previewClockY * densityVal
 
-                    val collisionMapArray = if (previewCollisionMap.isNotEmpty()) previewCollisionMap.split(",").mapNotNull { it.toFloatOrNull() }.toFloatArray() else null
-
                     val scale = maxOf(size.width / realScreenW, size.height / realScreenH)
+                    if (currentScale != scale) currentScale = scale
+
                     val dx = (size.width - realScreenW * scale) / 2f
                     val dy = (size.height - realScreenH * scale) / 2f
 
-                    val path = AdaptiveClockHelper.buildPath(
+                    AdaptiveClockHelper.buildPath(
                         timeString = timeString,
                         startX = realStartX,
                         startY = realStartY,
@@ -576,17 +598,17 @@ fun ClockEditorPreview(
                         isStretchEnabled = previewStretchEnabled,
                         collisionMap = collisionMapArray,
                         density = densityVal,
-                        strokeWidth = previewStrokeWidth 
+                        strokeWidth = previewStrokeWidth,
+                        path = sharedPath 
                     )
 
-                    val pathBounds = android.graphics.RectF()
-                    path.computeBounds(pathBounds, true)
+                    sharedPath.computeBounds(sharedPathBounds, true)
 
                     if (isDraggingClock) {
                         drawRoundRect(
                             color = Color.White.copy(alpha = 0.3f),
-                            topLeft = Offset(pathBounds.left * scale + dx - 40f, pathBounds.top * scale + dy - 40f),
-                            size = Size(pathBounds.width() * scale + 80f, pathBounds.height() * scale + 80f),
+                            topLeft = Offset(sharedPathBounds.left * scale + dx - 40f, sharedPathBounds.top * scale + dy - 40f),
+                            size = Size(sharedPathBounds.width() * scale + 80f, sharedPathBounds.height() * scale + 80f),
                             cornerRadius = CornerRadius(32f, 32f),
                             style = Stroke(width = 4f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(20f, 20f), 0f))
                         )
@@ -606,21 +628,22 @@ fun ClockEditorPreview(
                     }
 
                     drawIntoCanvas { canvas ->
-                        val matrix = android.graphics.Matrix()
-                        matrix.postScale(scale, scale)
-                        matrix.postTranslate(dx, dy)
-                        path.transform(matrix) 
+                        sharedMatrix.reset()
+                        sharedMatrix.postScale(scale, scale)
+                        sharedMatrix.postTranslate(dx, dy)
+                        sharedPath.transform(sharedMatrix) 
 
                         vectorPaint.strokeWidth = previewStrokeWidth * densityVal * scale
-                        vectorPaint.pathEffect = android.graphics.CornerPathEffect(previewRoundness * densityVal * scale)
+                        vectorPaint.pathEffect = cornerEffect
 
-                        canvas.nativeCanvas.drawPath(path, vectorPaint)
+                        canvas.nativeCanvas.drawPath(sharedPath, vectorPaint)
 
+                        datePaint.textSize = 20f * densityVal * scale
                         canvas.nativeCanvas.drawText(
                             dateText,
                             scaledDateX,
                             scaledDateY,
-                            datePaint.apply { textSize = 20f * densityVal * scale }
+                            datePaint
                         )
                     }
                 }

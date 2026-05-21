@@ -27,17 +27,18 @@ object AdaptiveClockHelper {
         collisionMap: FloatArray?,
         density: Float,
         strokeWidth: Float,
-        stretchProgress: Float = 1f 
+        stretchProgress: Float = 1f,
+        path: Path = Path()
     ): Path {
-        val path = Path()
+        path.rewind()
         val hourW = hourH * 0.55f
         val minW = minH * 0.55f
         val gap = hourH * 0.15f
         var currentX = startX
-
-        val parts = timeString.split(":")
-        val hours = parts.getOrNull(0) ?: "00"
-        val mins = parts.getOrNull(1) ?: "00"
+        
+        val colonIdx = timeString.indexOf(':')
+        val hours = if (colonIdx != -1) timeString.substring(0, colonIdx) else "00"
+        val mins = if (colonIdx != -1) timeString.substring(colonIdx + 1) else "00"
 
         fun getDropY(cx: Float, cw: Float, defaultH: Float): Float {
             val normalY = startY + defaultH
@@ -90,8 +91,8 @@ object AdaptiveClockHelper {
             }
         }
 
-        for (c in hours) {
-            drawDigit(c, currentX, hourW, hourH, getDropY(currentX, hourW, hourH))
+        for (i in hours.indices) {
+            drawDigit(hours[i], currentX, hourW, hourH, getDropY(currentX, hourW, hourH))
             currentX += hourW + gap
         }
 
@@ -102,8 +103,8 @@ object AdaptiveClockHelper {
         path.moveTo(colonX, startY + colonH * 0.65f); path.lineTo(colonX, startY + colonH * 0.7f)
         currentX += gap * 2
 
-        for (c in mins) {
-            drawDigit(c, currentX, minW, minH, getDropY(currentX, minW, minH))
+        for (i in mins.indices) {
+            drawDigit(mins[i], currentX, minW, minH, getDropY(currentX, minW, minH))
             currentX += minW + gap
         }
         return path

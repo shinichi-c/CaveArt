@@ -320,7 +320,12 @@ class VectorTextClock(context: Context) : TextClock(context) {
     var stretchProgress = 1f
     private var animator: ValueAnimator? = null
     
-    val penPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    private val cachedPath = Path()
+    private val screenPos = IntArray(2)
+    private var lastCurveRound = -1f
+    private var lastStrokeW = -1f
+
+    private val penPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
         style = Paint.Style.STROKE 
         strokeCap = Paint.Cap.ROUND 
@@ -384,13 +389,21 @@ class VectorTextClock(context: Context) : TextClock(context) {
         
         setMeasuredDimension(MeasureSpec.getSize(widthMeasureSpec), measuredH)
     }
+    
+    private fun updatePaintIfNeeded() {
+        if (lastCurveRound != curveRound || lastStrokeW != strokeW) {
+            penPaint.strokeWidth = strokeW * resources.displayMetrics.density
+            penPaint.pathEffect = CornerPathEffect(curveRound * resources.displayMetrics.density)
+            lastCurveRound = curveRound
+            lastStrokeW = strokeW
+        }
+    }
 
     override fun onDraw(canvas: Canvas) {
         val timeString = text.toString()
         if (timeString.isEmpty()) return
 
-        penPaint.strokeWidth = strokeW * resources.displayMetrics.density
-        penPaint.pathEffect = CornerPathEffect(curveRound * resources.displayMetrics.density)
+        updatePaintIfNeeded()
         
         val hPx = hourSizeDp * resources.displayMetrics.density
         val mPx = minuteSizeDp * resources.displayMetrics.density
@@ -398,20 +411,20 @@ class VectorTextClock(context: Context) : TextClock(context) {
         val hourW = hPx * 0.55f
         val minW = mPx * 0.55f
         val gap = hPx * 0.15f
-        val parts = timeString.split(":")
-        val hCount = (parts.getOrNull(0) ?: "00").length
-        val mCount = (parts.getOrNull(1) ?: "00").length
+        
+        val colonIdx = timeString.indexOf(':')
+        val hCount = if (colonIdx != -1) colonIdx else timeString.length
+        val mCount = if (colonIdx != -1) timeString.length - colonIdx - 1 else 0
         val totalWidth = (hCount * hourW) + (mCount * minW) + (gap * (hCount + mCount))
 
         val startX = (width - totalWidth) / 2f
         val startY = 0f 
 
-        val screenPos = IntArray(2)
         getLocationOnScreen(screenPos)
         val trueAbsoluteX = screenPos[0].toFloat()
         val trueAbsoluteY = screenPos[1].toFloat()
 
-        val path = AdaptiveClockHelper.buildPath(
+        AdaptiveClockHelper.buildPath(
             timeString = timeString,
             startX = startX,
             startY = startY,
@@ -425,9 +438,10 @@ class VectorTextClock(context: Context) : TextClock(context) {
             collisionMap = collisionMap,
             density = resources.displayMetrics.density,
             strokeWidth = strokeW,
-            stretchProgress = stretchProgress 
+            stretchProgress = stretchProgress,
+            path = cachedPath
         )
         
-        canvas.drawPath(path, penPaint)
+        canvas.drawPath(cachedPath, penPaint)
     }
 }
