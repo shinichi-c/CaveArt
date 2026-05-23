@@ -7,6 +7,7 @@ import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.graphics.RectF
 import android.net.Uri
+import android.os.Build
 import android.util.LruCache
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -42,8 +43,15 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     private val segmentationHelper = SegmentationHelper(application)
     private val refineHelper = ForegroundEstimationHelper(application)
     private val mattingHelper = DeepMattingHelper(application)
-    private val prefs = application.getSharedPreferences("cave_art_settings", Context.MODE_PRIVATE)
-    private val clockPrefs = application.getSharedPreferences("cave_art_clock_prefs", Context.MODE_PRIVATE)
+    
+    private val safeContext = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+        application.createDeviceProtectedStorageContext()
+    } else {
+        application
+    }
+    
+    private val prefs = safeContext.getSharedPreferences("cave_art_settings", Context.MODE_PRIVATE)
+    private val clockPrefs = safeContext.getSharedPreferences("cave_art_clock_prefs", Context.MODE_PRIVATE)
 
     var isLoading by mutableStateOf(true)
         private set

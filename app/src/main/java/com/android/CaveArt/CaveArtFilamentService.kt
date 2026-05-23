@@ -1,6 +1,7 @@
 package com.android.CaveArt
 
 import android.content.Context
+import android.os.Build
 import android.service.wallpaper.WallpaperService
 import android.util.Log
 import android.view.Choreographer
@@ -77,8 +78,13 @@ class CaveArtFilamentService : WallpaperService() {
 
         private fun load3DModel(context: Context) {
             try {
+                val safeContext = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    context.createDeviceProtectedStorageContext()
+                } else {
+                    context
+                }
                 
-                val customFile = File(context.filesDir, "custom_model.glb")
+                val customFile = File(safeContext.filesDir, "custom_model.glb")
                 if (!customFile.exists()) {
                     Log.w("CaveArt3D", "No custom model found. Waiting for user to import one.")
                     return
