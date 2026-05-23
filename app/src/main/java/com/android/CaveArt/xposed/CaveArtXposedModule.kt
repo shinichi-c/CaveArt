@@ -77,6 +77,7 @@ class CaveArtXposedModule : XposedModule() {
                             var cRound = 30f
                             var isStretch = false
                             var collMap = ""
+                            var cColor = Color.WHITE
                             
                             try {
                                 val cr = context.contentResolver
@@ -91,6 +92,7 @@ class CaveArtXposedModule : XposedModule() {
                                 cr.query(Uri.parse("content://com.android.CaveArt.settings/clock_roundness"), null, null, null, null)?.use { if (it.moveToFirst()) cRound = it.getFloat(0) }
                                 cr.query(Uri.parse("content://com.android.CaveArt.settings/clock_stretch"), null, null, null, null)?.use { if (it.moveToFirst()) isStretch = it.getInt(0) == 1 }
                                 cr.query(Uri.parse("content://com.android.CaveArt.settings/clock_collision_map"), null, null, null, null)?.use { if (it.moveToFirst()) collMap = it.getString(0) ?: "" }
+                                cr.query(Uri.parse("content://com.android.CaveArt.settings/clock_color"), null, null, null, null)?.use { if (it.moveToFirst()) cColor = it.getInt(0) }
                             } catch (e: Exception) {}
 
                             topMarginPx = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, initialY, context.resources.displayMetrics).toInt()
@@ -105,6 +107,8 @@ class CaveArtXposedModule : XposedModule() {
                                 strokeW = sWidth; curveRound = cRound
                                 stretchEnabled = isStretch
                                 collisionMap = if (collMap.isNotEmpty()) collMap.split(",").mapNotNull { it.toFloatOrNull() }.toFloatArray() else null
+                                clockColor = cColor
+                                penPaint.color = cColor
                                 translationX = initialXPx
                                 translationZ = 50f
                                 elevation = 50f
@@ -114,6 +118,7 @@ class CaveArtXposedModule : XposedModule() {
                             val myCustomDate = IndependentDateView(context).apply {
                                 id = customDateId
                                 setTextSize(TypedValue.COMPLEX_UNIT_SP, dateSize)
+                                setTextColor(cColor)
                                 translationX = dateXPx
                                 translationZ = 60f
                                 elevation = 60f
@@ -141,6 +146,7 @@ class CaveArtXposedModule : XposedModule() {
                                 addAction("com.android.CaveArt.UPDATE_DATE_POSITION")
                                 addAction("com.android.CaveArt.UPDATE_CLOCK_STRETCH")
                                 addAction("com.android.CaveArt.UPDATE_COLLISION_MAP")
+                                addAction("com.android.CaveArt.UPDATE_CLOCK_COLOR")
                                 addAction(Intent.ACTION_USER_PRESENT)
                                 addAction(Intent.ACTION_SCREEN_ON) 
                                 addAction(Intent.ACTION_TIME_TICK) 
@@ -204,6 +210,14 @@ class CaveArtXposedModule : XposedModule() {
                                             myCustomClock.collisionMap = if (mapStr.isNotEmpty()) mapStr.split(",").mapNotNull { it.toFloatOrNull() }.toFloatArray() else null
                                             myCustomClock.requestLayout()
                                             myCustomClock.invalidate()
+                                        }
+                                        "com.android.CaveArt.UPDATE_CLOCK_COLOR" -> {
+                                            val newColor = intent.getIntExtra("clock_color", Color.WHITE)
+                                            myCustomClock.clockColor = newColor
+                                            myCustomClock.penPaint.color = newColor
+                                            myCustomClock.invalidate()
+                                            myCustomDate.setTextColor(newColor)
+                                            myCustomDate.invalidate()
                                         }
                                         Intent.ACTION_TIME_TICK, Intent.ACTION_USER_PRESENT, Intent.ACTION_SCREEN_ON -> {
                                             myCustomClock.refreshSettings()
@@ -290,6 +304,9 @@ class IndependentDateView(context: Context) : TextClock(context) {
             cr.query(Uri.parse("content://com.android.CaveArt.settings/date_size"), null, null, null, null)?.use { 
                 if (it.moveToFirst()) setTextSize(TypedValue.COMPLEX_UNIT_SP, it.getFloat(0)) 
             }
+            cr.query(Uri.parse("content://com.android.CaveArt.settings/clock_color"), null, null, null, null)?.use { 
+                if (it.moveToFirst()) setTextColor(it.getInt(0)) 
+            }
             requestLayout()
             invalidate()
         } catch (e: Exception) {}
@@ -317,6 +334,7 @@ class VectorTextClock(context: Context) : TextClock(context) {
     var curveRound = 30f
     var stretchEnabled = false
     var collisionMap: FloatArray? = null
+    var clockColor = Color.WHITE
     var stretchProgress = 1f
     private var animator: ValueAnimator? = null
     
@@ -325,7 +343,7 @@ class VectorTextClock(context: Context) : TextClock(context) {
     private var lastCurveRound = -1f
     private var lastStrokeW = -1f
 
-    private val penPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    val penPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
         style = Paint.Style.STROKE 
         strokeCap = Paint.Cap.ROUND 
@@ -346,6 +364,7 @@ class VectorTextClock(context: Context) : TextClock(context) {
             cr.query(Uri.parse("content://com.android.CaveArt.settings/clock_stroke_width"), null, null, null, null)?.use { if (it.moveToFirst()) strokeW = it.getFloat(0) }
             cr.query(Uri.parse("content://com.android.CaveArt.settings/clock_roundness"), null, null, null, null)?.use { if (it.moveToFirst()) curveRound = it.getFloat(0) }
             cr.query(Uri.parse("content://com.android.CaveArt.settings/clock_stretch"), null, null, null, null)?.use { if (it.moveToFirst()) stretchEnabled = it.getInt(0) == 1 }
+            cr.query(Uri.parse("content://com.android.CaveArt.settings/clock_color"), null, null, null, null)?.use { if (it.moveToFirst()) clockColor = it.getInt(0) }
             cr.query(Uri.parse("content://com.android.CaveArt.settings/clock_collision_map"), null, null, null, null)?.use { 
                 if (it.moveToFirst()) {
                     val mapStr = it.getString(0) ?: ""
@@ -389,9 +408,10 @@ class VectorTextClock(context: Context) : TextClock(context) {
         
         setMeasuredDimension(MeasureSpec.getSize(widthMeasureSpec), measuredH)
     }
-    
+
     private fun updatePaintIfNeeded() {
-        if (lastCurveRound != curveRound || lastStrokeW != strokeW) {
+        if (lastCurveRound != curveRound || lastStrokeW != strokeW || penPaint.color != clockColor) {
+            penPaint.color = clockColor
             penPaint.strokeWidth = strokeW * resources.displayMetrics.density
             penPaint.pathEffect = CornerPathEffect(curveRound * resources.displayMetrics.density)
             lastCurveRound = curveRound

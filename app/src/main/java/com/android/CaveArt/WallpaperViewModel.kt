@@ -12,6 +12,7 @@ import android.util.LruCache
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
@@ -100,6 +101,8 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     var clockMinuteSize by mutableFloatStateOf(clockPrefs.getFloat("clock_minute_size", 75f))
     var clockStrokeWidth by mutableFloatStateOf(clockPrefs.getFloat("clock_stroke_width", 8f))
     var clockRoundness by mutableFloatStateOf(clockPrefs.getFloat("clock_roundness", 30f))
+    
+    var clockColor by mutableIntStateOf(clockPrefs.getInt("clock_color", AndroidColor.WHITE))
 
     var isClockStretchEnabled by mutableStateOf(clockPrefs.getBoolean("clock_stretch", false))
     var clockCollisionMap by mutableStateOf(clockPrefs.getString("clock_collision_map", "") ?: "")
@@ -144,6 +147,15 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         intent.putExtra("clock_minute_size", minuteSize)
         intent.putExtra("clock_stroke_width", strokeWidth)
         intent.putExtra("clock_roundness", roundness)
+        context.sendBroadcast(intent)
+    }
+    
+    fun updateClockColor(context: Context, color: Int) {
+        clockColor = color
+        clockPrefs.edit().putInt("clock_color", color).apply()
+        
+        val intent = android.content.Intent("com.android.CaveArt.UPDATE_CLOCK_COLOR")
+        intent.putExtra("clock_color", color)
         context.sendBroadcast(intent)
     }
 
