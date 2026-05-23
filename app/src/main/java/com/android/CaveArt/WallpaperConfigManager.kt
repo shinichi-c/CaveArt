@@ -1,16 +1,11 @@
 package com.android.CaveArt
 
 import android.content.Context
-import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.core.stringPreferencesKey
-import androidx.datastore.preferences.preferencesDataStore
+import android.os.Build
 import com.android.CaveArt.animations.AnimationStyle
-import kotlinx.coroutines.flow.first
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-
-private val Context.dataStore by preferencesDataStore(name = "cave_art_live_prefs")
 
 @Serializable
 data class LiveWallpaperConfig(
@@ -31,23 +26,33 @@ data class LiveWallpaperConfig(
 
 object WallpaperConfigManager {
     
-    private val CONFIG_KEY = stringPreferencesKey("live_config_json")
+    private const val PREFS_NAME = "cave_art_live_prefs"
+    private const val CONFIG_KEY = "live_config_json"
 
     private val json = Json { 
         ignoreUnknownKeys = true 
         encodeDefaults = true
     }
     
-    suspend fun saveConfig(context: Context, config: LiveWallpaperConfig) {
-        context.dataStore.edit { preferences ->
-            preferences[CONFIG_KEY] = json.encodeToString(config)
+    private fun getDeviceProtectedContext(context: Context): Context {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            context.createDeviceProtectedStorageContext()
+        } else {
+            context
         }
+    }
+    
+    suspend fun saveConfig(context: Context, config: LiveWallpaperConfig) {
+        val safeContext = getDeviceProtectedContext(context)
+        val prefs = safeContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putString(CONFIG_KEY, json.encodeToString(config)).apply()
     }
     
     suspend fun loadConfig(context: Context): LiveWallpaperConfig {
         return try {
-            val preferences = context.dataStore.data.first()
-            val jsonStr = preferences[CONFIG_KEY]
+            val safeContext = getDeviceProtectedContext(context)
+            val prefs = safeContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val jsonStr = prefs.getString(CONFIG_KEY, null)
             
             if (jsonStr != null) {
                 json.decodeFromString(jsonStr)

@@ -6,6 +6,7 @@ import android.content.Context
 import android.database.Cursor
 import android.database.MatrixCursor
 import android.net.Uri
+import android.os.Build
 
 class CaveArtSettingsProvider : ContentProvider() {
     override fun onCreate(): Boolean = true
@@ -14,8 +15,15 @@ class CaveArtSettingsProvider : ContentProvider() {
         uri: Uri, projection: Array<String>?, selection: String?,
         selectionArgs: Array<String>?, sortOrder: String?
     ): Cursor? {
-        val context = context ?: return null
-        val prefs = context.getSharedPreferences("cave_art_clock_prefs", Context.MODE_PRIVATE)
+        val baseContext = context ?: return null
+        
+        val safeContext = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            baseContext.createDeviceProtectedStorageContext()
+        } else {
+            baseContext
+        }
+        
+        val prefs = safeContext.getSharedPreferences("cave_art_clock_prefs", Context.MODE_PRIVATE)
         
         val cursor = MatrixCursor(arrayOf("value"))
         when (uri.lastPathSegment) {

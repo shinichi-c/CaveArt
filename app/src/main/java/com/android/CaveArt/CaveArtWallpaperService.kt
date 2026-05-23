@@ -49,8 +49,17 @@ class CaveArtWallpaperService : WallpaperService() {
         private val receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
                 when (intent?.action) {
-                    Intent.ACTION_USER_PRESENT -> currentAnimation.onUnlock()
-                    Intent.ACTION_SCREEN_OFF -> currentAnimation.onLock()
+                    Intent.ACTION_USER_PRESENT -> {
+                        currentAnimation.onUnlock()
+                        if (originalBitmap == null) reloadConfig()
+                    }
+                    Intent.ACTION_USER_UNLOCKED -> {
+                        
+                        if (originalBitmap == null) reloadConfig()
+                    }
+                    Intent.ACTION_SCREEN_OFF -> {
+                        currentAnimation.onLock()
+                    }
                 }
             }
         }
@@ -74,9 +83,15 @@ class CaveArtWallpaperService : WallpaperService() {
             super.onCreate(surfaceHolder)
             val filter = IntentFilter().apply {
                 addAction(Intent.ACTION_USER_PRESENT)
+                addAction(Intent.ACTION_USER_UNLOCKED)
                 addAction(Intent.ACTION_SCREEN_OFF)
             }
-            registerReceiver(receiver, filter)
+            
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)
+            } else {
+                registerReceiver(receiver, filter)
+            }
             reloadConfig()
         }
 
@@ -217,7 +232,8 @@ class CaveArtWallpaperService : WallpaperService() {
                 val loadedOriginal = try {
                     if (!config.imagePath.isNullOrEmpty()) {
                         val metrics = resources.displayMetrics
-                        val maxDim = max(metrics.widthPixels, metrics.heightPixels)
+                        
+                        val maxDim = max(metrics.widthPixels, metrics.heightPixels).coerceAtLeast(1080)
                         
                         val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                         BitmapFactory.decodeFile(config.imagePath, options)
@@ -236,7 +252,10 @@ class CaveArtWallpaperService : WallpaperService() {
                     }
                     else if (config.resourceId != 0) BitmapHelper.decodeSampledBitmapFromResource(resources, config.resourceId, 2500)
                     else null
-                } catch (e: Exception) { null }
+                } catch (e: Exception) { 
+                    e.printStackTrace()
+                    null 
+                }
 
                 var loadedMask = try {
                     val animNeedsMask = config.isAnimationEnabled && currentAnimation.needsSegmentationMask()

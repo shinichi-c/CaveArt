@@ -45,6 +45,7 @@
             android:name=".CaveArtFilamentService"
             android:exported="true"
             android:label="CaveArt 3D Engine"
+            android:directBootAware="true"
             android:permission="android.permission.BIND_WALLPAPER">
             <intent-filter>
                 <action android:name="android.service.wallpaper.WallpaperService" />
@@ -57,6 +58,7 @@
         <provider
             android:name=".CaveArtSettingsProvider"
             android:authorities="com.android.CaveArt.settings"
+            android:directBootAware="true"
             android:exported="true" />
 
     </application>
