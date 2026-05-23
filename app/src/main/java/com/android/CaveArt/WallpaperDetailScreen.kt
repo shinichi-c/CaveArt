@@ -410,7 +410,9 @@ fun ClockEditorPreview(
     var previewRoundness by remember { mutableFloatStateOf(viewModel.clockRoundness) }
     var previewStretchEnabled by remember { mutableStateOf(viewModel.isClockStretchEnabled) }
     var previewCollisionMap by remember { mutableStateOf(viewModel.clockCollisionMap) }
-    
+    var previewClockColor by remember { mutableIntStateOf(viewModel.clockColor) }
+    var extractedColors by remember { mutableStateOf(listOf(android.graphics.Color.WHITE, android.graphics.Color.BLACK)) }
+
     var timeString by remember { mutableStateOf("") }
     var dateText by remember { mutableStateOf("") }
     
@@ -420,7 +422,39 @@ fun ClockEditorPreview(
             val timePattern = if (is24Hour) "HH:mm" else "hh:mm"
             timeString = java.text.SimpleDateFormat(timePattern, java.util.Locale.getDefault()).format(java.util.Date())
             dateText = java.text.SimpleDateFormat("EEE, MMM d", java.util.Locale.getDefault()).format(java.util.Date())
-            delay(1000L)
+            delay(1000L) 
+        }
+    }
+
+    LaunchedEffect(wallpaper) {
+        withContext(Dispatchers.IO) {
+            val bitmap = if(wallpaper.uri != null) BitmapHelper.decodeSampledBitmapFromUri(context, wallpaper.uri, 300) else BitmapHelper.decodeSampledBitmapFromResource(context.resources, wallpaper.resourceId, 300)
+            if (bitmap != null) {
+                val scaledBitmap = Bitmap.createScaledBitmap(bitmap, 112, 112, true)
+                val pixels = IntArray(scaledBitmap.width * scaledBitmap.height)
+                scaledBitmap.getPixels(pixels, 0, scaledBitmap.width, 0, 0, scaledBitmap.width, scaledBitmap.height)
+                val quantizerResult = QuantizerCelebi.quantize(pixels, 128)
+                val rankedColors = Score.score(quantizerResult)
+                
+                var finalColors = rankedColors.distinct().take(5)
+                if (finalColors.size < 5 && finalColors.isNotEmpty()) {
+                    val hct = Hct.fromInt(finalColors.first())
+                    val generated = listOf(
+                        Hct.from(hct.hue + 60.0, hct.chroma, hct.tone).toInt(),
+                        Hct.from(hct.hue - 60.0, hct.chroma, hct.tone).toInt(),
+                        Hct.from(hct.hue + 180.0, hct.chroma, hct.tone).toInt(),
+                        Hct.from(hct.hue, hct.chroma, 30.0).toInt(),
+                        Hct.from(hct.hue, hct.chroma, 80.0).toInt()
+                    )
+                    finalColors = (finalColors + generated).distinct().take(5)
+                }
+                
+                withContext(Dispatchers.Main) {
+                    extractedColors = listOf(android.graphics.Color.WHITE, android.graphics.Color.BLACK) + finalColors
+                }
+                scaledBitmap.recycle()
+                bitmap.recycle()
+            }
         }
     }
 
@@ -436,23 +470,22 @@ fun ClockEditorPreview(
             previewCollisionMap = ""
         }
     }
-    
+
     val collisionMapArray = remember(previewCollisionMap) {
         if (previewCollisionMap.isNotEmpty()) previewCollisionMap.split(",").mapNotNull { it.toFloatOrNull() }.toFloatArray() else null
     }
-    
+
     val sharedPath = remember { android.graphics.Path() }
     val sharedPathBounds = remember { android.graphics.RectF() }
     val sharedMatrix = remember { android.graphics.Matrix() }
     var currentScale by remember { mutableFloatStateOf(1f) }
-    
+
     val cornerEffect = remember(previewRoundness, densityVal, currentScale) {
         android.graphics.CornerPathEffect(previewRoundness * densityVal * currentScale)
     }
 
     val vectorPaint = remember {
         android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-            color = android.graphics.Color.WHITE
             style = android.graphics.Paint.Style.STROKE
             strokeCap = android.graphics.Paint.Cap.ROUND
             strokeJoin = android.graphics.Paint.Join.ROUND
@@ -462,7 +495,6 @@ fun ClockEditorPreview(
 
     val datePaint = remember {
         android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-            color = android.graphics.Color.WHITE
             textAlign = android.graphics.Paint.Align.CENTER
             setShadowLayer(10f, 0f, 3f, android.graphics.Color.argb(160, 0, 0, 0))
             typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
@@ -634,11 +666,13 @@ fun ClockEditorPreview(
                         sharedMatrix.postTranslate(dx, dy)
                         sharedPath.transform(sharedMatrix) 
 
+                        vectorPaint.color = previewClockColor
                         vectorPaint.strokeWidth = previewStrokeWidth * densityVal * scale
                         vectorPaint.pathEffect = cornerEffect
 
                         canvas.nativeCanvas.drawPath(sharedPath, vectorPaint)
 
+                        datePaint.color = previewClockColor
                         datePaint.textSize = 20f * densityVal * scale
                         canvas.nativeCanvas.drawText(
                             dateText,
@@ -692,6 +726,32 @@ fun ClockEditorPreview(
                         .padding(horizontal = 24.dp)
                         .padding(bottom = 32.dp)
                 ) {
+                    Text("Clock Theme", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        extractedColors.forEach { colorInt ->
+                            val isSelected = previewClockColor == colorInt
+                            Box(
+                                modifier = Modifier.size(40.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (isSelected) Box(modifier = Modifier.fillMaxSize().border(3.dp, Color(colorInt), CircleShape))
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize(if (isSelected) 0.65f else 1f)
+                                        .clip(CircleShape)
+                                        .background(Color(colorInt))
+                                        .clickable { previewClockColor = colorInt }
+                                )
+                            }
+                        }
+                    }
+                    
+                    Spacer(Modifier.height(24.dp))
+                    
                     Text("Clock Style", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
                     Spacer(Modifier.height(24.dp))
 
@@ -785,6 +845,7 @@ fun ClockEditorPreview(
                         isSetting = false
                     ) {
                         showApplyOptions = false
+                        viewModel.updateClockColor(context, previewClockColor)
                         viewModel.updateClockStyle(context, previewHourSize, previewMinSize, previewStrokeWidth, previewRoundness)
                         viewModel.updateLockscreenClockPosition(context, previewClockX, previewClockY)
                         viewModel.updateLockscreenDatePosition(context, previewDateX, previewDateY)
@@ -802,6 +863,7 @@ fun ClockEditorPreview(
                         isSetting = false
                     ) {
                         showApplyOptions = false
+                        viewModel.updateClockColor(context, previewClockColor)
                         viewModel.updateClockStyle(context, previewHourSize, previewMinSize, previewStrokeWidth, previewRoundness)
                         viewModel.updateLockscreenClockPosition(context, previewClockX, previewClockY)
                         viewModel.updateLockscreenDatePosition(context, previewDateX, previewDateY)
@@ -997,7 +1059,8 @@ class FilamentTextureController(val textureView: android.view.TextureView) : and
         assetLoader = com.google.android.filament.gltfio.AssetLoader(engine, com.google.android.filament.gltfio.UbershaderProvider(engine), com.google.android.filament.EntityManager.get())
         resourceLoader = com.google.android.filament.gltfio.ResourceLoader(engine)
         try {
-            val customFile = java.io.File(textureView.context.filesDir, "custom_model.glb")
+            val safeContext = if (android.os.Build.VERSION.SDK_INT >= 24) textureView.context.createDeviceProtectedStorageContext() else textureView.context
+            val customFile = java.io.File(safeContext.filesDir, "custom_model.glb")
             if (customFile.exists()) {
                 val bytes = customFile.readBytes()
                 val buffer = java.nio.ByteBuffer.allocateDirect(bytes.size)
