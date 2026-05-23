@@ -125,8 +125,9 @@ fun EffectsControlsSheet(
         if (uri != null) {
             scope.launch(Dispatchers.IO) {
                 try {
+                    val safeContext = if (android.os.Build.VERSION.SDK_INT >= 24) context.createDeviceProtectedStorageContext() else context
                     context.contentResolver.openInputStream(uri)?.use { input ->
-                        java.io.File(context.filesDir, "custom_model.glb").outputStream().use { output ->
+                        java.io.File(safeContext.filesDir, "custom_model.glb").outputStream().use { output ->
                             input.copyTo(output)
                         }
                     }
