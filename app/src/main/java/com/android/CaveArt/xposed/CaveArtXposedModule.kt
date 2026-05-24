@@ -28,6 +28,7 @@ class CaveArtXposedModule : XposedModule() {
         var screenH = 2400f
         
         var activeClock: VectorTextClock? = null
+        var activeDate: IndependentDateView? = null
     }
 
     override fun onPackageLoaded(param: XposedModuleInterface.PackageLoadedParam) {
@@ -55,7 +56,8 @@ class CaveArtXposedModule : XposedModule() {
                 val bindDataMethod = clockSectionClass.getDeclaredMethod("bindData", constraintLayoutClass)
 
                 hook(bindDataMethod).intercept { chain ->
-                    chain.proceed() 
+                    val result = chain.proceed()
+                    
                     val rootLayout = chain.args[0] as? ViewGroup
                     if (rootLayout != null) {
                         val context = rootLayout.context
@@ -123,12 +125,12 @@ class CaveArtXposedModule : XposedModule() {
                                 translationZ = 60f
                                 elevation = 60f
                             }
+                            activeDate = myCustomDate
 
                             rootLayout.viewTreeObserver.addOnPreDrawListener {
-                                if (largeId != 0) rootLayout.findViewById<View>(largeId)?.apply { alpha = 0f; visibility = View.GONE }
-                                if (smallId != 0) rootLayout.findViewById<View>(smallId)?.apply { alpha = 0f; visibility = View.GONE }
+                                if (largeId != 0) rootLayout.findViewById<View>(largeId)?.apply { if(visibility != View.GONE) visibility = View.GONE; if(alpha != 0f) alpha = 0f; scaleX=0f; scaleY=0f }
+                                if (smallId != 0) rootLayout.findViewById<View>(smallId)?.apply { if(visibility != View.GONE) visibility = View.GONE; if(alpha != 0f) alpha = 0f; scaleX=0f; scaleY=0f }
                                 SystemUIHider.forceHideOnPreDraw(rootLayout)
-                                myCustomDate.bringToFront() 
                                 true
                             }
 
@@ -228,6 +230,8 @@ class CaveArtXposedModule : XposedModule() {
                             }, filter, Context.RECEIVER_EXPORTED)
                         }
                     }
+                    
+                    result
                 }
             } catch (e: Exception) {}
 
@@ -244,7 +248,7 @@ class CaveArtXposedModule : XposedModule() {
                     val sectionClass = classLoader.loadClass(sectionName)
                     val applyMethod = sectionClass.getDeclaredMethod("applyConstraints", constraintSetClass)
                     hook(applyMethod).intercept { chain ->
-                        chain.proceed()
+                        val result = chain.proceed()
                         val cs = chain.args[0]
                         val connect = constraintSetClass.getMethod("connect", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType, Int::class.javaPrimitiveType, Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
                         val setVisibility = constraintSetClass.getMethod("setVisibility", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
@@ -256,13 +260,13 @@ class CaveArtXposedModule : XposedModule() {
                             if (largeId != 0) {
                                 val getVisibility = constraintSetClass.getMethod("getVisibility", Int::class.javaPrimitiveType)
                                 val largeVis = getVisibility.invoke(cs, largeId) as Int
-                                val hasNotifications = (largeVis != 0) 
+                                val hasNotifications = (largeVis == 8 || largeVis == 4) 
                                 activeClock?.setClockState(hasNotifications)
                             }
                         } catch(e: Exception) {}
 
-                        if (largeId != 0) { setVisibility.invoke(cs, largeId, 4); setAlpha?.invoke(cs, largeId, 0f) }
-                        if (smallId != 0) { setVisibility.invoke(cs, smallId, 4); setAlpha?.invoke(cs, smallId, 0f) }
+                        if (largeId != 0) { setVisibility.invoke(cs, largeId, 8); setAlpha?.invoke(cs, largeId, 0f) }
+                        if (smallId != 0) { setVisibility.invoke(cs, smallId, 8); setAlpha?.invoke(cs, smallId, 0f) }
                         
                         connect.invoke(cs, customClockId, 3, 0, 3, topMarginPx) 
                         connect.invoke(cs, customClockId, 6, 0, 6, 0) 
@@ -278,8 +282,35 @@ class CaveArtXposedModule : XposedModule() {
                         connect.invoke(cs, customDateId, 7, 0, 7, 0)
                         setVisibility.invoke(cs, customDateId, 0)
                         setAlpha?.invoke(cs, customDateId, 1f)
+
+                        val context = activeClock?.context
+                        if (context != null) {
+                            try {
+                                val density = context.resources.displayMetrics.density
+                                val cHeight = (activeClock?.hourSizeDp ?: 100f) * density * 1.2f
+                                val dHeight = 20f * density * 1.5f
+                                
+                                val lowestPoint = Math.max(
+                                    topMarginPx + cHeight.toInt(),
+                                    dateTopMarginPx + dHeight.toInt()
+                                )
+                                val targetMargin = lowestPoint + (32f * density).toInt()
+                                
+                                val nsslId = OverlapPreventionHelper.nsslId
+                                if (nsslId != 0) connect.invoke(cs, nsslId, 3, 0, 3, targetMargin)
+                                
+                                val mediaId = OverlapPreventionHelper.mediaCarouselId
+                                if (mediaId != 0) connect.invoke(cs, mediaId, 3, 0, 3, targetMargin)
+
+                                val placeholderId = OverlapPreventionHelper.nsslPlaceholderId
+                                if (placeholderId != 0) connect.invoke(cs, placeholderId, 3, 0, 3, targetMargin)
+
+                            } catch (e: Exception) {}
+                        }
                         
                         SystemUIHider.hideInConstraintSet(cs, constraintSetClass)
+                        
+                        result
                     }
                 } catch (e: Exception) {}
             }
@@ -390,7 +421,6 @@ class VectorTextClock(context: Context) : TextClock(context) {
             interpolator = PathInterpolator(0.4f, 0f, 0.2f, 1f)
             addUpdateListener { 
                 stretchProgress = it.animatedValue as Float
-                requestLayout() 
                 invalidate()
             }
             start()
@@ -402,11 +432,9 @@ class VectorTextClock(context: Context) : TextClock(context) {
         val maxTextSize = maxOf(hourSizeDp, minuteSizeDp) * density
         
         val maxExtraPadding = if (stretchEnabled) (maxTextSize * 1.6f) else 0f
-        val animatedExtraPadding = (maxExtraPadding * stretchProgress).toInt()
+        val staticMeasuredH = (maxTextSize * 1.2f + maxExtraPadding).toInt()
         
-        val measuredH = (maxTextSize * 1.2f).toInt() + animatedExtraPadding
-        
-        setMeasuredDimension(MeasureSpec.getSize(widthMeasureSpec), measuredH)
+        setMeasuredDimension(MeasureSpec.getSize(widthMeasureSpec), staticMeasuredH)
     }
 
     private fun updatePaintIfNeeded() {
