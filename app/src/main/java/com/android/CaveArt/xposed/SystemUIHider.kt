@@ -19,18 +19,14 @@ object SystemUIHider {
     
     private fun hideViewCompletely(view: View?) {
         view?.let {
-            it.visibility = View.GONE
-            it.alpha = 0f
-            if (it is ViewGroup) {
-                for (i in 0 until it.childCount) {
-                    hideViewCompletely(it.getChildAt(i))
-                }
-            }
+            
+            if (it.alpha != 0f) it.alpha = 0f
+            if (it.scaleX != 0f) it.scaleX = 0f
+            if (it.scaleY != 0f) it.scaleY = 0f
         }
     }
     
     fun forceHideOnPreDraw(rootLayout: ViewGroup) {
-        
         val smartIds = listOf(dateSmartspaceId, keyguardSliceViewId, bcSmartspaceId, lockscreenSmartspaceId)
         smartIds.forEach { id ->
             if (id != 0) hideViewCompletely(rootLayout.findViewById(id))
@@ -55,8 +51,6 @@ object SystemUIHider {
                 setVisibility.invoke(cs, viewId, 8)
                 setAlpha?.invoke(cs, viewId, 0f)
             }
-        } catch (e: Exception) {
-            
-        }
+        } catch (e: Exception) {}
     }
 }
