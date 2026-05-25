@@ -5,32 +5,26 @@ import android.view.View
 import android.view.ViewGroup
 
 object SystemUIHider {
-    var dateSmartspaceId = 0
-    var keyguardSliceViewId = 0
-    var bcSmartspaceId = 0
-    var lockscreenSmartspaceId = 0
+    var nativeNotificationStackId = 0
+    var nativeMediaCarouselId = 0
     
     fun initIds(context: Context) {
-        dateSmartspaceId = context.resources.getIdentifier("date_smartspace_view", "id", context.packageName)
-        keyguardSliceViewId = context.resources.getIdentifier("keyguard_slice_view", "id", context.packageName)
-        bcSmartspaceId = context.resources.getIdentifier("bc_smartspace_view", "id", context.packageName)
-        lockscreenSmartspaceId = context.resources.getIdentifier("lockscreen_smartspace", "id", context.packageName)
+        nativeNotificationStackId = context.resources.getIdentifier("notification_stack_scroller", "id", context.packageName)
+        nativeMediaCarouselId = context.resources.getIdentifier("keyguard_media_carousel", "id", context.packageName)
     }
     
     private fun hideViewCompletely(view: View?) {
         view?.let {
-            
             if (it.alpha != 0f) it.alpha = 0f
             if (it.scaleX != 0f) it.scaleX = 0f
             if (it.scaleY != 0f) it.scaleY = 0f
+            it.isClickable = false
         }
     }
     
     fun forceHideOnPreDraw(rootLayout: ViewGroup) {
-        val smartIds = listOf(dateSmartspaceId, keyguardSliceViewId, bcSmartspaceId, lockscreenSmartspaceId)
-        smartIds.forEach { id ->
-            if (id != 0) hideViewCompletely(rootLayout.findViewById(id))
-        }
+        if (nativeNotificationStackId != 0) hideViewCompletely(rootLayout.findViewById(nativeNotificationStackId))
+        if (nativeMediaCarouselId != 0) hideViewCompletely(rootLayout.findViewById(nativeMediaCarouselId))
         
         for (i in 0 until rootLayout.childCount) {
             val child = rootLayout.getChildAt(i)
@@ -44,13 +38,8 @@ object SystemUIHider {
     fun hideInConstraintSet(cs: Any, constraintSetClass: Class<*>) {
         try {
             val setVisibility = constraintSetClass.getMethod("setVisibility", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
-            val setAlpha = try { constraintSetClass.getMethod("setAlpha", Int::class.javaPrimitiveType, Float::class.javaPrimitiveType) } catch (e: Exception) { null }
-
-            val smartIds = listOf(dateSmartspaceId, keyguardSliceViewId, bcSmartspaceId, lockscreenSmartspaceId)
-            smartIds.filter { it != 0 }.forEach { viewId ->
-                setVisibility.invoke(cs, viewId, 8)
-                setAlpha?.invoke(cs, viewId, 0f)
-            }
+            if (nativeNotificationStackId != 0) setVisibility.invoke(cs, nativeNotificationStackId, 8)
+            if (nativeMediaCarouselId != 0) setVisibility.invoke(cs, nativeMediaCarouselId, 8)
         } catch (e: Exception) {}
     }
 }

@@ -9,6 +9,7 @@ object OverlapPreventionHelper {
     var nsslPlaceholderId = 0
     var mediaCarouselId = 0
     var keyguardStatusId = 0
+    var aodIconsId = 0
     
     fun initIds(context: Context) {
         val res = context.resources
@@ -18,6 +19,7 @@ object OverlapPreventionHelper {
         nsslPlaceholderId = res.getIdentifier("nssl_placeholder", "id", pkg)
         mediaCarouselId = res.getIdentifier("keyguard_media_carousel", "id", pkg)
         keyguardStatusId = res.getIdentifier("keyguard_status_view", "id", pkg)
+        aodIconsId = res.getIdentifier("aod_notification_icon_container", "id", pkg)
     }
     
     fun forceElementsBelow(rootLayout: ViewGroup, clock: View, date: View) {
