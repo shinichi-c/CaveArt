@@ -29,6 +29,38 @@ class CaveArtXposedModule : XposedModule() {
         
         var activeClock: VectorTextClock? = null
         var activeDate: IndependentDateView? = null
+
+        var isShiftedForNotifications = false
+        var currentShiftY = 0f
+        var shiftAnimator: ValueAnimator? = null
+        
+        fun updateNotificationShift(context: Context, hasNotifications: Boolean) {
+            isShiftedForNotifications = hasNotifications
+            
+            val density = context.resources.displayMetrics.density
+            val safeTopPx = (80f * density).toInt() 
+            val highestElementPx = Math.min(topMarginPx, dateTopMarginPx)
+            
+            val targetShiftY = if (hasNotifications && highestElementPx > safeTopPx) {
+                (safeTopPx - highestElementPx).toFloat()
+            } else {
+                0f
+            }
+            
+            if (targetShiftY == currentShiftY && shiftAnimator?.isRunning != true) return
+            
+            shiftAnimator?.cancel()
+            shiftAnimator = ValueAnimator.ofFloat(currentShiftY, targetShiftY).apply {
+                duration = 450
+                interpolator = PathInterpolator(0.4f, 0f, 0.2f, 1f)
+                addUpdateListener {
+                    currentShiftY = it.animatedValue as Float
+                    activeClock?.translationY = currentShiftY
+                    activeDate?.translationY = currentShiftY
+                }
+                start()
+            }
+        }
     }
 
     override fun onPackageLoaded(param: XposedModuleInterface.PackageLoadedParam) {
@@ -56,7 +88,7 @@ class CaveArtXposedModule : XposedModule() {
                 val bindDataMethod = clockSectionClass.getDeclaredMethod("bindData", constraintLayoutClass)
 
                 hook(bindDataMethod).intercept { chain ->
-                    val result = chain.proceed()
+                    val result = chain.proceed() 
                     
                     val rootLayout = chain.args[0] as? ViewGroup
                     if (rootLayout != null) {
@@ -112,6 +144,7 @@ class CaveArtXposedModule : XposedModule() {
                                 clockColor = cColor
                                 penPaint.color = cColor
                                 translationX = initialXPx
+                                translationY = currentShiftY
                                 translationZ = 50f
                                 elevation = 50f
                             }
@@ -122,6 +155,7 @@ class CaveArtXposedModule : XposedModule() {
                                 setTextSize(TypedValue.COMPLEX_UNIT_SP, dateSize)
                                 setTextColor(cColor)
                                 translationX = dateXPx
+                                translationY = currentShiftY
                                 translationZ = 60f
                                 elevation = 60f
                             }
@@ -184,6 +218,7 @@ class CaveArtXposedModule : XposedModule() {
                                             
                                             myCustomDate.requestLayout()
                                             myCustomDate.invalidate()
+                                            updateNotificationShift(context, isShiftedForNotifications)
                                         }
                                         "com.android.CaveArt.UPDATE_CLOCK_POSITION" -> {
                                             val newX = intent.getFloatExtra("clock_x", 0f)
@@ -201,6 +236,7 @@ class CaveArtXposedModule : XposedModule() {
                                                     constraintSetClass.getMethod("applyTo", constraintLayoutClass).invoke(set, rootLayout)
                                                 }
                                             } catch (e: Exception) {}
+                                            updateNotificationShift(context, isShiftedForNotifications)
                                         }
                                         "com.android.CaveArt.UPDATE_CLOCK_STRETCH" -> {
                                             myCustomClock.stretchEnabled = intent.getBooleanExtra("clock_stretch", false)
@@ -231,7 +267,7 @@ class CaveArtXposedModule : XposedModule() {
                         }
                     }
                     
-                    result
+                    result 
                 }
             } catch (e: Exception) {}
 
@@ -248,7 +284,7 @@ class CaveArtXposedModule : XposedModule() {
                     val sectionClass = classLoader.loadClass(sectionName)
                     val applyMethod = sectionClass.getDeclaredMethod("applyConstraints", constraintSetClass)
                     hook(applyMethod).intercept { chain ->
-                        val result = chain.proceed()
+                        val result = chain.proceed() 
                         val cs = chain.args[0]
                         val connect = constraintSetClass.getMethod("connect", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType, Int::class.javaPrimitiveType, Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
                         val setVisibility = constraintSetClass.getMethod("setVisibility", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
@@ -256,61 +292,73 @@ class CaveArtXposedModule : XposedModule() {
                         val constrainWidth = try { constraintSetClass.getMethod("constrainWidth", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType) } catch (e: Exception) { null }
                         val constrainHeight = try { constraintSetClass.getMethod("constrainHeight", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType) } catch (e: Exception) { null }
 
-                        try {
-                            if (largeId != 0) {
+                        val context = activeClock?.context
+                        if (context != null) {
+                            try {
                                 val getVisibility = constraintSetClass.getMethod("getVisibility", Int::class.javaPrimitiveType)
                                 val largeVis = getVisibility.invoke(cs, largeId) as Int
                                 val hasNotifications = (largeVis == 8 || largeVis == 4) 
+                                
                                 activeClock?.setClockState(hasNotifications)
-                            }
-                        } catch(e: Exception) {}
+                                updateNotificationShift(context, hasNotifications)
+                            } catch(e: Exception) {}
 
-                        if (largeId != 0) { setVisibility.invoke(cs, largeId, 8); setAlpha?.invoke(cs, largeId, 0f) }
-                        if (smallId != 0) { setVisibility.invoke(cs, smallId, 8); setAlpha?.invoke(cs, smallId, 0f) }
-                        
-                        connect.invoke(cs, customClockId, 3, 0, 3, topMarginPx) 
-                        connect.invoke(cs, customClockId, 6, 0, 6, 0) 
-                        connect.invoke(cs, customClockId, 7, 0, 7, 0)
-                        setVisibility.invoke(cs, customClockId, 0)
-                        setAlpha?.invoke(cs, customClockId, 1f)
-                        
-                        constrainWidth?.invoke(cs, customDateId, -2)
-                        constrainHeight?.invoke(cs, customDateId, -2)
+                            if (largeId != 0) { setVisibility.invoke(cs, largeId, 8); setAlpha?.invoke(cs, largeId, 0f) }
+                            if (smallId != 0) { setVisibility.invoke(cs, smallId, 8); setAlpha?.invoke(cs, smallId, 0f) }
+                            
+                            connect.invoke(cs, customClockId, 3, 0, 3, topMarginPx) 
+                            connect.invoke(cs, customClockId, 6, 0, 6, 0) 
+                            connect.invoke(cs, customClockId, 7, 0, 7, 0)
+                            setVisibility.invoke(cs, customClockId, 0)
+                            setAlpha?.invoke(cs, customClockId, 1f)
+                            
+                            constrainWidth?.invoke(cs, customDateId, -2)
+                            constrainHeight?.invoke(cs, customDateId, -2)
 
-                        connect.invoke(cs, customDateId, 3, 0, 3, dateTopMarginPx) 
-                        connect.invoke(cs, customDateId, 6, 0, 6, 0) 
-                        connect.invoke(cs, customDateId, 7, 0, 7, 0)
-                        setVisibility.invoke(cs, customDateId, 0)
-                        setAlpha?.invoke(cs, customDateId, 1f)
+                            connect.invoke(cs, customDateId, 3, 0, 3, dateTopMarginPx) 
+                            connect.invoke(cs, customDateId, 6, 0, 6, 0) 
+                            connect.invoke(cs, customDateId, 7, 0, 7, 0)
+                            setVisibility.invoke(cs, customDateId, 0)
+                            setAlpha?.invoke(cs, customDateId, 1f)
 
-                        val context = activeClock?.context
-                        if (context != null) {
                             try {
                                 val density = context.resources.displayMetrics.density
                                 val cHeight = (activeClock?.hourSizeDp ?: 100f) * density * 1.2f
                                 val dHeight = 20f * density * 1.5f
                                 
+                                val safeTopPx = (80f * density).toInt() 
+                                val highestElementPx = Math.min(topMarginPx, dateTopMarginPx)
+                                val finalShiftY = if (isShiftedForNotifications && highestElementPx > safeTopPx) {
+                                    (safeTopPx - highestElementPx).toFloat()
+                                } else {
+                                    0f
+                                }
+                                
                                 val lowestPoint = Math.max(
-                                    topMarginPx + cHeight.toInt(),
-                                    dateTopMarginPx + dHeight.toInt()
+                                    topMarginPx + finalShiftY.toInt() + cHeight.toInt(),
+                                    dateTopMarginPx + finalShiftY.toInt() + dHeight.toInt()
                                 )
                                 val targetMargin = lowestPoint + (32f * density).toInt()
                                 
-                                val nsslId = OverlapPreventionHelper.nsslId
-                                if (nsslId != 0) connect.invoke(cs, nsslId, 3, 0, 3, targetMargin)
+                                val idsToPush = listOf(
+                                    OverlapPreventionHelper.nsslId,
+                                    OverlapPreventionHelper.mediaCarouselId,
+                                    OverlapPreventionHelper.nsslPlaceholderId,
+                                    OverlapPreventionHelper.keyguardStatusId,
+                                    OverlapPreventionHelper.aodIconsId
+                                )
                                 
-                                val mediaId = OverlapPreventionHelper.mediaCarouselId
-                                if (mediaId != 0) connect.invoke(cs, mediaId, 3, 0, 3, targetMargin)
-
-                                val placeholderId = OverlapPreventionHelper.nsslPlaceholderId
-                                if (placeholderId != 0) connect.invoke(cs, placeholderId, 3, 0, 3, targetMargin)
-
+                                for (id in idsToPush) {
+                                    if (id != 0) {
+                                        connect.invoke(cs, id, 3, 0, 3, targetMargin)
+                                    }
+                                }
                             } catch (e: Exception) {}
                         }
                         
                         SystemUIHider.hideInConstraintSet(cs, constraintSetClass)
                         
-                        result
+                        result 
                     }
                 } catch (e: Exception) {}
             }
