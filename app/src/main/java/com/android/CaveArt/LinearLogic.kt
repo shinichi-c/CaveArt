@@ -33,6 +33,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
@@ -47,6 +48,13 @@ fun HeroCarouselWithIndicator(
     onHaptics: () -> Unit,
     viewModel: WallpaperViewModel
 ) {
+    val context = LocalContext.current
+    val metrics = remember { context.resources.displayMetrics }
+    val screenAspectRatio = remember { metrics.widthPixels.toFloat() / metrics.heightPixels.toFloat() }
+    
+    val preferredItemWidth = 85.dp
+    val computedHeight = preferredItemWidth / screenAspectRatio
+
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally
@@ -63,13 +71,13 @@ fun HeroCarouselWithIndicator(
         ) {
             HorizontalMultiBrowseCarousel(
                 state = carouselState,
-                preferredItemWidth = 140.dp, 
-                itemSpacing = 12.dp, 
+                preferredItemWidth = preferredItemWidth, 
+                itemSpacing = 8.dp,
                 contentPadding = PaddingValues(horizontal = 0.dp), 
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 12.dp, bottom = 24.dp) 
-                    .height(190.dp)
+                    .padding(top = 2.dp, bottom = 4.dp)
+                    .height(computedHeight)
             ) { i ->
                 AsyncWallpaperImage(
                     wallpaper = filteredWallpapers[i],
@@ -103,7 +111,7 @@ fun HeroCarouselWithIndicator(
 
             Surface(
                 modifier = Modifier
-                    .padding(bottom = 12.dp)
+                    .padding(bottom = 6.dp)
                     .clickable { viewModel.dismissFastScrollGuide() },
                 shape = RoundedCornerShape(16.dp),
                 color = MaterialTheme.colorScheme.primary,
@@ -140,7 +148,7 @@ fun HeroCarouselWithIndicator(
         Box(
             modifier = Modifier
                 .padding(horizontal = 24.dp)
-                .padding(bottom = 12.dp), 
+                .padding(bottom = 2.dp), 
             contentAlignment = Alignment.Center
         ) {
             FastScrollIndicator(
