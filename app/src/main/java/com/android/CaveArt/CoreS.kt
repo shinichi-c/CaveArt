@@ -585,8 +585,12 @@ fun WallpaperPreviewCard(
     normalPageAlpha: Float,
     normalPageScale: Float
 ) {
-    val isLiveActive = (viewModel.isMagicShapeEnabled || viewModel.isAnimationEnabled || viewModel.isFilamentEnabled || viewModel.isLockscreenClockPreviewVisible) && isCurrentPage
-    val heightFraction = if (viewModel.isLockscreenClockPreviewVisible && isCurrentPage) 0.96f else 1f
+    val isLiveActive = (viewModel.isMagicShapeEnabled || viewModel.isAnimationEnabled || viewModel.isFilamentEnabled) && isCurrentPage
+    val isClockEditor = viewModel.isLockscreenClockPreviewVisible && isCurrentPage
+
+    val context = LocalContext.current
+    val metrics = remember { context.resources.displayMetrics }
+    val screenAspectRatio = remember { metrics.widthPixels.toFloat() / metrics.heightPixels.toFloat() }
 
     Box(
         modifier = Modifier
@@ -599,32 +603,42 @@ fun WallpaperPreviewCard(
             },
         contentAlignment = Alignment.Center
     ) {
-        Card(
-            modifier = Modifier
-                .fillMaxHeight(heightFraction)
-                .aspectRatio(10.5f / 19.5f)
-                .combinedClickable(
-                    onClick = onTap,
-                    onLongClick = onLongPress
-                ),
-            shape = RoundedCornerShape(if (viewModel.isLockscreenClockPreviewVisible && isCurrentPage) 36.dp else 20.dp),
-            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
-        ) {
-            if (isLiveActive) {
-                LiveEffectImage(
-                    wallpaper = wallpaper,
-                    viewModel = viewModel,
-                    modifier = Modifier.fillMaxSize(),
-                    onApplyClockAndWallpaperClick = onApplyClockAndWallpaperClick
-                )
-            } else {
-                AsyncWallpaperImage(
-                    wallpaper = wallpaper,
-                    contentDescription = null,
-                    viewModel = viewModel,
-                    modifier = Modifier.fillMaxSize(),
-                    allowMagic = false
-                )
+        if (isClockEditor) {
+            
+            LiveEffectImage(
+                wallpaper = wallpaper,
+                viewModel = viewModel,
+                modifier = Modifier.fillMaxSize(),
+                onApplyClockAndWallpaperClick = onApplyClockAndWallpaperClick
+            )
+        } else {
+            Card(
+                modifier = Modifier
+                    .fillMaxHeight(0.82f)
+                    .aspectRatio(screenAspectRatio) 
+                    .combinedClickable(
+                        onClick = onTap,
+                        onLongClick = onLongPress
+                    ),
+                shape = RoundedCornerShape(20.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+            ) {
+                if (isLiveActive) {
+                    LiveEffectImage(
+                        wallpaper = wallpaper,
+                        viewModel = viewModel,
+                        modifier = Modifier.fillMaxSize(),
+                        onApplyClockAndWallpaperClick = onApplyClockAndWallpaperClick
+                    )
+                } else {
+                    AsyncWallpaperImage(
+                        wallpaper = wallpaper,
+                        contentDescription = null,
+                        viewModel = viewModel,
+                        modifier = Modifier.fillMaxSize(),
+                        allowMagic = false
+                    )
+                }
             }
         }
     }

@@ -416,6 +416,8 @@ fun ClockEditorPreview(
     var timeString by remember { mutableStateOf("") }
     var dateText by remember { mutableStateOf("") }
     
+    val screenAspectRatio = realScreenW / realScreenH
+    
     LaunchedEffect(Unit) {
         while (true) {
             val is24Hour = DateFormat.is24HourFormat(context)
@@ -500,191 +502,207 @@ fun ClockEditorPreview(
             typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
         }
     }
-
+    
     Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        
-        Box(modifier = Modifier.fillMaxSize()) {
-            AsyncWallpaperImage(wallpaper = wallpaper, contentDescription = null, viewModel = viewModel, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop, allowMagic = false)
-            
-            Box(modifier = Modifier.fillMaxWidth().height(300.dp).background(Brush.verticalGradient(listOf(Color.Black.copy(alpha=0.6f), Color.Transparent))))
-
-            Box(modifier = Modifier
+    	
+        Box(
+            modifier = Modifier
                 .fillMaxSize()
-                .pointerInput(Unit) {
-                    var rawClockX = previewClockX
-                    var rawClockY = previewClockY
-                    var rawDateX = previewDateX
-                    var rawDateY = previewDateY
-
-                    awaitEachGesture {
-                        val down = awaitFirstDown(requireUnconsumed = true)
-                        if (down.isConsumed) return@awaitEachGesture
-                        
-                        var dragged = false
-                        val scale = maxOf(size.width / realScreenW, size.height / realScreenH)
-                        val dy = (size.height - realScreenH * scale) / 2f
-                        
-                        val scaledDateY = (previewDateY * densityVal + (20f * densityVal)) * scale + dy
-                        val scaledClockY = (previewClockY * densityVal) * scale + dy
-                        
-                        val distToDate = abs(down.position.y - scaledDateY)
-                        val distToClock = abs(down.position.y - scaledClockY)
-                        
-                        val activeDrag = if (distToDate < distToClock && distToDate < 300f) "DATE" else "CLOCK"
-                        
-                        rawClockX = previewClockX
-                        rawClockY = previewClockY
-                        rawDateX = previewDateX
-                        rawDateY = previewDateY
-
-                        var hasChangedClock = false
-                        var hasChangedDate = false
-
-                        do {
-                            val event = awaitPointerEvent()
-                            val pan = event.calculatePan()
-                            val zoom = event.calculateZoom()
-                            
-                            if (pan.getDistance() > 3f || abs(zoom - 1f) > 0.01f) {
-                                dragged = true
-                            }
-                            
-                            if (dragged) {
-                                if (activeDrag == "DATE") {
-                                    isDraggingDate = true
-                                    hasChangedDate = true
-                                    rawDateX += (pan.x / scale) / densityVal
-                                    rawDateY += (pan.y / scale) / densityVal
-                                    
-                                    previewDateX = rawDateX
-                                    previewDateY = rawDateY.coerceIn(0f, config.screenHeightDp.toFloat())
-                                } else {
-                                    isDraggingClock = true
-                                    hasChangedClock = true
-                                    val newHour = (previewHourSize * zoom).coerceIn(40f, 200f)
-                                    val newMin = (previewMinSize * zoom).coerceIn(40f, 200f)
-                                    
-                                    rawClockX += (pan.x / scale) / densityVal
-                                    rawClockY += (pan.y / scale) / densityVal
-                                    
-                                    previewHourSize = newHour
-                                    previewMinSize = newMin
-                                    previewClockX = rawClockX
-                                    previewClockY = rawClockY.coerceIn(0f, config.screenHeightDp.toFloat())
-                                }
-                                event.changes.forEach { if (it.positionChanged()) it.consume() }
-                            }
-                        } while (event.changes.any { it.pressed })
-                        
-                        isDraggingClock = false
-                        isDraggingDate = false
-                        
-                        if (hasChangedClock) {
-                            if (abs(previewClockX) < 15f) {
-                                previewClockX = 0f
-                                view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
-                            }
-                        }
-                        if (hasChangedDate) {
-                            if (abs(previewDateX) < 15f) {
-                                previewDateX = 0f
-                                view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
-                            }
-                        }
-                    }
-                }
+                .padding(bottom = 80.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Card(
+                modifier = Modifier
+                    .fillMaxHeight(0.72f)
+                    .aspectRatio(screenAspectRatio),
+                shape = RoundedCornerShape(36.dp),
+                elevation = CardDefaults.cardElevation(0.dp)
             ) {
-                androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
-                    if (timeString.isEmpty()) return@Canvas
-
-                    val hPx = previewHourSize * densityVal
-                    val mPx = previewMinSize * densityVal
+                Box(modifier = Modifier.fillMaxSize()) {
+                    AsyncWallpaperImage(wallpaper = wallpaper, contentDescription = null, viewModel = viewModel, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop, allowMagic = false)
                     
-                    val hourW = hPx * 0.55f
-                    val minW = mPx * 0.55f
-                    val gap = hPx * 0.15f
-                    val colonIdx = timeString.indexOf(':')
-                    val hCount = if (colonIdx != -1) colonIdx else timeString.length
-                    val mCount = if (colonIdx != -1) timeString.length - colonIdx - 1 else 0
-                    val totalWidth = (hCount * hourW) + (mCount * minW) + (gap * (hCount + mCount))
+                    Box(modifier = Modifier.fillMaxWidth().height(300.dp).background(Brush.verticalGradient(listOf(Color.Black.copy(alpha=0.6f), Color.Transparent))))
 
-                    val realCenterX = (realScreenW / 2f) + (previewClockX * densityVal)
-                    val realStartX = realCenterX - (totalWidth / 2f)
-                    val realStartY = previewClockY * densityVal
+                    Box(modifier = Modifier
+                        .fillMaxSize()
+                        .pointerInput(Unit) {
+                            var rawClockX = previewClockX
+                            var rawClockY = previewClockY
+                            var rawDateX = previewDateX
+                            var rawDateY = previewDateY
 
-                    val scale = maxOf(size.width / realScreenW, size.height / realScreenH)
-                    if (currentScale != scale) currentScale = scale
+                            awaitEachGesture {
+                                val down = awaitFirstDown(requireUnconsumed = true)
+                                if (down.isConsumed) return@awaitEachGesture
+                                
+                                var dragged = false
+                                val scale = minOf(size.width / realScreenW, size.height / realScreenH)
+                                val dx = (size.width - realScreenW * scale) / 2f
+                                val dy = (size.height - realScreenH * scale) / 2f
+                                
+                                val scaledDateY = (previewDateY * densityVal + (20f * densityVal)) * scale + dy
+                                val scaledClockY = (previewClockY * densityVal) * scale + dy
+                                
+                                val distToDate = abs(down.position.y - scaledDateY)
+                                val distToClock = abs(down.position.y - scaledClockY)
+                                
+                                val activeDrag = if (distToDate < distToClock && distToDate < 300f) "DATE" else "CLOCK"
+                                
+                                rawClockX = previewClockX
+                                rawClockY = previewClockY
+                                rawDateX = previewDateX
+                                rawDateY = previewDateY
 
-                    val dx = (size.width - realScreenW * scale) / 2f
-                    val dy = (size.height - realScreenH * scale) / 2f
+                                var hasChangedClock = false
+                                var hasChangedDate = false
 
-                    AdaptiveClockHelper.buildPath(
-                        timeString = timeString,
-                        startX = realStartX,
-                        startY = realStartY,
-                        absoluteClockX = 0f, 
-                        absoluteClockY = 0f, 
-                        hourH = hPx,
-                        minH = mPx,
-                        screenW = realScreenW,
-                        screenH = realScreenH,
-                        isStretchEnabled = previewStretchEnabled,
-                        collisionMap = collisionMapArray,
-                        density = densityVal,
-                        strokeWidth = previewStrokeWidth,
-                        path = sharedPath 
-                    )
+                                do {
+                                    val event = awaitPointerEvent()
+                                    val pan = event.calculatePan()
+                                    val zoom = event.calculateZoom()
+                                    
+                                    if (pan.getDistance() > 3f || abs(zoom - 1f) > 0.01f) {
+                                        dragged = true
+                                    }
+                                    
+                                    if (dragged) {
+                                        if (activeDrag == "DATE") {
+                                            isDraggingDate = true
+                                            hasChangedDate = true
+                                            rawDateX += (pan.x / scale) / densityVal
+                                            rawDateY += (pan.y / scale) / densityVal
+                                            
+                                            previewDateX = rawDateX
+                                            previewDateY = rawDateY.coerceIn(0f, config.screenHeightDp.toFloat())
+                                        } else {
+                                            isDraggingClock = true
+                                            hasChangedClock = true
+                                            val newHour = (previewHourSize * zoom).coerceIn(40f, 200f)
+                                            val newMin = (previewMinSize * zoom).coerceIn(40f, 200f)
+                                            
+                                            rawClockX += (pan.x / scale) / densityVal
+                                            rawClockY += (pan.y / scale) / densityVal
+                                            
+                                            previewHourSize = newHour
+                                            previewMinSize = newMin
+                                            previewClockX = rawClockX
+                                            previewClockY = rawClockY.coerceIn(0f, config.screenHeightDp.toFloat())
+                                        }
+                                        event.changes.forEach { if (it.positionChanged()) it.consume() }
+                                    }
+                                } while (event.changes.any { it.pressed })
+                                
+                                isDraggingClock = false
+                                isDraggingDate = false
+                                
+                                if (hasChangedClock) {
+                                    if (abs(previewClockX) < 15f) {
+                                        previewClockX = 0f
+                                        view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                                    }
+                                }
+                                if (hasChangedDate) {
+                                    if (abs(previewDateX) < 15f) {
+                                        previewDateX = 0f
+                                        view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                                    }
+                                }
+                            }
+                        }
+                    ) {
+                        androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
+                            if (timeString.isEmpty()) return@Canvas
 
-                    sharedPath.computeBounds(sharedPathBounds, true)
+                            val hPx = previewHourSize * densityVal
+                            val mPx = previewMinSize * densityVal
+                            
+                            val hourW = hPx * 0.55f
+                            val minW = mPx * 0.55f
+                            val gap = hPx * 0.15f
+                            val colonIdx = timeString.indexOf(':')
+                            val hCount = if (colonIdx != -1) colonIdx else timeString.length
+                            val mCount = if (colonIdx != -1) timeString.length - colonIdx - 1 else 0
+                            val totalWidth = (hCount * hourW) + (mCount * minW) + (gap * (hCount + mCount))
 
-                    if (isDraggingClock) {
-                        drawRoundRect(
-                            color = Color.White.copy(alpha = 0.3f),
-                            topLeft = Offset(sharedPathBounds.left * scale + dx - 40f, sharedPathBounds.top * scale + dy - 40f),
-                            size = Size(sharedPathBounds.width() * scale + 80f, sharedPathBounds.height() * scale + 80f),
-                            cornerRadius = CornerRadius(32f, 32f),
-                            style = Stroke(width = 4f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(20f, 20f), 0f))
-                        )
-                    }
+                            val realCenterX = (realScreenW / 2f) + (previewClockX * densityVal)
+                            val realStartX = realCenterX - (totalWidth / 2f)
+                            val realStartY = previewClockY * densityVal
 
-                    val scaledDateY = (previewDateY * densityVal + (20f * densityVal)) * scale + dy
-                    val scaledDateX = (realScreenW / 2f) * scale + dx + (previewDateX * densityVal) * scale
+                            val scale = minOf(size.width / realScreenW, size.height / realScreenH)
+                            if (currentScale != scale) currentScale = scale
 
-                    if (isDraggingDate) {
-                        drawRoundRect(
-                            color = Color.White.copy(alpha = 0.3f),
-                            topLeft = Offset(scaledDateX - 250f, scaledDateY - 60f),
-                            size = Size(500f, 100f),
-                            cornerRadius = CornerRadius(32f, 32f),
-                            style = Stroke(width = 4f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(20f, 20f), 0f))
-                        )
-                    }
+                            val dx = (size.width - realScreenW * scale) / 2f
+                            val dy = (size.height - realScreenH * scale) / 2f
 
-                    drawIntoCanvas { canvas ->
-                        sharedMatrix.reset()
-                        sharedMatrix.postScale(scale, scale)
-                        sharedMatrix.postTranslate(dx, dy)
-                        sharedPath.transform(sharedMatrix) 
+                            AdaptiveClockHelper.buildPath(
+                                timeString = timeString,
+                                startX = realStartX,
+                                startY = realStartY,
+                                absoluteClockX = 0f, 
+                                absoluteClockY = 0f, 
+                                hourH = hPx,
+                                minH = mPx,
+                                screenW = realScreenW,
+                                screenH = realScreenH,
+                                isStretchEnabled = previewStretchEnabled,
+                                collisionMap = collisionMapArray,
+                                density = densityVal,
+                                strokeWidth = previewStrokeWidth,
+                                path = sharedPath 
+                            )
 
-                        vectorPaint.color = previewClockColor
-                        vectorPaint.strokeWidth = previewStrokeWidth * densityVal * scale
-                        vectorPaint.pathEffect = cornerEffect
+                            sharedPath.computeBounds(sharedPathBounds, true)
 
-                        canvas.nativeCanvas.drawPath(sharedPath, vectorPaint)
+                            if (isDraggingClock) {
+                                drawRoundRect(
+                                    color = Color.White.copy(alpha = 0.3f),
+                                    topLeft = Offset(sharedPathBounds.left * scale + dx - 40f, sharedPathBounds.top * scale + dy - 40f),
+                                    size = Size(sharedPathBounds.width() * scale + 80f, sharedPathBounds.height() * scale + 80f),
+                                    cornerRadius = CornerRadius(32f, 32f),
+                                    style = Stroke(width = 4f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(20f, 20f), 0f))
+                                )
+                            }
 
-                        datePaint.color = previewClockColor
-                        datePaint.textSize = 20f * densityVal * scale
-                        canvas.nativeCanvas.drawText(
-                            dateText,
-                            scaledDateX,
-                            scaledDateY,
-                            datePaint
-                        )
+                            val scaledDateY = (previewDateY * densityVal + (20f * densityVal)) * scale + dy
+                            val scaledDateX = (realScreenW / 2f) * scale + dx + (previewDateX * densityVal) * scale
+
+                            if (isDraggingDate) {
+                                drawRoundRect(
+                                    color = Color.White.copy(alpha = 0.3f),
+                                    topLeft = Offset(scaledDateX - 250f, scaledDateY - 60f),
+                                    size = Size(500f, 100f),
+                                    cornerRadius = CornerRadius(32f, 32f),
+                                    style = Stroke(width = 4f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(20f, 20f), 0f))
+                                )
+                            }
+
+                            drawIntoCanvas { canvas ->
+                                sharedMatrix.reset()
+                                sharedMatrix.postScale(scale, scale)
+                                sharedMatrix.postTranslate(dx, dy)
+                                sharedPath.transform(sharedMatrix) 
+
+                                vectorPaint.color = previewClockColor
+                                vectorPaint.strokeWidth = previewStrokeWidth * densityVal * scale
+                                vectorPaint.pathEffect = cornerEffect
+
+                                canvas.nativeCanvas.drawPath(sharedPath, vectorPaint)
+
+                                datePaint.color = previewClockColor
+                                datePaint.textSize = 20f * densityVal * scale
+                                canvas.nativeCanvas.drawText(
+                                    dateText,
+                                    scaledDateX,
+                                    scaledDateY,
+                                    datePaint
+                                )
+                            }
+                        }
                     }
                 }
             }
         }
-
+        
         Row(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
