@@ -508,12 +508,12 @@ fun ClockEditorPreview(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(bottom = 80.dp),
+                .padding(bottom = 70.dp),
             contentAlignment = Alignment.Center
         ) {
             Card(
                 modifier = Modifier
-                    .fillMaxHeight(0.72f)
+                    .fillMaxHeight(0.82f)
                     .aspectRatio(screenAspectRatio),
                 shape = RoundedCornerShape(36.dp),
                 elevation = CardDefaults.cardElevation(0.dp)

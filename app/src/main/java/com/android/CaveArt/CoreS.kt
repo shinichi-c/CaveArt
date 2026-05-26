@@ -262,7 +262,7 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                     exit = slideOutVertically { -it } + fadeOut()
                 ) {
                     Box(
-                        modifier = Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 8.dp),
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 2.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         if (isAnyEditorActive) {
@@ -430,7 +430,7 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                                 )
 
                                 Box(
-                                    modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 12.dp),
+                                    modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 2.dp),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     ConnectedWallpaperActions(
@@ -604,7 +604,6 @@ fun WallpaperPreviewCard(
         contentAlignment = Alignment.Center
     ) {
         if (isClockEditor) {
-            
             LiveEffectImage(
                 wallpaper = wallpaper,
                 viewModel = viewModel,
@@ -614,7 +613,7 @@ fun WallpaperPreviewCard(
         } else {
             Card(
                 modifier = Modifier
-                    .fillMaxHeight(0.82f)
+                    .fillMaxHeight(0.92f)
                     .aspectRatio(screenAspectRatio) 
                     .combinedClickable(
                         onClick = onTap,
@@ -656,6 +655,18 @@ fun ConnectedWallpaperActions(
 ) {
     val enabled = currentWallpaper != null
     
+    val configuration = LocalConfiguration.current
+    val screenWidthDp = configuration.screenWidthDp
+    
+    val scaleFactor = (screenWidthDp / 360f).coerceIn(0.82f, 1.05f)
+    
+    val toolbarHeight = (56.dp * scaleFactor)
+    val iconButtonSize = (44.dp * scaleFactor)
+    val iconSize = (22.dp * scaleFactor)
+    val fabSize = (52.dp * scaleFactor)
+    val fabIconSize = (22.dp * scaleFactor)
+    val toolbarSpacing = (4.dp * scaleFactor)
+
     HorizontalFloatingToolbar(
         expanded = true,
         floatingActionButton = {
@@ -663,12 +674,20 @@ fun ConnectedWallpaperActions(
                 onClick = { if (enabled) onSetWallpaperClick() },
                 containerColor = MaterialTheme.colorScheme.primary,
                 contentColor = MaterialTheme.colorScheme.onPrimary,
-                elevation = FloatingActionButtonDefaults.elevation(0.dp, 0.dp, 0.dp, 0.dp)
+                elevation = FloatingActionButtonDefaults.elevation(0.dp, 0.dp, 0.dp, 0.dp),
+                modifier = Modifier.size(fabSize),
+                shape = RoundedCornerShape(16.dp * scaleFactor)
             ) {
-                Icon(Icons.Default.Wallpaper, contentDescription = "Apply")
+                Icon(
+                    Icons.Default.Wallpaper, 
+                    contentDescription = "Apply",
+                    modifier = Modifier.size(fabIconSize)
+                )
             }
         },
-        modifier = Modifier.wrapContentWidth(),
+        modifier = Modifier
+            .wrapContentWidth()
+            .height(toolbarHeight),
         colors = FloatingToolbarColors(
             toolbarContainerColor = MaterialTheme.colorScheme.primaryContainer,
             toolbarContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -676,20 +695,64 @@ fun ConnectedWallpaperActions(
             fabContentColor = MaterialTheme.colorScheme.onPrimary
         )
     ) {
-        IconButton(onClick = onAddClick) { 
-            Icon(Icons.Default.AddPhotoAlternate, "Add", tint = MaterialTheme.colorScheme.onPrimaryContainer) 
+        IconButton(
+            onClick = onAddClick, 
+            modifier = Modifier.size(iconButtonSize)
+        ) { 
+            Icon(
+                Icons.Default.AddPhotoAlternate, 
+                "Add", 
+                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                modifier = Modifier.size(iconSize)
+            ) 
         }
-        IconButton(onClick = onLockscreenClick) {
-            Icon(Icons.Default.AccessTime, "Lockscreen", tint = MaterialTheme.colorScheme.onPrimaryContainer)
+        Spacer(Modifier.width(toolbarSpacing))
+        IconButton(
+            onClick = onLockscreenClick, 
+            modifier = Modifier.size(iconButtonSize)
+        ) {
+            Icon(
+                Icons.Default.AccessTime, 
+                "Lockscreen", 
+                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                modifier = Modifier.size(iconSize)
+            )
         }
-        IconButton(onClick = onFilamentClick) {
-            Icon(Icons.Default.ViewInAr, "3D Filament", tint = MaterialTheme.colorScheme.onPrimaryContainer)
+        Spacer(Modifier.width(toolbarSpacing))
+        IconButton(
+            onClick = onFilamentClick, 
+            modifier = Modifier.size(iconButtonSize)
+        ) {
+            Icon(
+                Icons.Default.ViewInAr, 
+                "3D Filament", 
+                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                modifier = Modifier.size(iconSize)
+            )
         }
-        IconButton(onClick = onAnimationClick) {
-            Icon(Icons.Default.Animation, "Animation", tint = MaterialTheme.colorScheme.onPrimaryContainer)
+        Spacer(Modifier.width(toolbarSpacing))
+        IconButton(
+            onClick = onAnimationClick, 
+            modifier = Modifier.size(iconButtonSize)
+        ) {
+            Icon(
+                Icons.Default.Animation, 
+                "Animation", 
+                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                modifier = Modifier.size(iconSize)
+            )
         }
-        IconButton(onClick = onMagicClick) {
-            Icon(Icons.Default.AutoAwesome, "Magic Shape", tint = MaterialTheme.colorScheme.onPrimaryContainer)
+        Spacer(Modifier.width(toolbarSpacing))
+        IconButton(
+            onClick = onMagicClick, 
+            modifier = Modifier.size(iconButtonSize)
+        ) {
+            Icon(
+                Icons.Default.AutoAwesome, 
+                "Magic Shape", 
+                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                modifier = Modifier.size(iconSize)
+            )
         }
     }
 }
