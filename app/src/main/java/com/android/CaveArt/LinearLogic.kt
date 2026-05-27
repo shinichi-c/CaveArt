@@ -148,7 +148,7 @@ fun HeroCarouselWithIndicator(
         Box(
             modifier = Modifier
                 .padding(horizontal = 24.dp)
-                .padding(bottom = 2.dp), 
+                .padding(bottom = 2.dp),
             contentAlignment = Alignment.Center
         ) {
             FastScrollIndicator(

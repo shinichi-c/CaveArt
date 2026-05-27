@@ -430,7 +430,7 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                                 )
 
                                 Box(
-                                    modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 2.dp),
+                                    modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 16.dp),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     ConnectedWallpaperActions(
@@ -613,7 +613,7 @@ fun WallpaperPreviewCard(
         } else {
             Card(
                 modifier = Modifier
-                    .fillMaxHeight(0.92f)
+                    .fillMaxHeight(0.90f)
                     .aspectRatio(screenAspectRatio) 
                     .combinedClickable(
                         onClick = onTap,
