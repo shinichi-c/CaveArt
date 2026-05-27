@@ -4,7 +4,8 @@ enum class AnimationStyle(val label: String) {
     MORPH("Organic Morph"),
     NANO_ASSEMBLY("Big Bang"),
     ORGANIC_BLOB("Organic Blob"),
-    FLUID_MORPH("Fluid Morph")
+    FLUID_MORPH("Fluid Morph"),
+    EXPRESSIVE_HORIZON("Expressive Horizon")
 }
 
 object AnimationFactory {
@@ -14,6 +15,7 @@ object AnimationFactory {
             AnimationStyle.NANO_ASSEMBLY -> NanoAssemblyAnimation()
             AnimationStyle.ORGANIC_BLOB -> OrganicBlobAnimation()
             AnimationStyle.FLUID_MORPH -> FluidMorphAnimation()
+            AnimationStyle.EXPRESSIVE_HORIZON -> ExpressiveHorizonAnimation()
         }
     }
 }
