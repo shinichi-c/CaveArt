@@ -377,6 +377,16 @@ class IndependentDateView(context: Context) : TextClock(context) {
         isSingleLine = true
     }
 
+    fun updateTimeDirectly() {
+        try {
+            val currentTime = System.currentTimeMillis()
+            val is24Hour = android.text.format.DateFormat.is24HourFormat(context)
+            val pattern = if (is24Hour) "EEE, d MMMM" else "EEE, d MMMM"
+            val dateString = java.text.SimpleDateFormat(pattern, java.util.Locale.getDefault()).format(java.util.Date(currentTime))
+            text = dateString
+        } catch (e: Exception) {}
+    }
+
     fun refreshSettings() {
         try {
             val cr = context.contentResolver
@@ -386,6 +396,7 @@ class IndependentDateView(context: Context) : TextClock(context) {
             cr.query(Uri.parse("content://com.android.CaveArt.settings/clock_color"), null, null, null, null)?.use { 
                 if (it.moveToFirst()) setTextColor(it.getInt(0)) 
             }
+            updateTimeDirectly()
             requestLayout()
             invalidate()
         } catch (e: Exception) {}
@@ -394,6 +405,13 @@ class IndependentDateView(context: Context) : TextClock(context) {
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         refreshSettings() 
+    }
+
+    override fun onWindowVisibilityChanged(visibility: Int) {
+        super.onWindowVisibilityChanged(visibility)
+        if (visibility == View.VISIBLE) {
+            updateTimeDirectly()
+        }
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
@@ -460,6 +478,13 @@ class VectorTextClock(context: Context) : TextClock(context) {
         refreshSettings()
     }
 
+    override fun onWindowVisibilityChanged(visibility: Int) {
+        super.onWindowVisibilityChanged(visibility)
+        if (visibility == View.VISIBLE) {
+            invalidate()
+        }
+    }
+
     fun setClockState(hasNotifications: Boolean) {
         val targetProgress = if (hasNotifications) 0f else 1f
         if (targetProgress == stretchProgress && animator?.isRunning != true) return
@@ -496,7 +521,11 @@ class VectorTextClock(context: Context) : TextClock(context) {
     }
 
     override fun onDraw(canvas: Canvas) {
-        val timeString = text.toString()
+        
+        val currentTime = System.currentTimeMillis()
+        val is24Hour = android.text.format.DateFormat.is24HourFormat(context)
+        val pattern = if (is24Hour) "HH:mm" else "hh:mm"
+        val timeString = java.text.SimpleDateFormat(pattern, java.util.Locale.getDefault()).format(java.util.Date(currentTime))
         if (timeString.isEmpty()) return
 
         updatePaintIfNeeded()
