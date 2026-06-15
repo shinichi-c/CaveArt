@@ -105,6 +105,7 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     var clockColor by mutableIntStateOf(clockPrefs.getInt("clock_color", AndroidColor.WHITE))
     var clockFont by mutableStateOf(clockPrefs.getString("clock_font", "default") ?: "default")
     var isDualToneEnabled by mutableStateOf(clockPrefs.getBoolean("clock_dual_tone", true))
+    var clockLayout by mutableIntStateOf(clockPrefs.getInt("clock_layout", 0))
 
     var isClockStretchEnabled by mutableStateOf(clockPrefs.getBoolean("clock_stretch", false))
     var clockCollisionMap by mutableStateOf(clockPrefs.getString("clock_collision_map", "") ?: "")
@@ -133,6 +134,15 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         
         val intent = android.content.Intent("com.android.CaveArt.UPDATE_CLOCK_DUAL_TONE")
         intent.putExtra("clock_dual_tone", enabled)
+        context.sendBroadcast(intent)
+    }
+
+    fun updateClockLayout(context: Context, layout: Int) {
+        clockLayout = layout
+        clockPrefs.edit().putInt("clock_layout", layout).apply()
+        
+        val intent = android.content.Intent("com.android.CaveArt.UPDATE_CLOCK_LAYOUT")
+        intent.putExtra("clock_layout", layout)
         context.sendBroadcast(intent)
     }
 
