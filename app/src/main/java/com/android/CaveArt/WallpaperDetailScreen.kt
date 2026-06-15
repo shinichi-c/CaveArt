@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.RectF
 import android.graphics.SurfaceTexture
+import android.graphics.Typeface
 import android.text.format.DateFormat
 import android.view.Choreographer
 import android.view.Surface
@@ -47,6 +48,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.layout.ContentScale
@@ -364,13 +366,17 @@ fun LiveEffectImage(
 ) {
     val context = LocalContext.current
     var previewMask by remember { mutableStateOf<Bitmap?>(null) }
+    var isMaskLoading by remember { mutableStateOf(false) } 
     
     LaunchedEffect(wallpaper) {
+        isMaskLoading = true
+        previewMask = null
         previewMask = viewModel.getMaskForClock(context, wallpaper)
+        isMaskLoading = false
     }
 
     if (viewModel.isLockscreenClockPreviewVisible) {
-        ClockEditorPreview(wallpaper, viewModel, previewMask, modifier, onApplyClockAndWallpaperClick)
+        ClockEditorPreview(wallpaper, viewModel, previewMask, isMaskLoading, modifier, onApplyClockAndWallpaperClick)
     } else {
         AnimatedWallpaperEngine(wallpaper, viewModel, previewMask, modifier)
     }
@@ -382,6 +388,7 @@ fun ClockEditorPreview(
     wallpaper: Wallpaper,
     viewModel: WallpaperViewModel,
     previewMask: Bitmap?,
+    isMaskLoading: Boolean,
     modifier: Modifier = Modifier,
     onApplyClockAndWallpaperClick: () -> Unit = {}
 ) {
@@ -411,12 +418,26 @@ fun ClockEditorPreview(
     var previewStretchEnabled by remember { mutableStateOf(viewModel.isClockStretchEnabled) }
     var previewCollisionMap by remember { mutableStateOf(viewModel.clockCollisionMap) }
     var previewClockColor by remember { mutableIntStateOf(viewModel.clockColor) }
+    var previewDualTone by remember { mutableStateOf(viewModel.isDualToneEnabled) }
+    var isCalculatingMap by remember { mutableStateOf(false) } 
     var extractedColors by remember { mutableStateOf(listOf(android.graphics.Color.WHITE, android.graphics.Color.BLACK)) }
 
     var timeString by remember { mutableStateOf("") }
     var dateText by remember { mutableStateOf("") }
     
     val screenAspectRatio = realScreenW / realScreenH
+
+    var previewClockFont by remember { mutableStateOf(viewModel.clockFont) }
+    val availableFonts = remember { viewModel.getAvailableFonts(context) }
+
+    val customTypeface = remember(previewClockFont) {
+        if (previewClockFont == "default") {
+            Typeface.create("sans-serif-bold", Typeface.NORMAL)
+        } else {
+            try { Typeface.createFromAsset(context.assets, "fonts/$previewClockFont") } 
+            catch (e: Exception) { Typeface.create("sans-serif-bold", Typeface.NORMAL) }
+        }
+    }
     
     LaunchedEffect(Unit) {
         while (true) {
@@ -429,12 +450,14 @@ fun ClockEditorPreview(
     }
 
     LaunchedEffect(wallpaper) {
+        previewClockColor = android.graphics.Color.WHITE
+        extractedColors = listOf(android.graphics.Color.WHITE, android.graphics.Color.BLACK)
+
         withContext(Dispatchers.IO) {
-            val bitmap = if(wallpaper.uri != null) BitmapHelper.decodeSampledBitmapFromUri(context, wallpaper.uri, 300) else BitmapHelper.decodeSampledBitmapFromResource(context.resources, wallpaper.resourceId, 300)
+            val bitmap = if(wallpaper.uri != null) BitmapHelper.decodeSampledBitmapFromUri(context, wallpaper.uri, 112) else BitmapHelper.decodeSampledBitmapFromResource(context.resources, wallpaper.resourceId, 112)
             if (bitmap != null) {
-                val scaledBitmap = Bitmap.createScaledBitmap(bitmap, 112, 112, true)
-                val pixels = IntArray(scaledBitmap.width * scaledBitmap.height)
-                scaledBitmap.getPixels(pixels, 0, scaledBitmap.width, 0, 0, scaledBitmap.width, scaledBitmap.height)
+                val pixels = IntArray(bitmap.width * bitmap.height)
+                bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
                 val quantizerResult = QuantizerCelebi.quantize(pixels, 128)
                 val rankedColors = Score.score(quantizerResult)
                 
@@ -453,19 +476,25 @@ fun ClockEditorPreview(
                 
                 withContext(Dispatchers.Main) {
                     extractedColors = listOf(android.graphics.Color.WHITE, android.graphics.Color.BLACK) + finalColors
+                    if (finalColors.isNotEmpty()) {
+                        previewClockColor = finalColors.first()
+                    }
                 }
-                scaledBitmap.recycle()
                 bitmap.recycle()
             }
         }
     }
 
+    val showLoadingAnimation = (previewStretchEnabled && isMaskLoading) || isCalculatingMap
+
     LaunchedEffect(previewMask, previewStretchEnabled) {
         if (previewStretchEnabled && previewMask != null) {
+            isCalculatingMap = true 
             withContext(Dispatchers.Default) {
                 val mapStr = AdaptiveClockHelper.generateCollisionMap(previewMask, realScreenW, realScreenH)
                 withContext(Dispatchers.Main) {
                     previewCollisionMap = mapStr
+                    isCalculatingMap = false 
                 }
             }
         } else {
@@ -477,10 +506,10 @@ fun ClockEditorPreview(
         if (previewCollisionMap.isNotEmpty()) previewCollisionMap.split(",").mapNotNull { it.toFloatOrNull() }.toFloatArray() else null
     }
 
-    val sharedPath = remember { android.graphics.Path() }
     val sharedPathBounds = remember { android.graphics.RectF() }
     val sharedMatrix = remember { android.graphics.Matrix() }
     var currentScale by remember { mutableFloatStateOf(1f) }
+    val sharedPath = remember { android.graphics.Path() }
 
     val cornerEffect = remember(previewRoundness, densityVal, currentScale) {
         android.graphics.CornerPathEffect(previewRoundness * densityVal * currentScale)
@@ -488,7 +517,7 @@ fun ClockEditorPreview(
 
     val vectorPaint = remember {
         android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-            style = android.graphics.Paint.Style.STROKE
+            style = android.graphics.Paint.Style.FILL_AND_STROKE
             strokeCap = android.graphics.Paint.Cap.ROUND
             strokeJoin = android.graphics.Paint.Join.ROUND
             setShadowLayer(15f, 0f, 5f, android.graphics.Color.argb(160, 0, 0, 0))
@@ -502,9 +531,13 @@ fun ClockEditorPreview(
             typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
         }
     }
-    
+
+    val isDarkTheme = isSystemInDarkTheme()
+    val overlayColor = if (isDarkTheme) Color.Black.copy(alpha = 0.4f) else MaterialTheme.colorScheme.surface.copy(alpha = 0.6f)
+    val particleColor = if (isDarkTheme) Color.White else Color.Black
+    val iconColor = if (isDarkTheme) Color.White else Color.Black
+
     Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-    	
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -616,13 +649,7 @@ fun ClockEditorPreview(
                             val hPx = previewHourSize * densityVal
                             val mPx = previewMinSize * densityVal
                             
-                            val hourW = hPx * 0.55f
-                            val minW = mPx * 0.55f
-                            val gap = hPx * 0.15f
-                            val colonIdx = timeString.indexOf(':')
-                            val hCount = if (colonIdx != -1) colonIdx else timeString.length
-                            val mCount = if (colonIdx != -1) timeString.length - colonIdx - 1 else 0
-                            val totalWidth = (hCount * hourW) + (mCount * minW) + (gap * (hCount + mCount))
+                            val totalWidth = AdaptiveClockHelper.measureClockWidth(timeString, hPx, mPx, customTypeface)
 
                             val realCenterX = (realScreenW / 2f) + (previewClockX * densityVal)
                             val realStartX = realCenterX - (totalWidth / 2f)
@@ -634,23 +661,28 @@ fun ClockEditorPreview(
                             val dx = (size.width - realScreenW * scale) / 2f
                             val dy = (size.height - realScreenH * scale) / 2f
 
-                            AdaptiveClockHelper.buildPath(
+                            val paths = AdaptiveClockHelper.buildPaths(
                                 timeString = timeString,
                                 startX = realStartX,
                                 startY = realStartY,
                                 absoluteClockX = 0f, 
                                 absoluteClockY = 0f, 
-                                hourH = hPx,
-                                minH = mPx,
+                                hourSizePx = hPx,
+                                minSizePx = mPx,
+                                typeface = customTypeface,
                                 screenW = realScreenW,
                                 screenH = realScreenH,
                                 isStretchEnabled = previewStretchEnabled,
                                 collisionMap = collisionMapArray,
                                 density = densityVal,
                                 strokeWidth = previewStrokeWidth,
-                                path = sharedPath 
+                                stretchProgress = 1f
                             )
 
+                            sharedPath.rewind()
+                            sharedPath.addPath(paths.hours)
+                            sharedPath.addPath(paths.colon)
+                            sharedPath.addPath(paths.mins)
                             sharedPath.computeBounds(sharedPathBounds, true)
 
                             if (isDraggingClock) {
@@ -680,13 +712,20 @@ fun ClockEditorPreview(
                                 sharedMatrix.reset()
                                 sharedMatrix.postScale(scale, scale)
                                 sharedMatrix.postTranslate(dx, dy)
-                                sharedPath.transform(sharedMatrix) 
+                                
+                                paths.hours.transform(sharedMatrix)
+                                paths.colon.transform(sharedMatrix)
+                                paths.mins.transform(sharedMatrix)
 
-                                vectorPaint.color = previewClockColor
                                 vectorPaint.strokeWidth = previewStrokeWidth * densityVal * scale
                                 vectorPaint.pathEffect = cornerEffect
 
-                                canvas.nativeCanvas.drawPath(sharedPath, vectorPaint)
+                                vectorPaint.color = if (previewDualTone) Color.White.toArgb() else previewClockColor
+                                canvas.nativeCanvas.drawPath(paths.hours, vectorPaint)
+                                canvas.nativeCanvas.drawPath(paths.colon, vectorPaint)
+                                
+                                vectorPaint.color = previewClockColor
+                                canvas.nativeCanvas.drawPath(paths.mins, vectorPaint)
 
                                 datePaint.color = previewClockColor
                                 datePaint.textSize = 20f * densityVal * scale
@@ -699,10 +738,44 @@ fun ClockEditorPreview(
                             }
                         }
                     }
+                    
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = showLoadingAnimation,
+                        enter = fadeIn(tween(300)),
+                        exit = fadeOut(tween(400)),
+                        modifier = Modifier.fillMaxSize()
+                    ) {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            
+                            AsyncWallpaperImage(
+                                wallpaper = wallpaper, 
+                                contentDescription = null, 
+                                viewModel = viewModel, 
+                                modifier = Modifier.fillMaxSize().blur(25.dp), 
+                                contentScale = ContentScale.Crop, 
+                                allowMagic = false
+                            )
+                            
+                            Spacer(modifier = Modifier.fillMaxSize().background(overlayColor))
+                            
+                            ParticleLoadingOverlay(color = particleColor)
+                            
+                            val infiniteTransition = rememberInfiniteTransition(label = "IconPulse")
+                            val pulseScale by infiniteTransition.animateFloat(initialValue = 1f, targetValue = 1.15f, animationSpec = infiniteRepeatable(tween(1200), RepeatMode.Reverse), label = "Scale")
+                            val glowAlpha by infiniteTransition.animateFloat(initialValue = 0.3f, targetValue = 0.7f, animationSpec = infiniteRepeatable(tween(1200), RepeatMode.Reverse), label = "Glow")
+                            
+                            Box(contentAlignment = Alignment.Center) {
+                                androidx.compose.foundation.Canvas(modifier = Modifier.size(100.dp).scale(pulseScale)) { 
+                                    drawCircle(brush = Brush.radialGradient(colors = listOf(particleColor.copy(alpha = glowAlpha), Color.Transparent), center = center, radius = size.width / 2)) 
+                                }
+                                Icon(Icons.Default.AutoAwesome, "Processing", tint = iconColor, modifier = Modifier.size(48.dp).scale(pulseScale))
+                            }
+                        }
+                    }
                 }
             }
         }
-        
+
         Row(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -744,7 +817,20 @@ fun ClockEditorPreview(
                         .padding(horizontal = 24.dp)
                         .padding(bottom = 32.dp)
                 ) {
-                    Text("Clock Theme", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                    
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Clock Theme", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Dual Tone", style = MaterialTheme.typography.labelSmall)
+                            Spacer(Modifier.width(8.dp))
+                            Switch(checked = previewDualTone, onCheckedChange = { previewDualTone = it })
+                        }
+                    }
+                    
                     Spacer(Modifier.height(8.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
@@ -770,6 +856,35 @@ fun ClockEditorPreview(
                     
                     Spacer(Modifier.height(24.dp))
                     
+                    Text("Typography", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.height(8.dp))
+                    LazyRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(availableFonts) { fontFile ->
+                            val isSelected = previewClockFont == fontFile
+                            val displayName = if (fontFile == "default") "System Default" else {
+                                fontFile.substringBeforeLast(".")
+                                    .split("_", "-")
+                                    .joinToString(" ") { word -> word.replaceFirstChar { if (it.isLowerCase()) it.titlecase(java.util.Locale.getDefault()) else it.toString() } }
+                            }
+                            
+                            FilterChip(
+                                selected = isSelected,
+                                onClick = { previewClockFont = fontFile },
+                                label = { Text(displayName, fontWeight = FontWeight.Bold) },
+                                shape = RoundedCornerShape(16.dp),
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                                    selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                            )
+                        }
+                    }
+
+                    Spacer(Modifier.height(24.dp))
+                    
                     Text("Clock Style", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
                     Spacer(Modifier.height(24.dp))
 
@@ -780,7 +895,7 @@ fun ClockEditorPreview(
                         Slider(
                             value = previewStrokeWidth,
                             onValueChange = { previewStrokeWidth = it },
-                            valueRange = 1f..25f,
+                            valueRange = 0f..25f,
                             modifier = Modifier.weight(1f)
                         )
                     }
@@ -863,6 +978,8 @@ fun ClockEditorPreview(
                         isSetting = false
                     ) {
                         showApplyOptions = false
+                        viewModel.updateDualTone(context, previewDualTone)
+                        viewModel.updateClockFont(context, previewClockFont)
                         viewModel.updateClockColor(context, previewClockColor)
                         viewModel.updateClockStyle(context, previewHourSize, previewMinSize, previewStrokeWidth, previewRoundness)
                         viewModel.updateLockscreenClockPosition(context, previewClockX, previewClockY)
@@ -881,6 +998,8 @@ fun ClockEditorPreview(
                         isSetting = false
                     ) {
                         showApplyOptions = false
+                        viewModel.updateDualTone(context, previewDualTone)
+                        viewModel.updateClockFont(context, previewClockFont) 
                         viewModel.updateClockColor(context, previewClockColor)
                         viewModel.updateClockStyle(context, previewHourSize, previewMinSize, previewStrokeWidth, previewRoundness)
                         viewModel.updateLockscreenClockPosition(context, previewClockX, previewClockY)

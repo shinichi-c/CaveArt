@@ -112,6 +112,8 @@ class CaveArtXposedModule : XposedModule() {
                             var isStretch = false
                             var collMap = ""
                             var cColor = Color.WHITE
+                            var cFont = "default"
+                            var isDualTone = true
                             
                             try {
                                 val cr = context.contentResolver
@@ -127,6 +129,8 @@ class CaveArtXposedModule : XposedModule() {
                                 cr.query(Uri.parse("content://com.android.CaveArt.settings/clock_stretch"), null, null, null, null)?.use { if (it.moveToFirst()) isStretch = it.getInt(0) == 1 }
                                 cr.query(Uri.parse("content://com.android.CaveArt.settings/clock_collision_map"), null, null, null, null)?.use { if (it.moveToFirst()) collMap = it.getString(0) ?: "" }
                                 cr.query(Uri.parse("content://com.android.CaveArt.settings/clock_color"), null, null, null, null)?.use { if (it.moveToFirst()) cColor = it.getInt(0) }
+                                cr.query(Uri.parse("content://com.android.CaveArt.settings/clock_font"), null, null, null, null)?.use { if (it.moveToFirst()) cFont = it.getString(0) ?: "default" }
+                                cr.query(Uri.parse("content://com.android.CaveArt.settings/clock_dual_tone"), null, null, null, null)?.use { if (it.moveToFirst()) isDualTone = it.getInt(0) == 1 }
                             } catch (e: Exception) {}
 
                             topMarginPx = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, initialY, context.resources.displayMetrics).toInt()
@@ -142,6 +146,8 @@ class CaveArtXposedModule : XposedModule() {
                                 stretchEnabled = isStretch
                                 collisionMap = if (collMap.isNotEmpty()) collMap.split(",").mapNotNull { it.toFloatOrNull() }.toFloatArray() else null
                                 clockColor = cColor
+                                clockFont = cFont
+                                dualToneEnabled = isDualTone
                                 penPaint.color = cColor
                                 translationX = initialXPx
                                 translationY = currentShiftY
@@ -183,6 +189,8 @@ class CaveArtXposedModule : XposedModule() {
                                 addAction("com.android.CaveArt.UPDATE_CLOCK_STRETCH")
                                 addAction("com.android.CaveArt.UPDATE_COLLISION_MAP")
                                 addAction("com.android.CaveArt.UPDATE_CLOCK_COLOR")
+                                addAction("com.android.CaveArt.UPDATE_CLOCK_FONT")
+                                addAction("com.android.CaveArt.UPDATE_CLOCK_DUAL_TONE")
                                 addAction(Intent.ACTION_USER_PRESENT)
                                 addAction(Intent.ACTION_SCREEN_ON) 
                                 addAction(Intent.ACTION_TIME_TICK) 
@@ -256,6 +264,16 @@ class CaveArtXposedModule : XposedModule() {
                                             myCustomClock.invalidate()
                                             myCustomDate.setTextColor(newColor)
                                             myCustomDate.invalidate()
+                                        }
+                                        "com.android.CaveArt.UPDATE_CLOCK_FONT" -> {
+                                            myCustomClock.clockFont = intent.getStringExtra("clock_font") ?: "default"
+                                            myCustomClock.reloadTypeface()
+                                            myCustomClock.requestLayout()
+                                            myCustomClock.invalidate()
+                                        }
+                                        "com.android.CaveArt.UPDATE_CLOCK_DUAL_TONE" -> {
+                                            myCustomClock.dualToneEnabled = intent.getBooleanExtra("clock_dual_tone", true)
+                                            myCustomClock.invalidate()
                                         }
                                         Intent.ACTION_TIME_TICK, Intent.ACTION_USER_PRESENT, Intent.ACTION_SCREEN_ON -> {
                                             myCustomClock.refreshSettings()
@@ -432,17 +450,20 @@ class VectorTextClock(context: Context) : TextClock(context) {
     var stretchEnabled = false
     var collisionMap: FloatArray? = null
     var clockColor = Color.WHITE
+    var clockFont = "default"
+    var dualToneEnabled = true
     var stretchProgress = 1f
     private var animator: ValueAnimator? = null
     
-    private val cachedPath = Path()
     private val screenPos = IntArray(2)
     private var lastCurveRound = -1f
     private var lastStrokeW = -1f
 
+    var customTypeface: Typeface = Typeface.DEFAULT_BOLD
+
     val penPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
-        style = Paint.Style.STROKE 
+        style = Paint.Style.FILL_AND_STROKE 
         strokeCap = Paint.Cap.ROUND 
         strokeJoin = Paint.Join.ROUND 
         setShadowLayer(15f, 0f, 5f, Color.argb(160, 0, 0, 0))
@@ -451,6 +472,19 @@ class VectorTextClock(context: Context) : TextClock(context) {
     init {
         setTextColor(Color.TRANSPARENT) 
         gravity = Gravity.CENTER
+    }
+
+    fun reloadTypeface() {
+        customTypeface = if (clockFont == "default" || clockFont.isEmpty()) {
+            Typeface.create("sans-serif-bold", Typeface.NORMAL)
+        } else {
+            try {
+                val moduleContext = context.createPackageContext("com.android.CaveArt", Context.CONTEXT_IGNORE_SECURITY)
+                Typeface.createFromAsset(moduleContext.assets, "fonts/$clockFont")
+            } catch (e: Exception) {
+                Typeface.create("sans-serif-bold", Typeface.NORMAL)
+            }
+        }
     }
 
     fun refreshSettings() {
@@ -468,6 +502,10 @@ class VectorTextClock(context: Context) : TextClock(context) {
                     collisionMap = if (mapStr.isNotEmpty()) mapStr.split(",").mapNotNull { v -> v.toFloatOrNull() }.toFloatArray() else null
                 }
             }
+            cr.query(Uri.parse("content://com.android.CaveArt.settings/clock_font"), null, null, null, null)?.use { if (it.moveToFirst()) clockFont = it.getString(0) ?: "default" }
+            cr.query(Uri.parse("content://com.android.CaveArt.settings/clock_dual_tone"), null, null, null, null)?.use { if (it.moveToFirst()) dualToneEnabled = it.getInt(0) == 1 }
+            
+            reloadTypeface()
             requestLayout()
             invalidate()
         } catch (e: Exception) {}
@@ -481,7 +519,7 @@ class VectorTextClock(context: Context) : TextClock(context) {
     override fun onWindowVisibilityChanged(visibility: Int) {
         super.onWindowVisibilityChanged(visibility)
         if (visibility == View.VISIBLE) {
-            invalidate()
+            invalidate() 
         }
     }
 
@@ -512,7 +550,6 @@ class VectorTextClock(context: Context) : TextClock(context) {
 
     private fun updatePaintIfNeeded() {
         if (lastCurveRound != curveRound || lastStrokeW != strokeW || penPaint.color != clockColor) {
-            penPaint.color = clockColor
             penPaint.strokeWidth = strokeW * resources.displayMetrics.density
             penPaint.pathEffect = CornerPathEffect(curveRound * resources.displayMetrics.density)
             lastCurveRound = curveRound
@@ -521,7 +558,6 @@ class VectorTextClock(context: Context) : TextClock(context) {
     }
 
     override fun onDraw(canvas: Canvas) {
-        
         val currentTime = System.currentTimeMillis()
         val is24Hour = android.text.format.DateFormat.is24HourFormat(context)
         val pattern = if (is24Hour) "HH:mm" else "hh:mm"
@@ -533,14 +569,7 @@ class VectorTextClock(context: Context) : TextClock(context) {
         val hPx = hourSizeDp * resources.displayMetrics.density
         val mPx = minuteSizeDp * resources.displayMetrics.density
         
-        val hourW = hPx * 0.55f
-        val minW = mPx * 0.55f
-        val gap = hPx * 0.15f
-        
-        val colonIdx = timeString.indexOf(':')
-        val hCount = if (colonIdx != -1) colonIdx else timeString.length
-        val mCount = if (colonIdx != -1) timeString.length - colonIdx - 1 else 0
-        val totalWidth = (hCount * hourW) + (mCount * minW) + (gap * (hCount + mCount))
+        val totalWidth = AdaptiveClockHelper.measureClockWidth(timeString, hPx, mPx, customTypeface)
 
         val startX = (width - totalWidth) / 2f
         val startY = 0f 
@@ -549,24 +578,29 @@ class VectorTextClock(context: Context) : TextClock(context) {
         val trueAbsoluteX = screenPos[0].toFloat()
         val trueAbsoluteY = screenPos[1].toFloat()
 
-        AdaptiveClockHelper.buildPath(
+        val paths = AdaptiveClockHelper.buildPaths(
             timeString = timeString,
             startX = startX,
             startY = startY,
             absoluteClockX = trueAbsoluteX,
             absoluteClockY = trueAbsoluteY,
-            hourH = hPx,
-            minH = mPx,
+            hourSizePx = hPx,
+            minSizePx = mPx,
+            typeface = customTypeface,
             screenW = CaveArtXposedModule.screenW,
             screenH = CaveArtXposedModule.screenH,
             isStretchEnabled = stretchEnabled,
             collisionMap = collisionMap,
             density = resources.displayMetrics.density,
             strokeWidth = strokeW,
-            stretchProgress = stretchProgress,
-            path = cachedPath
+            stretchProgress = stretchProgress
         )
         
-        canvas.drawPath(cachedPath, penPaint)
+        penPaint.color = if (dualToneEnabled) Color.WHITE else clockColor
+        canvas.drawPath(paths.hours, penPaint)
+        canvas.drawPath(paths.colon, penPaint)
+        
+        penPaint.color = clockColor
+        canvas.drawPath(paths.mins, penPaint)
     }
 }

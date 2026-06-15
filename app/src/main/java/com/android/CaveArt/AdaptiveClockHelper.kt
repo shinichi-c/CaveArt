@@ -2,8 +2,10 @@ package com.android.CaveArt
 
 import android.graphics.Bitmap
 import android.graphics.Matrix
+import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
+import android.graphics.Typeface
 
 data class AutoFitResult(
     val hourSize: Float,
@@ -11,38 +13,66 @@ data class AutoFitResult(
     val yDp: Float
 )
 
+class ClockPaths(val hours: Path = Path(), val colon: Path = Path(), val mins: Path = Path())
+
 object AdaptiveClockHelper {
 
-    fun buildPath(
+    fun measureClockWidth(timeString: String, hourSizePx: Float, minSizePx: Float, typeface: Typeface): Float {
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.typeface = typeface }
+        val colonIdx = timeString.indexOf(':')
+        val hours = if (colonIdx != -1) timeString.substring(0, colonIdx) else "00"
+        val mins = if (colonIdx != -1) timeString.substring(colonIdx + 1) else "00"
+        
+        var total = 0f
+        paint.textSize = hourSizePx
+        for (c in hours) {
+            val w = paint.measureText(c.toString())
+            total += w + w * 0.15f
+        }
+        if (colonIdx != -1) {
+            val cw = paint.measureText(":")
+            total += cw + cw * 0.5f
+        }
+        paint.textSize = minSizePx
+        for (c in mins) {
+            val w = paint.measureText(c.toString())
+            total += w + w * 0.15f
+        }
+        return total
+    }
+
+    fun buildPaths(
         timeString: String,
         startX: Float,
         startY: Float,
         absoluteClockX: Float,
         absoluteClockY: Float,
-        hourH: Float,
-        minH: Float,
+        hourSizePx: Float,
+        minSizePx: Float,
+        typeface: Typeface,
         screenW: Float,
         screenH: Float,
         isStretchEnabled: Boolean,
         collisionMap: FloatArray?,
         density: Float,
         strokeWidth: Float,
-        stretchProgress: Float = 1f,
-        path: Path = Path()
-    ): Path {
-        path.rewind()
-        val hourW = hourH * 0.55f
-        val minW = minH * 0.55f
-        val gap = hourH * 0.15f
-        var currentX = startX
+        stretchProgress: Float = 1f
+    ): ClockPaths {
         
+        val paths = ClockPaths()
+        val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.typeface = typeface }
+        
+        var currentX = startX
+        val charPath = Path()
+        val charBounds = RectF()
+        val transformMatrix = Matrix()
+
         val colonIdx = timeString.indexOf(':')
         val hours = if (colonIdx != -1) timeString.substring(0, colonIdx) else "00"
         val mins = if (colonIdx != -1) timeString.substring(colonIdx + 1) else "00"
 
         fun getDropY(cx: Float, cw: Float, defaultH: Float): Float {
             val normalY = startY + defaultH
-            
             if (!isStretchEnabled || collisionMap == null || collisionMap.isEmpty()) return normalY
             
             val absoluteX = cx + absoluteClockX
@@ -58,56 +88,58 @@ object AdaptiveClockHelper {
             
             val padding = (20f * density) + ((strokeWidth * density) / 2f) 
             val exactSurfaceY = minHitY - absoluteClockY - padding
-            
-            val maxStretchLimit = startY + (defaultH * 2.2f) 
+            val maxStretchLimit = startY + (defaultH * 2.5f) 
             val minCarHeight = startY + (defaultH * 0.4f)
             
             var finalY = exactSurfaceY
-            
             if (minHitY >= screenH * 0.98f) {
                 finalY = maxStretchLimit
             }
             
             val fullyStretchedY = finalY.coerceIn(minCarHeight, maxStretchLimit)
-            
             return normalY + (fullyStretchedY - normalY) * stretchProgress
         }
 
-        fun drawDigit(digit: Char, x: Float, w: Float, h: Float, dropY: Float) {
-            val actualH = dropY - startY
-            val midY = startY + actualH / 2f
-            
-            when (digit) {
-                '0' -> { path.addRect(x, startY, x+w, dropY, Path.Direction.CW) }
-                '1' -> { path.moveTo(x + w/2, startY); path.lineTo(x + w/2, dropY) }
-                '2' -> { path.moveTo(x, startY); path.lineTo(x+w, startY); path.lineTo(x+w, midY); path.lineTo(x, midY); path.lineTo(x, dropY); path.lineTo(x+w, dropY) }
-                '3' -> { path.moveTo(x, startY); path.lineTo(x+w, startY); path.lineTo(x+w, midY); path.lineTo(x, midY); path.moveTo(x+w, midY); path.lineTo(x+w, dropY); path.lineTo(x, dropY) }
-                '4' -> { path.moveTo(x, startY); path.lineTo(x, midY); path.lineTo(x+w, midY); path.moveTo(x+w, startY); path.lineTo(x+w, dropY) }
-                '5' -> { path.moveTo(x+w, startY); path.lineTo(x, startY); path.lineTo(x, midY); path.lineTo(x+w, midY); path.lineTo(x+w, dropY); path.lineTo(x, dropY) }
-                '6' -> { path.moveTo(x+w, startY); path.lineTo(x, startY); path.lineTo(x, dropY); path.lineTo(x+w, dropY); path.lineTo(x+w, midY); path.lineTo(x, midY) }
-                '7' -> { path.moveTo(x, startY); path.lineTo(x+w, startY); path.lineTo(x+w, dropY) }
-                '8' -> { path.addRect(x, startY, x+w, midY, Path.Direction.CW); path.addRect(x, midY, x+w, dropY, Path.Direction.CW) }
-                '9' -> { path.addRect(x, startY, x+w, midY, Path.Direction.CW); path.moveTo(x+w, midY); path.lineTo(x+w, dropY) }
+        fun appendText(text: String, sizePx: Float, targetPath: Path, isColon: Boolean = false) {
+            textPaint.textSize = sizePx
+            for (i in text.indices) {
+                val charStr = text[i].toString()
+                val charWidth = textPaint.measureText(charStr)
+                
+                charPath.rewind()
+                textPaint.getTextPath(charStr, 0, 1, 0f, 0f, charPath)
+                charPath.computeBounds(charBounds, true)
+
+                val charActualHeight = charBounds.height()
+                if (charActualHeight > 0) {
+                    val offsetY = startY - charBounds.top
+                    transformMatrix.reset()
+                    transformMatrix.postTranslate(currentX, offsetY)
+                    charPath.transform(transformMatrix)
+                    
+                    if (!isColon) {
+                        val dropY = getDropY(currentX, charWidth, sizePx)
+                        val targetHeight = dropY - startY
+                        
+                        if (isStretchEnabled && targetHeight > charActualHeight) {
+                            val scaleY = targetHeight / charActualHeight
+                            transformMatrix.reset()
+                            transformMatrix.postScale(1f, scaleY, currentX, startY)
+                            charPath.transform(transformMatrix)
+                        }
+                    }
+                }
+                targetPath.addPath(charPath)
+                val gap = if (isColon) charWidth * 0.5f else charWidth * 0.15f
+                currentX += charWidth + gap
             }
         }
 
-        for (i in hours.indices) {
-            drawDigit(hours[i], currentX, hourW, hourH, getDropY(currentX, hourW, hourH))
-            currentX += hourW + gap
-        }
+        appendText(hours, hourSizePx, paths.hours)
+        if (colonIdx != -1) appendText(":", hourSizePx, paths.colon, true)
+        appendText(mins, minSizePx, paths.mins)
 
-        val colonX = currentX + (gap / 2f)
-        val colonDropY = getDropY(colonX, gap, hourH)
-        val colonH = colonDropY - startY
-        path.moveTo(colonX, startY + colonH * 0.3f); path.lineTo(colonX, startY + colonH * 0.35f)
-        path.moveTo(colonX, startY + colonH * 0.65f); path.lineTo(colonX, startY + colonH * 0.7f)
-        currentX += gap * 2
-
-        for (i in mins.indices) {
-            drawDigit(mins[i], currentX, minW, minH, getDropY(currentX, minW, minH))
-            currentX += minW + gap
-        }
-        return path
+        return paths
     }
 
     fun generateCollisionMap(mask: Bitmap, screenW: Float, screenH: Float): String {
