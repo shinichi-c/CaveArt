@@ -103,9 +103,38 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     var clockRoundness by mutableFloatStateOf(clockPrefs.getFloat("clock_roundness", 30f))
     
     var clockColor by mutableIntStateOf(clockPrefs.getInt("clock_color", AndroidColor.WHITE))
+    var clockFont by mutableStateOf(clockPrefs.getString("clock_font", "default") ?: "default")
+    var isDualToneEnabled by mutableStateOf(clockPrefs.getBoolean("clock_dual_tone", true))
 
     var isClockStretchEnabled by mutableStateOf(clockPrefs.getBoolean("clock_stretch", false))
     var clockCollisionMap by mutableStateOf(clockPrefs.getString("clock_collision_map", "") ?: "")
+
+    fun getAvailableFonts(context: Context): List<String> {
+        return try {
+            val fontFiles = context.assets.list("fonts")?.filter { it.endsWith(".ttf") || it.endsWith(".otf") } ?: emptyList()
+            listOf("default") + fontFiles
+        } catch (e: Exception) {
+            listOf("default")
+        }
+    }
+
+    fun updateClockFont(context: Context, fontFilename: String) {
+        clockFont = fontFilename
+        clockPrefs.edit().putString("clock_font", fontFilename).apply()
+        
+        val intent = android.content.Intent("com.android.CaveArt.UPDATE_CLOCK_FONT")
+        intent.putExtra("clock_font", fontFilename)
+        context.sendBroadcast(intent)
+    }
+
+    fun updateDualTone(context: Context, enabled: Boolean) {
+        isDualToneEnabled = enabled
+        clockPrefs.edit().putBoolean("clock_dual_tone", enabled).apply()
+        
+        val intent = android.content.Intent("com.android.CaveArt.UPDATE_CLOCK_DUAL_TONE")
+        intent.putExtra("clock_dual_tone", enabled)
+        context.sendBroadcast(intent)
+    }
 
     fun updateLockscreenClockPosition(context: Context, x: Float, y: Float) {
         lockscreenClockOffsetX = x
@@ -208,7 +237,7 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     var is3DPopEnabled by mutableStateOf(true)
     var magicScale by mutableFloatStateOf(1.0f)
     var isCentered by mutableStateOf(false)
-    var currentAnimationStyle by mutableStateOf(AnimationStyle.NANO_ASSEMBLY)
+    var currentAnimationStyle by mutableStateOf(AnimationStyle.EXPRESSIVE_HORIZON)
     var currentAnimParams by mutableStateOf<Map<String, Float>>(emptyMap())
 
     fun setMagicShapeEnabled(enabled: Boolean) { _isMagicShapeEnabled.value = enabled; if (enabled) { _isAnimationEnabled.value = false; _isFilamentEnabled.value = false } }
