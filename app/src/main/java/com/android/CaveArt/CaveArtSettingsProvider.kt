@@ -39,6 +39,8 @@ class CaveArtSettingsProvider : ContentProvider() {
             "clock_stretch" -> cursor.addRow(arrayOf(if (prefs.getBoolean("clock_stretch", false)) 1 else 0))
             "clock_collision_map" -> cursor.addRow(arrayOf(prefs.getString("clock_collision_map", "")))
             "clock_color" -> cursor.addRow(arrayOf(prefs.getInt("clock_color", android.graphics.Color.WHITE)))
+            "clock_font" -> cursor.addRow(arrayOf(prefs.getString("clock_font", "default")))
+            "clock_dual_tone" -> cursor.addRow(arrayOf(if (prefs.getBoolean("clock_dual_tone", true)) 1 else 0))
         }
         return cursor
     }
