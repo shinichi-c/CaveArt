@@ -6,6 +6,7 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Typeface
+import kotlin.math.max
 
 data class AutoFitResult(
     val hourSize: Float,
@@ -17,28 +18,47 @@ class ClockPaths(val hours: Path = Path(), val colon: Path = Path(), val mins: P
 
 object AdaptiveClockHelper {
 
-    fun measureClockWidth(timeString: String, hourSizePx: Float, minSizePx: Float, typeface: Typeface): Float {
+    fun measureClockWidth(timeString: String, hourSizePx: Float, minSizePx: Float, typeface: Typeface, isVertical: Boolean): Float {
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.typeface = typeface }
         val colonIdx = timeString.indexOf(':')
         val hours = if (colonIdx != -1) timeString.substring(0, colonIdx) else "00"
         val mins = if (colonIdx != -1) timeString.substring(colonIdx + 1) else "00"
         
-        var total = 0f
-        paint.textSize = hourSizePx
-        for (c in hours) {
-            val w = paint.measureText(c.toString())
-            total += w + w * 0.15f
+        if (isVertical) {
+            val hStr = hours.padStart(2, '0')
+            val mStr = mins.padStart(2, '0')
+            
+            paint.textSize = hourSizePx
+            val wH0 = paint.measureText(hStr[0].toString())
+            val wH1 = paint.measureText(hStr[1].toString())
+            
+            paint.textSize = minSizePx
+            val wM0 = paint.measureText(mStr[0].toString())
+            val wM1 = paint.measureText(mStr[1].toString())
+            
+            val col0Width = max(wH0, wM0)
+            val col1Width = max(wH1, wM1)
+            val gapX = hourSizePx * 0.1f
+            
+            return col0Width + gapX + col1Width
+        } else {
+            var total = 0f
+            paint.textSize = hourSizePx
+            for (c in hours) {
+                val w = paint.measureText(c.toString())
+                total += w + w * 0.15f
+            }
+            if (colonIdx != -1) {
+                val cw = paint.measureText(":")
+                total += cw + cw * 0.5f
+            }
+            paint.textSize = minSizePx
+            for (c in mins) {
+                val w = paint.measureText(c.toString())
+                total += w + w * 0.15f
+            }
+            return total
         }
-        if (colonIdx != -1) {
-            val cw = paint.measureText(":")
-            total += cw + cw * 0.5f
-        }
-        paint.textSize = minSizePx
-        for (c in mins) {
-            val w = paint.measureText(c.toString())
-            total += w + w * 0.15f
-        }
-        return total
     }
 
     fun buildPaths(
@@ -53,6 +73,7 @@ object AdaptiveClockHelper {
         screenW: Float,
         screenH: Float,
         isStretchEnabled: Boolean,
+        isVertical: Boolean,
         collisionMap: FloatArray?,
         density: Float,
         strokeWidth: Float,
@@ -88,7 +109,7 @@ object AdaptiveClockHelper {
             
             val padding = (20f * density) + ((strokeWidth * density) / 2f) 
             val exactSurfaceY = minHitY - absoluteClockY - padding
-            val maxStretchLimit = startY + (defaultH * 2.5f) 
+            val maxStretchLimit = startY + (defaultH * 2.8f) 
             val minCarHeight = startY + (defaultH * 0.4f)
             
             var finalY = exactSurfaceY
@@ -100,44 +121,107 @@ object AdaptiveClockHelper {
             return normalY + (fullyStretchedY - normalY) * stretchProgress
         }
 
-        fun appendText(text: String, sizePx: Float, targetPath: Path, isColon: Boolean = false) {
-            textPaint.textSize = sizePx
-            for (i in text.indices) {
-                val charStr = text[i].toString()
-                val charWidth = textPaint.measureText(charStr)
+        if (isVertical) {
+            val hStr = hours.padStart(2, '0')
+            val mStr = mins.padStart(2, '0')
+            val gapX = hourSizePx * 0.1f
+            val gapY = hourSizePx * 0.05f
+            
+            textPaint.textSize = hourSizePx
+            val wH0 = textPaint.measureText(hStr[0].toString())
+            val wH1 = textPaint.measureText(hStr[1].toString())
+            textPaint.textSize = minSizePx
+            val wM0 = textPaint.measureText(mStr[0].toString())
+            val wM1 = textPaint.measureText(mStr[1].toString())
+            
+            val col0Width = max(wH0, wM0)
+            val col1Width = max(wH1, wM1)
+            
+            for (col in 0..1) {
+                val hChar = hStr[col].toString()
+                val mChar = mStr[col].toString()
+                val colWidth = if (col == 0) col0Width else col1Width
                 
+                val defaultTotalHeight = hourSizePx + minSizePx + gapY
+                val dropY = getDropY(currentX, colWidth, defaultTotalHeight)
+                val totalAvailableH = dropY - startY
+                
+                val targetCharHeight = ((totalAvailableH - gapY) / 2f).coerceAtLeast(hourSizePx * 0.4f)
+                
+                textPaint.textSize = hourSizePx
                 charPath.rewind()
-                textPaint.getTextPath(charStr, 0, 1, 0f, 0f, charPath)
+                textPaint.getTextPath(hChar, 0, 1, 0f, 0f, charPath)
                 charPath.computeBounds(charBounds, true)
-
-                val charActualHeight = charBounds.height()
-                if (charActualHeight > 0) {
+                if (charBounds.height() > 0) {
                     val offsetY = startY - charBounds.top
+                    val scaleY = if (isStretchEnabled) targetCharHeight / charBounds.height() else 1f
                     transformMatrix.reset()
-                    transformMatrix.postTranslate(currentX, offsetY)
+                    val centerOffsetX = currentX + (colWidth - textPaint.measureText(hChar)) / 2f
+                    transformMatrix.postTranslate(centerOffsetX, offsetY)
+                    transformMatrix.postScale(1f, scaleY, currentX, startY)
                     charPath.transform(transformMatrix)
+                    paths.hours.addPath(charPath)
+                }
+                
+                textPaint.textSize = minSizePx
+                charPath.rewind()
+                textPaint.getTextPath(mChar, 0, 1, 0f, 0f, charPath)
+                charPath.computeBounds(charBounds, true)
+                if (charBounds.height() > 0) {
+                    val actualMStartY = if (isStretchEnabled) startY + targetCharHeight + gapY else startY + hourSizePx + gapY
+                    val offsetY = actualMStartY - charBounds.top
+                    val scaleY = if (isStretchEnabled) targetCharHeight / charBounds.height() else 1f
+                    transformMatrix.reset()
+                    val centerOffsetX = currentX + (colWidth - textPaint.measureText(mChar)) / 2f
+                    transformMatrix.postTranslate(centerOffsetX, offsetY)
+                    transformMatrix.postScale(1f, scaleY, currentX, actualMStartY)
+                    charPath.transform(transformMatrix)
+                    paths.mins.addPath(charPath)
+                }
+                
+                currentX += colWidth + gapX
+            }
+
+        } else {
+            fun appendText(text: String, sizePx: Float, targetPath: Path, isColon: Boolean = false) {
+                textPaint.textSize = sizePx
+                for (i in text.indices) {
+                    val charStr = text[i].toString()
+                    val charWidth = textPaint.measureText(charStr)
                     
-                    if (!isColon) {
-                        val dropY = getDropY(currentX, charWidth, sizePx)
-                        val targetHeight = dropY - startY
+                    charPath.rewind()
+                    textPaint.getTextPath(charStr, 0, 1, 0f, 0f, charPath)
+                    charPath.computeBounds(charBounds, true)
+
+                    val charActualHeight = charBounds.height()
+                    if (charActualHeight > 0) {
+                        val offsetY = startY - charBounds.top
+                        transformMatrix.reset()
+                        transformMatrix.postTranslate(currentX, offsetY)
+                        charPath.transform(transformMatrix)
                         
-                        if (isStretchEnabled && targetHeight > charActualHeight) {
-                            val scaleY = targetHeight / charActualHeight
-                            transformMatrix.reset()
-                            transformMatrix.postScale(1f, scaleY, currentX, startY)
-                            charPath.transform(transformMatrix)
+                        if (!isColon) {
+                            val dropY = getDropY(currentX, charWidth, sizePx)
+                            val targetHeight = dropY - startY
+                            
+                            if (isStretchEnabled && targetHeight > charActualHeight) {
+                                val scaleY = targetHeight / charActualHeight
+                                transformMatrix.reset()
+                                transformMatrix.postScale(1f, scaleY, currentX, startY)
+                                charPath.transform(transformMatrix)
+                            }
                         }
                     }
+                    targetPath.addPath(charPath)
+                    val gap = if (isColon) charWidth * 0.5f else charWidth * 0.15f
+                    currentX += charWidth + gap
                 }
-                targetPath.addPath(charPath)
-                val gap = if (isColon) charWidth * 0.5f else charWidth * 0.15f
-                currentX += charWidth + gap
             }
-        }
 
-        appendText(hours, hourSizePx, paths.hours)
-        if (colonIdx != -1) appendText(":", hourSizePx, paths.colon, true)
-        appendText(mins, minSizePx, paths.mins)
+            appendText(hours, hourSizePx, paths.hours)
+            if (colonIdx != -1) appendText(":", hourSizePx, paths.colon, true)
+            appendText(mins, minSizePx, paths.mins)
+        }
 
         return paths
     }

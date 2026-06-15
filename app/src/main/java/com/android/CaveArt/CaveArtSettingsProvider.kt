@@ -41,6 +41,7 @@ class CaveArtSettingsProvider : ContentProvider() {
             "clock_color" -> cursor.addRow(arrayOf(prefs.getInt("clock_color", android.graphics.Color.WHITE)))
             "clock_font" -> cursor.addRow(arrayOf(prefs.getString("clock_font", "default")))
             "clock_dual_tone" -> cursor.addRow(arrayOf(if (prefs.getBoolean("clock_dual_tone", true)) 1 else 0))
+            "clock_layout" -> cursor.addRow(arrayOf(prefs.getInt("clock_layout", 0)))
         }
         return cursor
     }

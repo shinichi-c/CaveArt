@@ -419,6 +419,7 @@ fun ClockEditorPreview(
     var previewCollisionMap by remember { mutableStateOf(viewModel.clockCollisionMap) }
     var previewClockColor by remember { mutableIntStateOf(viewModel.clockColor) }
     var previewDualTone by remember { mutableStateOf(viewModel.isDualToneEnabled) }
+    var previewClockLayout by remember { mutableIntStateOf(viewModel.clockLayout) }
     var isCalculatingMap by remember { mutableStateOf(false) } 
     var extractedColors by remember { mutableStateOf(listOf(android.graphics.Color.WHITE, android.graphics.Color.BLACK)) }
 
@@ -649,7 +650,9 @@ fun ClockEditorPreview(
                             val hPx = previewHourSize * densityVal
                             val mPx = previewMinSize * densityVal
                             
-                            val totalWidth = AdaptiveClockHelper.measureClockWidth(timeString, hPx, mPx, customTypeface)
+                            val isVert = previewClockLayout == 1
+                            
+                            val totalWidth = AdaptiveClockHelper.measureClockWidth(timeString, hPx, mPx, customTypeface, isVert)
 
                             val realCenterX = (realScreenW / 2f) + (previewClockX * densityVal)
                             val realStartX = realCenterX - (totalWidth / 2f)
@@ -673,6 +676,7 @@ fun ClockEditorPreview(
                                 screenW = realScreenW,
                                 screenH = realScreenH,
                                 isStretchEnabled = previewStretchEnabled,
+                                isVertical = isVert,
                                 collisionMap = collisionMapArray,
                                 density = densityVal,
                                 strokeWidth = previewStrokeWidth,
@@ -738,7 +742,7 @@ fun ClockEditorPreview(
                             }
                         }
                     }
-                    
+
                     androidx.compose.animation.AnimatedVisibility(
                         visible = showLoadingAnimation,
                         enter = fadeIn(tween(300)),
@@ -746,7 +750,6 @@ fun ClockEditorPreview(
                         modifier = Modifier.fillMaxSize()
                     ) {
                         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            
                             AsyncWallpaperImage(
                                 wallpaper = wallpaper, 
                                 contentDescription = null, 
@@ -854,6 +857,27 @@ fun ClockEditorPreview(
                         }
                     }
                     
+                    Spacer(Modifier.height(24.dp))
+                    
+                    Text("Layout", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        FilterChip(
+                            selected = previewClockLayout == 0,
+                            onClick = { previewClockLayout = 0 },
+                            label = { Text("Horizontal") },
+                            shape = RoundedCornerShape(16.dp),
+                            colors = FilterChipDefaults.filterChipColors(selectedContainerColor = MaterialTheme.colorScheme.primaryContainer)
+                        )
+                        FilterChip(
+                            selected = previewClockLayout == 1,
+                            onClick = { previewClockLayout = 1 },
+                            label = { Text("Vertical Magazine") },
+                            shape = RoundedCornerShape(16.dp),
+                            colors = FilterChipDefaults.filterChipColors(selectedContainerColor = MaterialTheme.colorScheme.primaryContainer)
+                        )
+                    }
+
                     Spacer(Modifier.height(24.dp))
                     
                     Text("Typography", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
@@ -978,6 +1002,7 @@ fun ClockEditorPreview(
                         isSetting = false
                     ) {
                         showApplyOptions = false
+                        viewModel.updateClockLayout(context, previewClockLayout)
                         viewModel.updateDualTone(context, previewDualTone)
                         viewModel.updateClockFont(context, previewClockFont)
                         viewModel.updateClockColor(context, previewClockColor)
@@ -998,6 +1023,7 @@ fun ClockEditorPreview(
                         isSetting = false
                     ) {
                         showApplyOptions = false
+                        viewModel.updateClockLayout(context, previewClockLayout)
                         viewModel.updateDualTone(context, previewDualTone)
                         viewModel.updateClockFont(context, previewClockFont) 
                         viewModel.updateClockColor(context, previewClockColor)
