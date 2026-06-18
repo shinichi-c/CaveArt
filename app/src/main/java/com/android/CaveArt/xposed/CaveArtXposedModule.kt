@@ -36,30 +36,8 @@ class CaveArtXposedModule : XposedModule() {
         
         fun updateNotificationShift(context: Context, hasNotifications: Boolean) {
             isShiftedForNotifications = hasNotifications
-            
-            val density = context.resources.displayMetrics.density
-            val safeTopPx = (80f * density).toInt() 
-            val highestElementPx = Math.min(topMarginPx, dateTopMarginPx)
-            
-            val targetShiftY = if (hasNotifications && highestElementPx > safeTopPx) {
-                (safeTopPx - highestElementPx).toFloat()
-            } else {
-                0f
-            }
-            
-            if (targetShiftY == currentShiftY && shiftAnimator?.isRunning != true) return
-            
-            shiftAnimator?.cancel()
-            shiftAnimator = ValueAnimator.ofFloat(currentShiftY, targetShiftY).apply {
-                duration = 450
-                interpolator = PathInterpolator(0.4f, 0f, 0.2f, 1f)
-                addUpdateListener {
-                    currentShiftY = it.animatedValue as Float
-                    activeClock?.translationY = currentShiftY
-                    activeDate?.translationY = currentShiftY
-                }
-                start()
-            }
+            activeClock?.setClockState(hasNotifications)
+            activeDate?.setDateState(hasNotifications)
         }
     }
 
@@ -152,6 +130,7 @@ class CaveArtXposedModule : XposedModule() {
                                 dualToneEnabled = isDualTone
                                 isVertical = isVert == 1
                                 penPaint.color = cColor
+                                userTranslationX = initialXPx
                                 translationX = initialXPx
                                 translationY = currentShiftY
                                 translationZ = 50f
@@ -163,6 +142,7 @@ class CaveArtXposedModule : XposedModule() {
                                 id = customDateId
                                 setTextSize(TypedValue.COMPLEX_UNIT_SP, dateSize)
                                 setTextColor(cColor)
+                                userTranslationX = dateXPx
                                 translationX = dateXPx
                                 translationY = currentShiftY
                                 translationZ = 60f
@@ -214,7 +194,8 @@ class CaveArtXposedModule : XposedModule() {
                                         "com.android.CaveArt.UPDATE_DATE_POSITION" -> {
                                             val newX = intent.getFloatExtra("date_x", 0f)
                                             val newY = intent.getFloatExtra("date_y", 75f)
-                                            myCustomDate.translationX = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, newX, context.resources.displayMetrics)
+                                            val dateXPx = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, newX, context.resources.displayMetrics)
+                                            myCustomDate.userTranslationX = dateXPx
                                             dateTopMarginPx = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, newY, context.resources.displayMetrics).toInt()
                                             
                                             try {
@@ -228,6 +209,7 @@ class CaveArtXposedModule : XposedModule() {
                                                 }
                                             } catch (e: Exception) {}
                                             
+                                            myCustomDate.updatePosition()
                                             myCustomDate.requestLayout()
                                             myCustomDate.invalidate()
                                             updateNotificationShift(context, isShiftedForNotifications)
@@ -235,7 +217,8 @@ class CaveArtXposedModule : XposedModule() {
                                         "com.android.CaveArt.UPDATE_CLOCK_POSITION" -> {
                                             val newX = intent.getFloatExtra("clock_x", 0f)
                                             val newY = intent.getFloatExtra("clock_y", 110f)
-                                            myCustomClock.translationX = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, newX, context.resources.displayMetrics)
+                                            val clockXPx = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, newX, context.resources.displayMetrics)
+                                            myCustomClock.userTranslationX = clockXPx
                                             topMarginPx = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, newY, context.resources.displayMetrics).toInt()
                                             
                                             try {
@@ -248,6 +231,10 @@ class CaveArtXposedModule : XposedModule() {
                                                     constraintSetClass.getMethod("applyTo", constraintLayoutClass).invoke(set, rootLayout)
                                                 }
                                             } catch (e: Exception) {}
+                                            
+                                            myCustomClock.updateInterpolatedPositions()
+                                            myCustomClock.requestLayout()
+                                            myCustomClock.invalidate()
                                             updateNotificationShift(context, isShiftedForNotifications)
                                         }
                                         "com.android.CaveArt.UPDATE_CLOCK_STRETCH" -> {
@@ -321,12 +308,12 @@ class CaveArtXposedModule : XposedModule() {
 
                         val context = activeClock?.context
                         if (context != null) {
+                            var hasNotifications = false
                             try {
                                 val getVisibility = constraintSetClass.getMethod("getVisibility", Int::class.javaPrimitiveType)
                                 val largeVis = getVisibility.invoke(cs, largeId) as Int
-                                val hasNotifications = (largeVis == 8 || largeVis == 4) 
+                                hasNotifications = (largeVis == 8 || largeVis == 4) 
                                 
-                                activeClock?.setClockState(hasNotifications)
                                 updateNotificationShift(context, hasNotifications)
                             } catch(e: Exception) {}
 
@@ -350,21 +337,30 @@ class CaveArtXposedModule : XposedModule() {
 
                             try {
                                 val density = context.resources.displayMetrics.density
-                                val cHeight = (activeClock?.hourSizeDp ?: 100f) * density * (if (activeClock?.isVertical == true) 2.2f else 1.2f)
-                                val dHeight = 20f * density * 1.5f
                                 
-                                val safeTopPx = (80f * density).toInt() 
-                                val highestElementPx = Math.min(topMarginPx, dateTopMarginPx)
-                                val finalShiftY = if (isShiftedForNotifications && highestElementPx > safeTopPx) {
-                                    (safeTopPx - highestElementPx).toFloat()
+                                val dateCurrentY = if (hasNotifications) {
+                                    65f * density
                                 } else {
-                                    0f
+                                    dateTopMarginPx.toFloat()
                                 }
+                                val dateHeight = (if (hasNotifications) 15f else 20f) * density * 1.5f
+                                
+                                val clockCurrentY = if (hasNotifications) {
+                                    100f * density
+                                } else {
+                                    topMarginPx.toFloat()
+                                }
+                                val clockHeight = (if (hasNotifications) {
+                                    if ((activeClock?.hourSizeDp ?: 100f) > 85f) 85f else (activeClock?.hourSizeDp ?: 100f)
+                                } else {
+                                    activeClock?.hourSizeDp ?: 100f
+                                }) * density * (if (activeClock?.isVertical == true && !hasNotifications) 2.2f else 1.2f)
                                 
                                 val lowestPoint = Math.max(
-                                    topMarginPx + finalShiftY.toInt() + cHeight.toInt(),
-                                    dateTopMarginPx + finalShiftY.toInt() + dHeight.toInt()
-                                )
+                                    clockCurrentY + clockHeight,
+                                    dateCurrentY + dateHeight
+                                ).toInt()
+                                
                                 val targetMargin = lowestPoint + (32f * density).toInt()
                                 
                                 val idsToPush = listOf(
@@ -394,6 +390,10 @@ class CaveArtXposedModule : XposedModule() {
 }
 
 class IndependentDateView(context: Context) : TextClock(context) {
+    var notificationProgress = 0f
+    private var animator: ValueAnimator? = null
+    var userTranslationX = 0f
+
     init {
         format12Hour = "EEE, d MMMM"
         format24Hour = "EEE, d MMMM"
@@ -402,6 +402,32 @@ class IndependentDateView(context: Context) : TextClock(context) {
         typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
         setShadowLayer(10f, 0f, 3f, Color.argb(160, 0, 0, 0))
         isSingleLine = true
+    }
+
+    fun setDateState(hasNotifications: Boolean) {
+        val targetProgress = if (hasNotifications) 1f else 0f
+        if (targetProgress == notificationProgress && animator?.isRunning != true) return
+        animator?.cancel()
+        animator = ValueAnimator.ofFloat(notificationProgress, targetProgress).apply {
+            duration = 350
+            interpolator = PathInterpolator(0.2f, 0f, 0f, 1f)
+            addUpdateListener { 
+                notificationProgress = it.animatedValue as Float
+                updatePosition()
+                invalidate()
+            }
+            start()
+        }
+    }
+
+    fun updatePosition() {
+        val density = resources.displayMetrics.density
+        val targetYPx = 65f * density
+        val userY = CaveArtXposedModule.dateTopMarginPx.toFloat()
+        val targetTranslationY = targetYPx - userY
+        
+        translationY = targetTranslationY * notificationProgress
+        translationX = userTranslationX + (0f - userTranslationX) * notificationProgress
     }
 
     fun updateTimeDirectly() {
@@ -424,6 +450,7 @@ class IndependentDateView(context: Context) : TextClock(context) {
                 if (it.moveToFirst()) setTextColor(it.getInt(0)) 
             }
             updateTimeDirectly()
+            updatePosition()
             requestLayout()
             invalidate()
         } catch (e: Exception) {}
@@ -462,8 +489,10 @@ class VectorTextClock(context: Context) : TextClock(context) {
     var clockColor = Color.WHITE
     var clockFont = "default"
     var dualToneEnabled = true
-    var stretchProgress = 1f
-    private var animator: ValueAnimator? = null
+    
+    var notificationProgress = 0f
+    private var notificationAnimator: ValueAnimator? = null
+    var userTranslationX = 0f
     
     private val screenPos = IntArray(2)
     private var lastCurveRound = -1f
@@ -517,6 +546,7 @@ class VectorTextClock(context: Context) : TextClock(context) {
             cr.query(Uri.parse("content://com.android.CaveArt.settings/clock_layout"), null, null, null, null)?.use { if (it.moveToFirst()) isVertical = it.getInt(0) == 1 }
             
             reloadTypeface()
+            updateInterpolatedPositions()
             requestLayout()
             invalidate()
         } catch (e: Exception) {}
@@ -535,18 +565,29 @@ class VectorTextClock(context: Context) : TextClock(context) {
     }
 
     fun setClockState(hasNotifications: Boolean) {
-        val targetProgress = if (hasNotifications) 0f else 1f
-        if (targetProgress == stretchProgress && animator?.isRunning != true) return
-        animator?.cancel()
-        animator = ValueAnimator.ofFloat(stretchProgress, targetProgress).apply {
-            duration = 450
-            interpolator = PathInterpolator(0.4f, 0f, 0.2f, 1f)
+        val targetProgress = if (hasNotifications) 1f else 0f
+        if (targetProgress == notificationProgress && notificationAnimator?.isRunning != true) return
+        notificationAnimator?.cancel()
+        notificationAnimator = ValueAnimator.ofFloat(notificationProgress, targetProgress).apply {
+            duration = 350
+            interpolator = PathInterpolator(0.2f, 0f, 0f, 1f)
             addUpdateListener { 
-                stretchProgress = it.animatedValue as Float
+                notificationProgress = it.animatedValue as Float
+                updateInterpolatedPositions()
                 invalidate()
             }
             start()
         }
+    }
+
+    fun updateInterpolatedPositions() {
+        val density = resources.displayMetrics.density
+        val targetYPx = 100f * density
+        val userY = CaveArtXposedModule.topMarginPx.toFloat()
+        
+        val targetTranslationY = targetYPx - userY
+        translationY = targetTranslationY * notificationProgress
+        translationX = userTranslationX + (0f - userTranslationX) * notificationProgress
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
@@ -578,10 +619,19 @@ class VectorTextClock(context: Context) : TextClock(context) {
 
         updatePaintIfNeeded()
         
-        val hPx = hourSizeDp * resources.displayMetrics.density
-        val mPx = minuteSizeDp * resources.displayMetrics.density
+        val targetHourSizeDp = if (hourSizeDp > 85f) 85f else hourSizeDp
+        val targetMinSizeDp = if (minuteSizeDp > 72f) 72f else minuteSizeDp
         
-        val totalWidth = AdaptiveClockHelper.measureClockWidth(timeString, hPx, mPx, customTypeface, isVertical)
+        val currentHourSizeDp = hourSizeDp + (targetHourSizeDp - hourSizeDp) * notificationProgress
+        val currentMinSizeDp = minuteSizeDp + (targetMinSizeDp - minuteSizeDp) * notificationProgress
+        
+        val hPx = currentHourSizeDp * resources.displayMetrics.density
+        val mPx = currentMinSizeDp * resources.displayMetrics.density
+        
+        val preferredLayoutProgress = if (isVertical) 1f else 0f
+        val layoutProgress = preferredLayoutProgress * (1f - notificationProgress)
+        
+        val totalWidth = AdaptiveClockHelper.measureClockWidth(timeString, hPx, mPx, customTypeface, layoutProgress)
 
         val startX = (width - totalWidth) / 2f
         val startY = 0f 
@@ -602,11 +652,11 @@ class VectorTextClock(context: Context) : TextClock(context) {
             screenW = CaveArtXposedModule.screenW,
             screenH = CaveArtXposedModule.screenH,
             isStretchEnabled = stretchEnabled,
-            isVertical = isVertical,
+            layoutProgress = layoutProgress,
             collisionMap = collisionMap,
             density = resources.displayMetrics.density,
             strokeWidth = strokeW,
-            stretchProgress = stretchProgress
+            stretchProgress = 1f - notificationProgress 
         )
         
         penPaint.color = if (dualToneEnabled) Color.WHITE else clockColor
