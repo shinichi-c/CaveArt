@@ -402,6 +402,7 @@ fun ClockEditorPreview(
     val config = LocalConfiguration.current
     
     var showCustomizeSheet by remember { mutableStateOf(false) }
+    var showDateCustomizeSheet by remember { mutableStateOf(false) }
     var showApplyOptions by remember { mutableStateOf(false) }
     
     var isDraggingClock by remember { mutableStateOf(false) }
@@ -420,6 +421,10 @@ fun ClockEditorPreview(
     var previewClockColor by remember { mutableIntStateOf(viewModel.clockColor) }
     var previewDualTone by remember { mutableStateOf(viewModel.isDualToneEnabled) }
     var previewClockLayout by remember { mutableIntStateOf(viewModel.clockLayout) }
+    
+    var previewDateFormat by remember { mutableIntStateOf(viewModel.dateLayout) }
+    var previewDateAttached by remember { mutableStateOf(viewModel.isDateAttached) }
+    
     var isCalculatingMap by remember { mutableStateOf(false) } 
     var extractedColors by remember { mutableStateOf(listOf(android.graphics.Color.WHITE, android.graphics.Color.BLACK)) }
 
@@ -439,13 +444,30 @@ fun ClockEditorPreview(
             catch (e: Exception) { Typeface.create("sans-serif-bold", Typeface.NORMAL) }
         }
     }
+
+    LaunchedEffect(previewClockX, previewClockY, previewDateAttached) {
+        if (previewDateAttached) {
+            previewDateX = previewClockX
+            previewDateY = previewClockY - 35f 
+        }
+    }
     
-    LaunchedEffect(Unit) {
+    LaunchedEffect(previewDateFormat) {
         while (true) {
             val is24Hour = DateFormat.is24HourFormat(context)
             val timePattern = if (is24Hour) "HH:mm" else "hh:mm"
             timeString = java.text.SimpleDateFormat(timePattern, java.util.Locale.getDefault()).format(java.util.Date())
-            dateText = java.text.SimpleDateFormat("EEE, MMM d", java.util.Locale.getDefault()).format(java.util.Date())
+            
+            val date = java.util.Date()
+            val locale = java.util.Locale.getDefault()
+            dateText = when (previewDateFormat) {
+                0 -> java.text.SimpleDateFormat("EEE, d MMMM", locale).format(date)
+                1 -> java.text.SimpleDateFormat("EEE, d MMM", locale).format(date)
+                2 -> java.text.SimpleDateFormat("d MMM yyyy", locale).format(date).uppercase(locale)
+                3 -> java.text.SimpleDateFormat("EEEE, MMMM d", locale).format(date)
+                4 -> java.text.SimpleDateFormat("EEEE • d MMM", locale).format(date)
+                else -> java.text.SimpleDateFormat("EEE, d MMMM", locale).format(date)
+            }
             delay(1000L) 
         }
     }
@@ -568,6 +590,7 @@ fun ClockEditorPreview(
                             awaitEachGesture {
                                 val down = awaitFirstDown(requireUnconsumed = true)
                                 if (down.isConsumed) return@awaitEachGesture
+                                val timeStart = System.currentTimeMillis()
                                 
                                 var dragged = false
                                 val scale = minOf(size.width / realScreenW, size.height / realScreenH)
@@ -600,7 +623,7 @@ fun ClockEditorPreview(
                                     }
                                     
                                     if (dragged) {
-                                        if (activeDrag == "DATE") {
+                                        if (activeDrag == "DATE" && !previewDateAttached) {
                                             isDraggingDate = true
                                             hasChangedDate = true
                                             rawDateX += (pan.x / scale) / densityVal
@@ -626,6 +649,15 @@ fun ClockEditorPreview(
                                     }
                                 } while (event.changes.any { it.pressed })
                                 
+                                val timeEnd = System.currentTimeMillis()
+                                if (!dragged && (timeEnd - timeStart) < 300L) {
+                                    if (activeDrag == "DATE") {
+                                        showDateCustomizeSheet = true
+                                    } else {
+                                        showCustomizeSheet = true
+                                    }
+                                }
+                                
                                 isDraggingClock = false
                                 isDraggingDate = false
                                 
@@ -635,7 +667,7 @@ fun ClockEditorPreview(
                                         view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
                                     }
                                 }
-                                if (hasChangedDate) {
+                                if (hasChangedDate && !previewDateAttached) {
                                     if (abs(previewDateX) < 15f) {
                                         previewDateX = 0f
                                         view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
@@ -689,24 +721,39 @@ fun ClockEditorPreview(
                             sharedPath.addPath(paths.mins)
                             sharedPath.computeBounds(sharedPathBounds, true)
 
+                            datePaint.color = previewClockColor
+                            datePaint.textSize = 20f * densityVal * scale
+                            val dateTextWidth = datePaint.measureText(dateText)
+
+                            val scaledDateY = (previewDateY * densityVal + (20f * densityVal)) * scale + dy
+                            val scaledDateX = (realScreenW / 2f) * scale + dx + (previewDateX * densityVal) * scale
+
                             if (isDraggingClock) {
+                                val clockLeft = sharedPathBounds.left * scale + dx - 40f
+                                val clockTop = sharedPathBounds.top * scale + dy - 40f
+                                val clockRight = sharedPathBounds.right * scale + dx + 40f
+                                val clockBottom = sharedPathBounds.bottom * scale + dy + 40f
+                                
+                                val boxLeft = if (previewDateAttached) minOf(clockLeft, scaledDateX - dateTextWidth / 2f - 60f) else clockLeft
+                                val boxTop = if (previewDateAttached) minOf(clockTop, scaledDateY - 60f) else clockTop
+                                val boxRight = if (previewDateAttached) maxOf(clockRight, scaledDateX + dateTextWidth / 2f + 60f) else clockRight
+                                val boxBottom = clockBottom 
+                                
                                 drawRoundRect(
                                     color = Color.White.copy(alpha = 0.3f),
-                                    topLeft = Offset(sharedPathBounds.left * scale + dx - 40f, sharedPathBounds.top * scale + dy - 40f),
-                                    size = Size(sharedPathBounds.width() * scale + 80f, sharedPathBounds.height() * scale + 80f),
+                                    topLeft = Offset(boxLeft, boxTop),
+                                    size = Size(boxRight - boxLeft, boxBottom - boxTop),
                                     cornerRadius = CornerRadius(32f, 32f),
                                     style = Stroke(width = 4f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(20f, 20f), 0f))
                                 )
                             }
 
-                            val scaledDateY = (previewDateY * densityVal + (20f * densityVal)) * scale + dy
-                            val scaledDateX = (realScreenW / 2f) * scale + dx + (previewDateX * densityVal) * scale
-
-                            if (isDraggingDate) {
+                            if (isDraggingDate && !previewDateAttached) {
+                                val halfW = (dateTextWidth / 2f) + 60f
                                 drawRoundRect(
                                     color = Color.White.copy(alpha = 0.3f),
-                                    topLeft = Offset(scaledDateX - 250f, scaledDateY - 60f),
-                                    size = Size(500f, 100f),
+                                    topLeft = Offset(scaledDateX - halfW, scaledDateY - 60f),
+                                    size = Size(halfW * 2f, 100f),
                                     cornerRadius = CornerRadius(32f, 32f),
                                     style = Stroke(width = 4f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(20f, 20f), 0f))
                                 )
@@ -731,8 +778,6 @@ fun ClockEditorPreview(
                                 vectorPaint.color = previewClockColor
                                 canvas.nativeCanvas.drawPath(paths.mins, vectorPaint)
 
-                                datePaint.color = previewClockColor
-                                datePaint.textSize = 20f * densityVal * scale
                                 canvas.nativeCanvas.drawText(
                                     dateText,
                                     scaledDateX,
@@ -804,6 +849,69 @@ fun ClockEditorPreview(
                 contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
                 shape = RoundedCornerShape(24.dp)
             )
+        }
+
+        if (showDateCustomizeSheet) {
+            val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+            AmbientBottomSheet(
+                onDismissRequest = { showDateCustomizeSheet = false },
+                sheetState = sheetState,
+                viewModel = viewModel,
+                currentWallpaper = wallpaper
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp)
+                        .padding(bottom = 32.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("At a Glance Widget", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+                    }
+                    Spacer(Modifier.height(24.dp))
+                    
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text("Attach to Clock", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                            Text("Keep date permanently above clock", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Switch(checked = previewDateAttached, onCheckedChange = { previewDateAttached = it })
+                    }
+                    
+                    Spacer(Modifier.height(24.dp))
+                    
+                    Text("Date Format", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.height(8.dp))
+                    LazyRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        val formatTitles = listOf("Standard", "Short", "CAPS Year", "Full Spell", "Modern Minimal")
+                        items(formatTitles.size) { index ->
+                            FilterChip(
+                                selected = previewDateFormat == index,
+                                onClick = { previewDateFormat = index },
+                                label = { Text(formatTitles[index], fontWeight = FontWeight.Bold) },
+                                shape = RoundedCornerShape(16.dp),
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                                    selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                            )
+                        }
+                    }
+                    
+                    Spacer(Modifier.height(16.dp))
+                }
+            }
         }
 
         if (showCustomizeSheet) {
@@ -1006,6 +1114,8 @@ fun ClockEditorPreview(
                         viewModel.updateDualTone(context, previewDualTone)
                         viewModel.updateClockFont(context, previewClockFont)
                         viewModel.updateClockColor(context, previewClockColor)
+                        viewModel.updateDateLayout(context, previewDateFormat)
+                        viewModel.updateDateAttached(context, previewDateAttached)
                         viewModel.updateClockStyle(context, previewHourSize, previewMinSize, previewStrokeWidth, previewRoundness)
                         viewModel.updateLockscreenClockPosition(context, previewClockX, previewClockY)
                         viewModel.updateLockscreenDatePosition(context, previewDateX, previewDateY)
@@ -1027,6 +1137,8 @@ fun ClockEditorPreview(
                         viewModel.updateDualTone(context, previewDualTone)
                         viewModel.updateClockFont(context, previewClockFont) 
                         viewModel.updateClockColor(context, previewClockColor)
+                        viewModel.updateDateLayout(context, previewDateFormat)
+                        viewModel.updateDateAttached(context, previewDateAttached)
                         viewModel.updateClockStyle(context, previewHourSize, previewMinSize, previewStrokeWidth, previewRoundness)
                         viewModel.updateLockscreenClockPosition(context, previewClockX, previewClockY)
                         viewModel.updateLockscreenDatePosition(context, previewDateX, previewDateY)

@@ -106,6 +106,9 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     var clockFont by mutableStateOf(clockPrefs.getString("clock_font", "default") ?: "default")
     var isDualToneEnabled by mutableStateOf(clockPrefs.getBoolean("clock_dual_tone", true))
     var clockLayout by mutableIntStateOf(clockPrefs.getInt("clock_layout", 0))
+    
+    var dateLayout by mutableIntStateOf(clockPrefs.getInt("date_format", 0))
+    var isDateAttached by mutableStateOf(clockPrefs.getBoolean("date_attached", true))
 
     var isClockStretchEnabled by mutableStateOf(clockPrefs.getBoolean("clock_stretch", false))
     var clockCollisionMap by mutableStateOf(clockPrefs.getString("clock_collision_map", "") ?: "")
@@ -143,6 +146,24 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         
         val intent = android.content.Intent("com.android.CaveArt.UPDATE_CLOCK_LAYOUT")
         intent.putExtra("clock_layout", layout)
+        context.sendBroadcast(intent)
+    }
+    
+    fun updateDateLayout(context: Context, formatIndex: Int) {
+        dateLayout = formatIndex
+        clockPrefs.edit().putInt("date_format", formatIndex).apply()
+        
+        val intent = android.content.Intent("com.android.CaveArt.UPDATE_DATE_FORMAT")
+        intent.putExtra("date_format", formatIndex)
+        context.sendBroadcast(intent)
+    }
+
+    fun updateDateAttached(context: Context, attached: Boolean) {
+        isDateAttached = attached
+        clockPrefs.edit().putBoolean("date_attached", attached).apply()
+        
+        val intent = android.content.Intent("com.android.CaveArt.UPDATE_DATE_ATTACHED")
+        intent.putExtra("date_attached", attached)
         context.sendBroadcast(intent)
     }
 
