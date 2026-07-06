@@ -88,6 +88,12 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         _isAmbientBlurEnabled.value = enabled 
         prefs.edit().putBoolean("ambient_blur", enabled).apply()
     }
+
+    var scrollStyle by mutableIntStateOf(clockPrefs.getInt("scroll_style", 0))
+    fun updateScrollStyle(style: Int) {
+        scrollStyle = style
+        clockPrefs.edit().putInt("scroll_style", style).apply()
+    }
     
     var isLockscreenClockPreviewVisible by mutableStateOf(false)
 
@@ -125,68 +131,45 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     fun updateClockFont(context: Context, fontFilename: String) {
         clockFont = fontFilename
         clockPrefs.edit().putString("clock_font", fontFilename).apply()
-        
-        val intent = android.content.Intent("com.android.CaveArt.UPDATE_CLOCK_FONT")
-        intent.putExtra("clock_font", fontFilename)
-        context.sendBroadcast(intent)
+        context.sendBroadcast(android.content.Intent("com.android.CaveArt.UPDATE_CLOCK_FONT").apply { putExtra("clock_font", fontFilename) })
     }
 
     fun updateDualTone(context: Context, enabled: Boolean) {
         isDualToneEnabled = enabled
         clockPrefs.edit().putBoolean("clock_dual_tone", enabled).apply()
-        
-        val intent = android.content.Intent("com.android.CaveArt.UPDATE_CLOCK_DUAL_TONE")
-        intent.putExtra("clock_dual_tone", enabled)
-        context.sendBroadcast(intent)
+        context.sendBroadcast(android.content.Intent("com.android.CaveArt.UPDATE_CLOCK_DUAL_TONE").apply { putExtra("clock_dual_tone", enabled) })
     }
 
     fun updateClockLayout(context: Context, layout: Int) {
         clockLayout = layout
         clockPrefs.edit().putInt("clock_layout", layout).apply()
-        
-        val intent = android.content.Intent("com.android.CaveArt.UPDATE_CLOCK_LAYOUT")
-        intent.putExtra("clock_layout", layout)
-        context.sendBroadcast(intent)
+        context.sendBroadcast(android.content.Intent("com.android.CaveArt.UPDATE_CLOCK_LAYOUT").apply { putExtra("clock_layout", layout) })
     }
     
     fun updateDateLayout(context: Context, formatIndex: Int) {
         dateLayout = formatIndex
         clockPrefs.edit().putInt("date_format", formatIndex).apply()
-        
-        val intent = android.content.Intent("com.android.CaveArt.UPDATE_DATE_FORMAT")
-        intent.putExtra("date_format", formatIndex)
-        context.sendBroadcast(intent)
+        context.sendBroadcast(android.content.Intent("com.android.CaveArt.UPDATE_DATE_FORMAT").apply { putExtra("date_format", formatIndex) })
     }
 
     fun updateDateAttached(context: Context, attached: Boolean) {
         isDateAttached = attached
         clockPrefs.edit().putBoolean("date_attached", attached).apply()
-        
-        val intent = android.content.Intent("com.android.CaveArt.UPDATE_DATE_ATTACHED")
-        intent.putExtra("date_attached", attached)
-        context.sendBroadcast(intent)
+        context.sendBroadcast(android.content.Intent("com.android.CaveArt.UPDATE_DATE_ATTACHED").apply { putExtra("date_attached", attached) })
     }
 
     fun updateLockscreenClockPosition(context: Context, x: Float, y: Float) {
         lockscreenClockOffsetX = x
         lockscreenClockOffsetY = y
         clockPrefs.edit().putFloat("clock_x", x).putFloat("clock_y", y).apply()
-        
-        val intent = android.content.Intent("com.android.CaveArt.UPDATE_CLOCK_POSITION")
-        intent.putExtra("clock_x", x)
-        intent.putExtra("clock_y", y)
-        context.sendBroadcast(intent)
+        context.sendBroadcast(android.content.Intent("com.android.CaveArt.UPDATE_CLOCK_POSITION").apply { putExtra("clock_x", x); putExtra("clock_y", y) })
     }
     
     fun updateLockscreenDatePosition(context: Context, x: Float, y: Float) {
         lockscreenDateOffsetX = x
         lockscreenDateOffsetY = y
         clockPrefs.edit().putFloat("date_x", x).putFloat("date_y", y).apply()
-        
-        val intent = android.content.Intent("com.android.CaveArt.UPDATE_DATE_POSITION")
-        intent.putExtra("date_x", x)
-        intent.putExtra("date_y", y)
-        context.sendBroadcast(intent)
+        context.sendBroadcast(android.content.Intent("com.android.CaveArt.UPDATE_DATE_POSITION").apply { putExtra("date_x", x); putExtra("date_y", y) })
     }
 
     fun updateClockStyle(context: Context, hourSize: Float, minuteSize: Float, strokeWidth: Float, roundness: Float) {
@@ -202,21 +185,18 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
             .putFloat("clock_roundness", roundness)
             .apply()
 
-        val intent = android.content.Intent("com.android.CaveArt.UPDATE_CLOCK_STYLE")
-        intent.putExtra("clock_hour_size", hourSize)
-        intent.putExtra("clock_minute_size", minuteSize)
-        intent.putExtra("clock_stroke_width", strokeWidth)
-        intent.putExtra("clock_roundness", roundness)
-        context.sendBroadcast(intent)
+        context.sendBroadcast(android.content.Intent("com.android.CaveArt.UPDATE_CLOCK_STYLE").apply { 
+            putExtra("clock_hour_size", hourSize)
+            putExtra("clock_minute_size", minuteSize)
+            putExtra("clock_stroke_width", strokeWidth)
+            putExtra("clock_roundness", roundness)
+        })
     }
     
     fun updateClockColor(context: Context, color: Int) {
         clockColor = color
         clockPrefs.edit().putInt("clock_color", color).apply()
-        
-        val intent = android.content.Intent("com.android.CaveArt.UPDATE_CLOCK_COLOR")
-        intent.putExtra("clock_color", color)
-        context.sendBroadcast(intent)
+        context.sendBroadcast(android.content.Intent("com.android.CaveArt.UPDATE_CLOCK_COLOR").apply { putExtra("clock_color", color) })
     }
 
     fun toggleClockStretch(context: Context, enabled: Boolean, mask: Bitmap?, screenW: Float, screenH: Float) {
@@ -239,7 +219,6 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     
     fun autoFitClockToSubject(context: Context, mask: Bitmap?, screenW: Float, screenH: Float) {
         if (mask == null) return
-        
         viewModelScope.launch(Dispatchers.Default) {
             val density = context.resources.displayMetrics.density
             val result = AdaptiveClockHelper.calculateAutoFit(
@@ -293,29 +272,14 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     }
     fun updateAnimParam(key: String, value: Float) { currentAnimParams = currentAnimParams.toMutableMap().apply { put(key, value) } }
     
-    var baseWallpapers by mutableStateOf<List<Wallpaper>>(emptyList())
     var allWallpapers by mutableStateOf<List<Wallpaper>>(emptyList())
-    var allTags by mutableStateOf<List<String>>(listOf("All"))
-    var selectedTag by mutableStateOf("All")
-        private set
-
-    var debugResults by mutableStateOf<List<DebugResult>>(emptyList())
-    var isRunningDebug by mutableStateOf(false)
-
-    fun selectTag(tag: String) { selectedTag = tag }
-
-    val filteredWallpapers by derivedStateOf {
-        if (selectedTag == "All") allWallpapers 
-        else baseWallpapers.filter { it.tag == selectedTag || it.mlTags.contains(selectedTag) }
-    }
 
     init {
         viewModelScope.launch {
             isLoading = true
             launch(MLThread.dispatcher) { try { segmentationHelper.warmUp(); refineHelper.warmUp(); mattingHelper.warmUp() } catch (e: Exception) {} }
             val initialList = loadBasicWallpaperList(application.applicationContext)
-            baseWallpapers = initialList; allWallpapers = initialList
-            updateTags()
+            allWallpapers = initialList
             isLoading = false
             scanWallpapersForTags(application.applicationContext)
             updateAnimationStyle(currentAnimationStyle)
@@ -324,10 +288,7 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     
     fun addGalleryWallpaper(uri: Uri) {
         val newWallpaper = Wallpaper(id = UUID.randomUUID().toString(), uri = uri, title = "Gallery Image", tag = "Gallery")
-        baseWallpapers = listOf(newWallpaper) + baseWallpapers
-        allWallpapers = baseWallpapers
-        updateTags()
-        selectTag("All")
+        allWallpapers = listOf(newWallpaper) + allWallpapers
         viewModelScope.launch { scanSingleWallpaper(getApplication(), newWallpaper) }
     }
     
@@ -421,7 +382,7 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     private suspend fun scanWallpapersForTags(context: Context) = withContext(Dispatchers.IO) {
-        baseWallpapers.toList().forEach { scanSingleWallpaper(context, it) }
+        allWallpapers.toList().forEach { scanSingleWallpaper(context, it) }
     }
     
     private suspend fun scanSingleWallpaper(context: Context, wallpaper: Wallpaper) {
@@ -436,15 +397,11 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         }
         if (detectedTags.isNotEmpty()) {
             wallpaper.mlTags = detectedTags
-            withContext(Dispatchers.Main) { updateTags() }
         }
     }
 
-    private fun updateTags() {
-        val originalTags = baseWallpapers.map { it.tag }
-        val mlKitTags = baseWallpapers.flatMap { it.mlTags }
-        allTags = listOf("All") + (originalTags + mlKitTags).distinct().sorted()
-    }
+    var debugResults by mutableStateOf<List<DebugResult>>(emptyList())
+    var isRunningDebug by mutableStateOf(false)
 
     fun runModelDiagnostics(context: Context, target: Wallpaper?) {
         if (target == null) return

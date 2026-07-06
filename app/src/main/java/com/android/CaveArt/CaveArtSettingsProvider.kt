@@ -34,6 +34,7 @@ class CaveArtSettingsProvider : ContentProvider() {
             "date_size" -> cursor.addRow(arrayOf(prefs.getFloat("date_size", 20f)))
             "date_format" -> cursor.addRow(arrayOf(prefs.getInt("date_format", 0)))
             "date_attached" -> cursor.addRow(arrayOf(if (prefs.getBoolean("date_attached", true)) 1 else 0))
+            "scroll_style" -> cursor.addRow(arrayOf(prefs.getInt("scroll_style", 0)))
             "clock_hour_size" -> cursor.addRow(arrayOf(prefs.getFloat("clock_hour_size", 100f)))
             "clock_minute_size" -> cursor.addRow(arrayOf(prefs.getFloat("clock_minute_size", 75f)))
             "clock_stroke_width" -> cursor.addRow(arrayOf(prefs.getFloat("clock_stroke_width", 8f)))
