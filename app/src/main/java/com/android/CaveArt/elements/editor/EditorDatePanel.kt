@@ -12,7 +12,12 @@ import androidx.compose.ui.unit.dp
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun EditorDatePanel(viewModel: WallpaperViewModel, wallpaper: Wallpaper, state: LockscreenEditorState, onDismiss: () -> Unit) {
+fun EditorDatePanel(
+    viewModel: WallpaperViewModel, 
+    wallpaper: Wallpaper, 
+    state: ClockStudioState, 
+    onDismiss: () -> Unit
+) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     AmbientBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState, viewModel = viewModel, currentWallpaper = wallpaper) {
         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 32.dp)) {

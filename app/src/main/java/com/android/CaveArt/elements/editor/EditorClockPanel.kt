@@ -13,12 +13,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.LineWeight
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.RoundedCorner
-import androidx.compose.material.icons.filled.ScreenLockPortrait
 import androidx.compose.material.icons.filled.Transform
-import androidx.compose.material.icons.filled.Wallpaper
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberCoroutineScope
@@ -34,7 +30,18 @@ import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun EditorClockPanel(viewModel: WallpaperViewModel, wallpaper: Wallpaper, state: LockscreenEditorState, extractedColors: List<Int>, availableFonts: List<String>, previewMask: android.graphics.Bitmap?, realScreenW: Float, realScreenH: Float, densityVal: Float, onDismiss: () -> Unit) {
+fun EditorClockPanel(
+    viewModel: WallpaperViewModel, 
+    wallpaper: Wallpaper, 
+    state: ClockStudioState, 
+    extractedColors: List<Int>, 
+    availableFonts: List<String>, 
+    previewMask: android.graphics.Bitmap?, 
+    realScreenW: Float, 
+    realScreenH: Float, 
+    densityVal: Float, 
+    onDismiss: () -> Unit
+) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
     AmbientBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState, viewModel = viewModel, currentWallpaper = wallpaper) {
@@ -89,28 +96,6 @@ fun EditorClockPanel(viewModel: WallpaperViewModel, wallpaper: Wallpaper, state:
                 ) { Icon(Icons.Default.AutoFixHigh, null); Spacer(Modifier.width(8.dp)); Text("Smart Fit", fontWeight = FontWeight.Bold) }
                 Button(onClick = { state.stretchEnabled.value = !state.stretchEnabled.value }, modifier = Modifier.weight(1f).height(56.dp), shape = RoundedCornerShape(16.dp), colors = if (state.stretchEnabled.value) ButtonDefaults.buttonColors() else ButtonDefaults.filledTonalButtonColors()) { Icon(Icons.Default.Transform, null); Spacer(Modifier.width(8.dp)); Text("Adaptive", fontWeight = FontWeight.Bold) }
             }
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun EditorApplyPanel(viewModel: WallpaperViewModel, wallpaper: Wallpaper, state: LockscreenEditorState, previewMask: android.graphics.Bitmap?, realScreenW: Float, realScreenH: Float, context: android.content.Context, onApplyClockAndWallpaperClick: () -> Unit, onDismiss: () -> Unit) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    AmbientBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState, viewModel = viewModel, currentWallpaper = wallpaper) {
-        Column(modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp).navigationBarsPadding()) {
-            Text("Apply Lockscreen", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black, modifier = Modifier.padding(bottom = 24.dp))
-            DestinationButton(Icons.Default.ScreenLockPortrait, "Clock Layout Only", "Update clock position and style", false) {
-                viewModel.updateClockLayout(context, state.clockLayout.intValue); viewModel.updateDualTone(context, state.dualTone.value); viewModel.updateClockFont(context, state.clockFont.value); viewModel.updateClockColor(context, state.clockColor.intValue); viewModel.updateDateLayout(context, state.dateFormat.intValue); viewModel.updateDateAttached(context, state.dateAttached.value); viewModel.updateClockStyle(context, state.hourSize.floatValue, state.minSize.floatValue, state.strokeWidth.floatValue, state.roundness.floatValue); viewModel.updateLockscreenClockPosition(context, state.clockX.floatValue, state.clockY.floatValue); viewModel.updateLockscreenDatePosition(context, state.dateX.floatValue, state.dateY.floatValue); viewModel.toggleClockStretch(context, state.stretchEnabled.value, previewMask, realScreenW, realScreenH)
-                viewModel.isLockscreenClockPreviewVisible = false
-                android.widget.Toast.makeText(context, "Clock Layout Applied", android.widget.Toast.LENGTH_SHORT).show(); onDismiss()
-            }
-            Spacer(Modifier.height(12.dp))
-            DestinationButton(Icons.Default.Wallpaper, "Clock + Wallpaper", "Update layout and set static wallpaper", false) {
-                viewModel.updateClockLayout(context, state.clockLayout.intValue); viewModel.updateDualTone(context, state.dualTone.value); viewModel.updateClockFont(context, state.clockFont.value); viewModel.updateClockColor(context, state.clockColor.intValue); viewModel.updateDateLayout(context, state.dateFormat.intValue); viewModel.updateDateAttached(context, state.dateAttached.value); viewModel.updateClockStyle(context, state.hourSize.floatValue, state.minSize.floatValue, state.strokeWidth.floatValue, state.roundness.floatValue); viewModel.updateLockscreenClockPosition(context, state.clockX.floatValue, state.clockY.floatValue); viewModel.updateLockscreenDatePosition(context, state.dateX.floatValue, state.dateY.floatValue); viewModel.toggleClockStretch(context, state.stretchEnabled.value, previewMask, realScreenW, realScreenH)
-                onApplyClockAndWallpaperClick(); onDismiss()
-            }
-            Spacer(Modifier.height(16.dp))
         }
     }
 }

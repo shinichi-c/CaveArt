@@ -15,9 +15,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asComposePath
 import androidx.compose.ui.graphics.asImageBitmap
@@ -71,8 +69,12 @@ fun AmbientBottomSheet(
     content: @Composable ColumnScope.() -> Unit
 ) {
     ModalBottomSheet(
-        onDismissRequest = onDismissRequest, sheetState = sheetState,
-        containerColor = Color.Transparent, dragHandle = null
+        onDismissRequest = onDismissRequest, 
+        sheetState = sheetState,
+        containerColor = Color.Transparent, 
+        dragHandle = null,
+        
+        scrimColor = Color.Transparent 
     ) {
         Box(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))) {
             if (viewModel.isAmbientBlurEnabled && currentWallpaper != null) {
