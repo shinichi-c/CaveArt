@@ -38,90 +38,193 @@ fun SettingsSheet(viewModel: WallpaperViewModel, currentWallpaper: Wallpaper?, o
             modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 24.dp, vertical = 8.dp).verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text("App Settings", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 16.dp), color = MaterialTheme.colorScheme.onSurface)
+            StaggeredRow(0) { Text("App Settings", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black, modifier = Modifier.padding(bottom = 16.dp), color = MaterialTheme.colorScheme.onSurface) }
             
-            Column(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
-                Text("Fast Scroll Style", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
-                Spacer(Modifier.height(8.dp))
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    val styles = listOf("Original", "Vision Pill", "Elastic", "Hover Tooltip", "Magnetic Wave")
-                    items(styles.size) { index ->
-                        val isSelected = viewModel.scrollStyle == index
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Card(
-                                modifier = Modifier
-                                    .size(100.dp, 60.dp)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .border(if (isSelected) 3.dp else 1.dp, if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
-                                    .clickable { viewModel.updateScrollStyle(index) },
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                            ) {
-                                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                    LiveScrollTile(index)
+            StaggeredRow(1) {
+                Column(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
+                    Text("Fast Scroll Style", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                    Spacer(Modifier.height(8.dp))
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        val styles = listOf("Original", "Vision Pill", "Elastic", "Hover Tooltip", "Magnetic Wave")
+                        items(styles.size) { index ->
+                            val isSelected = viewModel.scrollStyle == index
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Card(
+                                    modifier = Modifier
+                                        .size(100.dp, 60.dp)
+                                        .clip(RoundedCornerShape(16.dp))
+                                        .border(if (isSelected) 3.dp else 1.dp, if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp))
+                                        .clickable { viewModel.updateScrollStyle(index) },
+                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                                ) {
+                                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                        LiveScrollTile(index)
+                                    }
+                                }
+                                Spacer(Modifier.height(4.dp))
+                                Text(styles[index], style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = if(isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+                }
+            }
+
+            StaggeredRow(2) {
+                Column(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
+                    HorizontalDivider(modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                    Text("Dock Style", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                    Spacer(Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        val styles = listOf(false, true)
+                        val labels = listOf("Grounded", "Floating")
+                        styles.forEachIndexed { index, floating ->
+                            val isSelected = viewModel.isFloatingDockEnabled == floating
+                            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
+                                Card(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(72.dp)
+                                        .clip(RoundedCornerShape(16.dp))
+                                        .border(if (isSelected) 3.dp else 1.dp, if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp))
+                                        .clickable { viewModel.setFloatingDockEnabled(floating) },
+                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                                ) {
+                                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                        LiveDockTile(isFloating = floating)
+                                    }
+                                }
+                                Spacer(Modifier.height(4.dp))
+                                Text(labels[index], style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = if(isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+                }
+            }
+
+            StaggeredRow(3) {
+                Column {
+                    HorizontalDivider(modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                    Row(modifier = Modifier.fillMaxWidth().height(64.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Fixed Wallpaper Alignment", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                            Text(if (viewModel.isFixedAlignmentEnabled) "Image remains static (No Parallax)" else "Image scrolls with screen (Parallax)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Spacer(Modifier.width(16.dp))
+                        Switch(checked = viewModel.isFixedAlignmentEnabled, onCheckedChange = { viewModel.setFixedAlignmentEnabled(it) })
+                    }
+                }
+            }
+
+            StaggeredRow(4) {
+                Column {
+                    HorizontalDivider(modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                    Row(modifier = Modifier.fillMaxWidth().height(64.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Fast Scroll Haptics", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                            Text(if (viewModel.isHapticsEnabled) "Tap/vibration feedback is ON" else "Tap/vibration feedback is OFF", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Spacer(Modifier.width(16.dp))
+                        Switch(checked = viewModel.isHapticsEnabled, onCheckedChange = { viewModel.setHapticsEnabled(it) })
+                    }
+                }
+            }
+
+            StaggeredRow(5) {
+                Column {
+                    HorizontalDivider(modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                    Row(modifier = Modifier.fillMaxWidth().height(64.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Ambient Background", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                            Text(if (viewModel.isAmbientBlurEnabled) "Dynamic blurred wallpaper behind UI" else "Solid background color", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Spacer(Modifier.width(16.dp))
+                        Switch(checked = viewModel.isAmbientBlurEnabled, onCheckedChange = { viewModel.setAmbientBlurEnabled(it) })
+                    }
+                }
+            }
+
+            StaggeredRow(6) {
+                Column {
+                    Spacer(modifier = Modifier.height(24.dp))
+                    Button(onClick = { viewModel.runModelDiagnostics(context, currentWallpaper) }, enabled = !viewModel.isRunningDebug && currentWallpaper != null, modifier = Modifier.fillMaxWidth()) {
+                        if (viewModel.isRunningDebug) CircularProgressIndicator(Modifier.size(20.dp), color = Color.White) else Text("RUN MODEL DIAGNOSTIC", fontWeight = FontWeight.Bold)
+                    }
+                    
+                    if (viewModel.debugResults.isNotEmpty()) {
+                        viewModel.debugResults.forEach { res ->
+                            Card(modifier = Modifier.padding(top = 16.dp).fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.6f))) {
+                                Column(Modifier.padding(16.dp)) {
+                                    Text(res.testName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
+                                    Text("Input: ${res.inputType}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.secondary)
+                                    if (res.error != null) Text("Error: ${res.error}", color = Color.Red)
+                                    else {
+                                        Text("Min: ${"%.2f".format(res.minOutput)} Max: ${"%.2f".format(res.maxOutput)}")
+                                        Spacer(Modifier.height(8.dp))
+                                        if (res.previewBitmap != null) androidx.compose.foundation.Image(bitmap = res.previewBitmap.asImageBitmap(), contentDescription = null, modifier = Modifier.fillMaxWidth().height(200.dp).background(Color.Black))
+                                    }
                                 }
                             }
-                            Spacer(Modifier.height(4.dp))
-                            Text(styles[index], style = MaterialTheme.typography.labelSmall, color = if(isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
+                    Spacer(modifier = Modifier.height(16.dp))
                 }
             }
+        }
+    }
+}
 
-            HorizontalDivider(modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+@Composable
+fun LiveDockTile(isFloating: Boolean) {
+    val infiniteTransition = rememberInfiniteTransition(label = "LiveDockTile")
+    val floatAnim by infiniteTransition.animateFloat(
+        initialValue = 0f, targetValue = 1f, 
+        animationSpec = infiniteRepeatable(animation = tween(1500, easing = FastOutSlowInEasing), repeatMode = RepeatMode.Reverse),
+        label = "DockProgress"
+    )
+    
+    val color = MaterialTheme.colorScheme.primary
+    val trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f)
 
-            Row(modifier = Modifier.fillMaxWidth().height(64.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("Fixed Wallpaper Alignment", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
-                    Text(if (viewModel.isFixedAlignmentEnabled) "Image remains static (No Parallax)" else "Image scrolls with screen (Parallax)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                Spacer(Modifier.width(16.dp))
-                Switch(checked = viewModel.isFixedAlignmentEnabled, onCheckedChange = { viewModel.setFixedAlignmentEnabled(it) })
-            }
+    Canvas(modifier = Modifier.fillMaxSize()) {
+        val w = size.width
+        val h = size.height
 
-            HorizontalDivider(modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-            
-            Row(modifier = Modifier.fillMaxWidth().height(64.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("Fast Scroll Haptics", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
-                    Text(if (viewModel.isHapticsEnabled) "Tap/vibration feedback is ON" else "Tap/vibration feedback is OFF", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                Spacer(Modifier.width(16.dp))
-                Switch(checked = viewModel.isHapticsEnabled, onCheckedChange = { viewModel.setHapticsEnabled(it) })
-            }
+        val phoneW = w * 0.45f
+        val phoneH = h * 0.8f
+        val phoneLeft = (w - phoneW) / 2f
+        val phoneTop = (h - phoneH) / 2f
 
-            HorizontalDivider(modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-            
-            Row(modifier = Modifier.fillMaxWidth().height(64.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("Ambient Background", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
-                    Text(if (viewModel.isAmbientBlurEnabled) "Dynamic blurred wallpaper behind UI" else "Solid background color", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                Spacer(Modifier.width(16.dp))
-                Switch(checked = viewModel.isAmbientBlurEnabled, onCheckedChange = { viewModel.setAmbientBlurEnabled(it) })
-            }
+        drawRoundRect(
+            color = trackColor,
+            topLeft = Offset(phoneLeft, phoneTop),
+            size = Size(phoneW, phoneH),
+            cornerRadius = CornerRadius(8.dp.toPx())
+        )
 
-            Spacer(modifier = Modifier.height(24.dp))
-            Button(onClick = { viewModel.runModelDiagnostics(context, currentWallpaper) }, enabled = !viewModel.isRunningDebug && currentWallpaper != null, modifier = Modifier.fillMaxWidth()) {
-                if (viewModel.isRunningDebug) CircularProgressIndicator(Modifier.size(20.dp), color = Color.White) else Text("RUN MODEL DIAGNOSTIC")
-            }
-            
-            if (viewModel.debugResults.isNotEmpty()) {
-                viewModel.debugResults.forEach { res ->
-                    Card(modifier = Modifier.padding(top = 16.dp).fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.6f))) {
-                        Column(Modifier.padding(16.dp)) {
-                            Text(res.testName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                            Text("Input: ${res.inputType}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.secondary)
-                            if (res.error != null) Text("Error: ${res.error}", color = Color.Red)
-                            else {
-                                Text("Min: ${"%.2f".format(res.minOutput)} Max: ${"%.2f".format(res.maxOutput)}")
-                                Spacer(Modifier.height(8.dp))
-                                if (res.previewBitmap != null) androidx.compose.foundation.Image(bitmap = res.previewBitmap.asImageBitmap(), contentDescription = null, modifier = Modifier.fillMaxWidth().height(200.dp).background(Color.Black))
-                            }
-                        }
-                    }
-                }
-            }
-            Spacer(modifier = Modifier.height(16.dp))
+        if (isFloating) {
+            val dockW = phoneW * 0.8f
+            val dockH = 8.dp.toPx()
+            val hoverY = floatAnim * 3.dp.toPx()
+            drawRoundRect(
+                color = color,
+                topLeft = Offset(phoneLeft + (phoneW - dockW) / 2f, phoneTop + phoneH - dockH - 6.dp.toPx() - hoverY),
+                size = Size(dockW, dockH),
+                cornerRadius = CornerRadius(4.dp.toPx())
+            )
+        } else {
+            val dockW = phoneW
+            val dockH = 12.dp.toPx() + (floatAnim * 2.dp.toPx()) 
+            drawRoundRect(
+                color = color,
+                topLeft = Offset(phoneLeft, phoneTop + phoneH - dockH),
+                size = Size(dockW, dockH),
+                cornerRadius = CornerRadius(8.dp.toPx()) 
+            )
+            drawRect(
+                color = color,
+                topLeft = Offset(phoneLeft, phoneTop + phoneH - 6.dp.toPx()),
+                size = Size(dockW, 6.dp.toPx())
+            )
         }
     }
 }
