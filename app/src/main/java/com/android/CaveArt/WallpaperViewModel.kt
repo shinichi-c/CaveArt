@@ -88,6 +88,13 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         _isAmbientBlurEnabled.value = enabled 
         prefs.edit().putBoolean("ambient_blur", enabled).apply()
     }
+    
+    private val _isFloatingDockEnabled = mutableStateOf(prefs.getBoolean("floating_dock", true))
+    val isFloatingDockEnabled: Boolean by _isFloatingDockEnabled
+    fun setFloatingDockEnabled(enabled: Boolean) {
+        _isFloatingDockEnabled.value = enabled
+        prefs.edit().putBoolean("floating_dock", enabled).apply()
+    }
 
     var scrollStyle by mutableIntStateOf(clockPrefs.getInt("scroll_style", 0))
     fun updateScrollStyle(style: Int) {

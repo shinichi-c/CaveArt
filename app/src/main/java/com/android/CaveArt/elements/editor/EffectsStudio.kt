@@ -7,6 +7,7 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -19,6 +20,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -32,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.android.CaveArt.animations.AnimationFactory
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -40,6 +43,7 @@ import kotlinx.coroutines.withContext
 fun EffectsStudio(
     wallpaper: Wallpaper,
     viewModel: WallpaperViewModel,
+    sharedElementModifier: Modifier = Modifier,
     onBack: () -> Unit,
     onApplyRequested: (Int) -> Unit
 ) {
@@ -47,6 +51,13 @@ fun EffectsStudio(
     var currentBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var previewOriginal by remember { mutableStateOf<Bitmap?>(null) }
     var previewMask by remember { mutableStateOf<Bitmap?>(null) }
+    val isDarkTheme = isSystemInDarkTheme()
+    
+    var transitionFinished by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        delay(350)
+        transitionFinished = true
+    }
     
     var extractedColors by remember { mutableStateOf(listOf<Int>()) }
     var showCustomizeSheet by remember { mutableStateOf(false) }
@@ -55,6 +66,7 @@ fun EffectsStudio(
     var isExtractingColors by remember { mutableStateOf(true) }
     
     LaunchedEffect(wallpaper) {
+        delay(350)
         isExtractingColors = true
         previewMask = viewModel.getMaskForClock(context, wallpaper)
         withContext(Dispatchers.IO) {
@@ -64,16 +76,23 @@ fun EffectsStudio(
                     val pixels = IntArray(bitmap.width * bitmap.height)
                     bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
                     var finalColors = com.materialkolor.score.Score.score(com.materialkolor.quantize.QuantizerCelebi.quantize(pixels, 128)).distinct().take(5)
-                    if (finalColors.size < 5 && finalColors.isNotEmpty()) {
-                        val hct = com.materialkolor.hct.Hct.fromInt(finalColors.first())
-                        finalColors = (finalColors + listOf(com.materialkolor.hct.Hct.from(hct.hue + 60.0, hct.chroma, hct.tone).toInt(), com.materialkolor.hct.Hct.from(hct.hue - 60.0, hct.chroma, hct.tone).toInt(), com.materialkolor.hct.Hct.from(hct.hue + 180.0, hct.chroma, hct.tone).toInt(), com.materialkolor.hct.Hct.from(hct.hue, hct.chroma, 30.0).toInt(), com.materialkolor.hct.Hct.from(hct.hue, hct.chroma, 80.0).toInt())).distinct().take(5)
-                    }
+                    
+                    val hct = com.materialkolor.hct.Hct.fromInt(finalColors.firstOrNull() ?: android.graphics.Color.WHITE)
+                    val hue = hct.hue
+                    val tonePrimary = if (isDarkTheme) 85.0 else 40.0
+                    val toneSecondary = if (isDarkTheme) 80.0 else 30.0
+                    
+                    finalColors = listOf(
+                        com.materialkolor.hct.Hct.from(hue, maxOf(48.0, hct.chroma), tonePrimary).toInt(),
+                        com.materialkolor.hct.Hct.from(hue, 16.0, toneSecondary).toInt(),
+                        com.materialkolor.hct.Hct.from(hue + 60.0, 24.0, tonePrimary).toInt(),
+                        com.materialkolor.hct.Hct.from(hue, 4.0, if(isDarkTheme) 90.0 else 20.0).toInt(),
+                        com.materialkolor.hct.Hct.from(hue + 180.0, maxOf(48.0, hct.chroma), tonePrimary).toInt()
+                    )
+                    
                     withContext(Dispatchers.Main) { 
                         extractedColors = finalColors
-                        
-                        if (finalColors.isNotEmpty()) {
-                            viewModel.updateMagicConfig(viewModel.currentMagicShape, finalColors.first())
-                        }
+                        if (finalColors.isNotEmpty()) viewModel.updateMagicConfig(viewModel.currentMagicShape, finalColors.first())
                     }
                     bitmap.recycle()
                 }
@@ -92,6 +111,7 @@ fun EffectsStudio(
         viewModel.isFilamentEnabled, viewModel.currentMagicShape, viewModel.currentBackgroundColor, 
         viewModel.is3DPopEnabled, viewModel.magicScale, viewModel.isCentered, viewModel.currentAnimationStyle
     ) {
+        if (!transitionFinished) delay(350)
         if (viewModel.isFilamentEnabled) {
             currentBitmap = null
         } else if (viewModel.isAnimationEnabled) {
@@ -105,23 +125,22 @@ fun EffectsStudio(
         }
     }
 
-    val isDarkTheme = androidx.compose.foundation.isSystemInDarkTheme()
     val overlayColor = if (isDarkTheme) Color.Black.copy(alpha = 0.4f) else MaterialTheme.colorScheme.surface.copy(alpha = 0.6f)
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.surface,
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("Effects Studio", fontWeight = FontWeight.Bold) },
+                title = { Text("Effects Studio", style = MaterialTheme.typography.headlineMedium) },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back") } },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
             )
         },
         bottomBar = {
             Row(modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 24.dp, top = 16.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-                ExtendedFloatingActionButton(onClick = { showCustomizeSheet = true }, icon = { Icon(Icons.Default.Palette, null) }, text = { Text("Customize") }, containerColor = MaterialTheme.colorScheme.secondaryContainer, contentColor = MaterialTheme.colorScheme.onSecondaryContainer, shape = RoundedCornerShape(24.dp))
+                ExtendedFloatingActionButton(onClick = { showCustomizeSheet = true }, icon = { Icon(Icons.Default.Palette, null) }, text = { Text("Customize") }, containerColor = MaterialTheme.colorScheme.secondaryContainer, contentColor = MaterialTheme.colorScheme.onSecondaryContainer, shape = MaterialTheme.shapes.extraLarge)
                 Spacer(Modifier.width(16.dp))
-                ExtendedFloatingActionButton(onClick = { showApplyOptions = true }, icon = { Icon(Icons.Default.Check, null) }, text = { Text("Done") }, containerColor = MaterialTheme.colorScheme.primaryContainer, contentColor = MaterialTheme.colorScheme.onPrimaryContainer, shape = RoundedCornerShape(24.dp))
+                ExtendedFloatingActionButton(onClick = { showApplyOptions = true }, icon = { Icon(Icons.Default.Check, null) }, text = { Text("Done") }, containerColor = MaterialTheme.colorScheme.primaryContainer, contentColor = MaterialTheme.colorScheme.onPrimaryContainer, shape = MaterialTheme.shapes.extraLarge)
             }
         }
     ) { padding ->
@@ -129,7 +148,18 @@ fun EffectsStudio(
             val metrics = context.resources.displayMetrics
             val screenAspectRatio = metrics.widthPixels.toFloat() / metrics.heightPixels.toFloat()
             
-            Card(modifier = Modifier.fillMaxHeight().aspectRatio(screenAspectRatio, matchHeightConstraintsFirst = true), shape = RoundedCornerShape(28.dp), elevation = CardDefaults.cardElevation(12.dp)) {
+            val targetElevation = if (!transitionFinished || showCustomizeSheet || showApplyOptions) 0.dp else 24.dp
+            val cardElevation by animateDpAsState(targetElevation, label = "cardElevation")
+
+            Card(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .aspectRatio(screenAspectRatio, matchHeightConstraintsFirst = true)
+                    .then(sharedElementModifier)
+                    .clip(MaterialTheme.shapes.extraLarge),
+                shape = MaterialTheme.shapes.extraLarge, 
+                elevation = CardDefaults.cardElevation(cardElevation)
+            ) {
                 Box(modifier = Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
                     
                     if (isExtractingColors || (currentBitmap == null && !viewModel.isFilamentEnabled)) {
@@ -170,10 +200,12 @@ fun EffectsStudio(
             val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
             AmbientBottomSheet(onDismissRequest = { showApplyOptions = false }, sheetState = sheetState, viewModel = viewModel, currentWallpaper = wallpaper) {
                 Column(modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp).navigationBarsPadding()) {
-                    Text("Apply Live Effect", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black, modifier = Modifier.padding(bottom = 24.dp))
-                    DestinationButton(Icons.Default.AutoAwesome, "Live Wallpaper", "Animated interactive wallpaper", false) {
-                        onApplyRequested(0) 
-                        showApplyOptions = false
+                    StaggeredRow(0) { Text("Apply Live Effect", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.padding(bottom = 24.dp)) }
+                    StaggeredRow(1) {
+                        DestinationButton(Icons.Default.AutoAwesome, "Live Wallpaper", "Animated interactive wallpaper", false) {
+                            onApplyRequested(0) 
+                            showApplyOptions = false
+                        }
                     }
                     Spacer(Modifier.height(16.dp))
                 }

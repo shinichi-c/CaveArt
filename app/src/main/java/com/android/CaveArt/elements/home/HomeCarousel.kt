@@ -5,8 +5,9 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.shape.CircleShape
@@ -24,7 +25,6 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
@@ -63,19 +63,31 @@ fun HeroCarouselWithIndicator(
             contentPadding = PaddingValues(horizontal = 0.dp), 
             modifier = Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 4.dp).height(computedHeight)
         ) { index ->
+        
+            val interactionSource = remember { MutableInteractionSource() }
+            val isPressed by interactionSource.collectIsPressedAsState()
+            val bouncySpring = spring<Float>(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow)
+            val dpSpring = spring<androidx.compose.ui.unit.Dp>(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow)
+            val itemScale by animateFloatAsState(targetValue = if (isPressed) 0.85f else 1f, animationSpec = bouncySpring, label = "squishScale")
+            val cornerRadius by animateDpAsState(targetValue = if (isPressed) 16.dp else 32.dp, animationSpec = dpSpring, label = "squishCorner")
+
             AsyncWallpaperImage(
                 wallpaper = filteredWallpapers[index], 
                 contentDescription = null, 
                 viewModel = viewModel, 
-                modifier = Modifier.fillMaxSize().maskClip(MaterialTheme.shapes.extraLarge).clickable { onWallpaperClick(index) }, 
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer { scaleX = itemScale; scaleY = itemScale }
+                    .maskClip(RoundedCornerShape(cornerRadius))
+                    .clickable(interactionSource = interactionSource, indication = null) { onWallpaperClick(index) }, 
                 allowMagic = false
             )
         }
         
         AnimatedVisibility(
             visible = viewModel.showFastScrollGuide && pagerState.pageCount > 1, 
-            enter = expandVertically(expandFrom = Alignment.Bottom) + fadeIn(tween(500)), 
-            exit = shrinkVertically(shrinkTowards = Alignment.Bottom) + fadeOut(tween(300))
+            enter = expandVertically(animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow), expandFrom = Alignment.Bottom) + fadeIn(), 
+            exit = shrinkVertically(animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow), shrinkTowards = Alignment.Bottom) + fadeOut()
         ) {
             val infiniteTransition = rememberInfiniteTransition(label = "drag_guide")
             val dragX by infiniteTransition.animateFloat(initialValue = -12f, targetValue = 12f, animationSpec = infiniteRepeatable(animation = tween(1200, easing = FastOutSlowInEasing), repeatMode = RepeatMode.Reverse), label = "drag_x")
@@ -113,11 +125,12 @@ fun FastScrollIndicator(
     var initialPage by remember { mutableIntStateOf(0) }
     
     val isPagerScrolling = pagerState.isScrollInProgress && !isDragging
-    
     val pagerOffsetPx = with(density) { (pagerState.currentPageOffsetFraction * 40.dp.toPx()) }
+    val expressiveSpring = spring<Float>(dampingRatio = 0.75f, stiffness = Spring.StiffnessMediumLow)
+    
     val animatedDragOffset by animateFloatAsState(
         targetValue = if (isDragging) rawDragOffset else pagerOffsetPx, 
-        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow), 
+        animationSpec = expressiveSpring, 
         label = "dragSpring"
     )
 
@@ -154,17 +167,19 @@ fun FastScrollIndicator(
         )
     }
     
+    val dpSpring = spring<Dp>(dampingRatio = 0.75f, stiffness = Spring.StiffnessMediumLow)
+
     Box(modifier = modifier.width(trackWidth).height(32.dp).then(fastScrollModifier), contentAlignment = Alignment.Center) {
         
         when (viewModel.scrollStyle) {
             0 -> {
-                val thumbWidth by animateDpAsState(if (isDragging) 40.dp else 20.dp, spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow), label = "w")
-                val thumbHeight by animateDpAsState(if (isDragging) 8.dp else 6.dp, spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow), label = "h")
+                val thumbWidth by animateDpAsState(if (isDragging) 40.dp else 20.dp, dpSpring, label = "w")
+                val thumbHeight by animateDpAsState(if (isDragging) 8.dp else 6.dp, dpSpring, label = "h")
                 Box(modifier = Modifier.offset(x = with(density) { animatedDragOffset.toDp() }).size(thumbWidth, thumbHeight).shadow(elevation = if (isDragging) 8.dp else 2.dp, shape = CircleShape, ambientColor = activeColor, spotColor = activeColor).background(activeColor, CircleShape))
             }
             1 -> {
-                val thumbWidth by animateDpAsState(if (isDragging) 40.dp else 24.dp, spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow), label = "w")
-                val thumbHeight by animateDpAsState(if (isDragging) 12.dp else 8.dp, spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow), label = "h")
+                val thumbWidth by animateDpAsState(if (isDragging) 40.dp else 24.dp, dpSpring, label = "w")
+                val thumbHeight by animateDpAsState(if (isDragging) 12.dp else 8.dp, dpSpring, label = "h")
                 Canvas(modifier = Modifier.fillMaxSize().graphicsLayer { alpha = trackAlpha }) {
                     drawRoundRect(color = inactiveColor, topLeft = Offset(0f, size.height / 2f - 6.dp.toPx()), size = Size(size.width, 12.dp.toPx()), cornerRadius = CornerRadius(6.dp.toPx()))
                 }

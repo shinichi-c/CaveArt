@@ -34,6 +34,7 @@ import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.android.CaveArt.animations.AnimationFactory
 import com.android.CaveArt.animations.AnimationStyle
 import com.android.CaveArt.animations.AnimSetting
@@ -94,8 +95,8 @@ fun EffectsControlsSheet(
                         tabs.forEach { tab ->
                             val isSelected = selectedTab == tab
                             val tabIcon = when (tab) { "Shape" -> Icons.Default.Category; "Animation" -> Icons.Default.Animation; "3D Engine" -> Icons.Default.ViewInAr; else -> Icons.Default.Palette }
-                            Box(modifier = Modifier.height(48.dp).clip(CircleShape).background(if (isSelected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent).clickable { selectedTab = tab }.padding(horizontal = if (isSelected) 20.dp else 16.dp), contentAlignment = Alignment.Center) {
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) { if (isSelected) Icon(tabIcon, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSecondaryContainer); Text(tab, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = if (isSelected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant) }
+                            Box(modifier = Modifier.height(56.dp).clip(CircleShape).background(if (isSelected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent).clickable { selectedTab = tab }.padding(horizontal = if (isSelected) 24.dp else 20.dp), contentAlignment = Alignment.Center) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) { if (isSelected) Icon(tabIcon, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSecondaryContainer); Text(tab, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, fontSize = 15.sp, color = if (isSelected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant) }
                             }
                         }
                     }
@@ -109,7 +110,7 @@ fun EffectsControlsSheet(
                             Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp), horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally)) {
                                 MagicShape.values().take(5).forEach { shape ->
                                     val isSelected = viewModel.currentMagicShape == shape
-                                    Box(modifier = Modifier.weight(1f).aspectRatio(1f).clip(RoundedCornerShape(16.dp)).background(if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant).clickable { viewModel.updateMagicConfig(shape, viewModel.currentBackgroundColor) }, contentAlignment = Alignment.Center) { ShapeIcon(shape = shape, color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.fillMaxSize(0.45f)) }
+                                    Box(modifier = Modifier.weight(1f).aspectRatio(1f).clip(RoundedCornerShape(20.dp)).background(if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant).clickable { viewModel.updateMagicConfig(shape, viewModel.currentBackgroundColor) }, contentAlignment = Alignment.Center) { ShapeIcon(shape = shape, color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.fillMaxSize(0.45f)) }
                                 }
                             }
                             Spacer(Modifier.height(28.dp))
@@ -128,8 +129,8 @@ fun EffectsControlsSheet(
                             Spacer(Modifier.height(16.dp))
                             Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                    FilterChip(selected = viewModel.is3DPopEnabled, onClick = { viewModel.is3DPopEnabled = !viewModel.is3DPopEnabled }, label = { Text("3D Pop", fontWeight = FontWeight.Bold) }, leadingIcon = { Icon(Icons.Default.Layers, null, Modifier.size(18.dp)) }, shape = RoundedCornerShape(16.dp), border = null)
-                                    FilterChip(selected = viewModel.isCentered, onClick = { viewModel.isCentered = !viewModel.isCentered }, label = { Text("Center", fontWeight = FontWeight.Bold) }, leadingIcon = { Icon(Icons.Default.FilterCenterFocus, null, Modifier.size(18.dp)) }, shape = RoundedCornerShape(16.dp), border = null)
+                                    FilterChip(selected = viewModel.is3DPopEnabled, onClick = { viewModel.is3DPopEnabled = !viewModel.is3DPopEnabled }, label = { Text("3D Pop", fontSize = 15.sp, fontWeight = FontWeight.Bold) }, leadingIcon = { Icon(Icons.Default.Layers, null, Modifier.size(18.dp)) }, shape = RoundedCornerShape(24.dp), modifier = Modifier.padding(vertical = 4.dp), border = null)
+                                    FilterChip(selected = viewModel.isCentered, onClick = { viewModel.isCentered = !viewModel.isCentered }, label = { Text("Center", fontSize = 15.sp, fontWeight = FontWeight.Bold) }, leadingIcon = { Icon(Icons.Default.FilterCenterFocus, null, Modifier.size(18.dp)) }, shape = RoundedCornerShape(24.dp), modifier = Modifier.padding(vertical = 4.dp), border = null)
                                 }
                                 Spacer(Modifier.height(16.dp))
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("Effect Size", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant); Text(if (viewModel.magicScale < 1.0f) "Tight" else "Wide", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary) }
@@ -148,17 +149,18 @@ fun EffectsControlsSheet(
                                     val style = styles[index]
                                     val isSelected = viewModel.currentAnimationStyle == style
                                     
-                                    val tileScale by animateFloatAsState(if (isSelected) 1.05f else 1.0f, spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow), label = "tileScale")
+                                    val tileScale by animateFloatAsState(if (isSelected) 1.08f else 1.0f, spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow), label = "tileScale")
                                     val borderColor by animateColorAsState(if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f), spring(), label = "borderColor")
                                     
                                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                         Card(
                                             modifier = Modifier
                                                 .scale(tileScale)
-                                                .size(110.dp, 75.dp)
-                                                .clip(RoundedCornerShape(16.dp))
-                                                .border(if (isSelected) 3.dp else 1.dp, borderColor, RoundedCornerShape(16.dp))
+                                                .size(120.dp, 80.dp)
+                                                .clip(RoundedCornerShape(20.dp))
+                                                .border(if (isSelected) 3.dp else 1.dp, borderColor, RoundedCornerShape(20.dp))
                                                 .clickable { viewModel.updateAnimationStyle(style) },
+                                            shape = RoundedCornerShape(20.dp),
                                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
                                         ) {
                                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -194,8 +196,8 @@ fun EffectsControlsSheet(
                                         FilterChip(
                                             selected = selectedParamId == setting.id,
                                             onClick = { selectedParamId = setting.id },
-                                            label = { Text(setting.title, fontWeight = FontWeight.Bold) },
-                                            shape = RoundedCornerShape(16.dp),
+                                            label = { Text(setting.title, fontSize = 15.sp, fontWeight = FontWeight.Bold) },
+                                            shape = RoundedCornerShape(24.dp), modifier = Modifier.padding(vertical = 4.dp),
                                             colors = FilterChipDefaults.filterChipColors(selectedContainerColor = MaterialTheme.colorScheme.secondaryContainer)
                                         )
                                     }

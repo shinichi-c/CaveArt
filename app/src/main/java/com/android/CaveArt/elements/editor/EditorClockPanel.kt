@@ -24,6 +24,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -54,7 +55,7 @@ fun EditorClockPanel(
             Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 extractedColors.forEach { colorInt ->
                     val isSelected = state.clockColor.intValue == colorInt
-                    Box(modifier = Modifier.size(40.dp), contentAlignment = Alignment.Center) {
+                    Box(modifier = Modifier.size(44.dp), contentAlignment = Alignment.Center) {
                         if (isSelected) Box(modifier = Modifier.fillMaxSize().border(3.dp, Color(colorInt), CircleShape))
                         Box(modifier = Modifier.fillMaxSize(if (isSelected) 0.65f else 1f).clip(CircleShape).background(Color(colorInt)).clickable { state.clockColor.intValue = colorInt })
                     }
@@ -64,8 +65,8 @@ fun EditorClockPanel(
             Text("Layout", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                FilterChip(selected = state.clockLayout.intValue == 0, onClick = { state.clockLayout.intValue = 0 }, label = { Text("Horizontal") }, shape = RoundedCornerShape(16.dp), colors = FilterChipDefaults.filterChipColors(selectedContainerColor = MaterialTheme.colorScheme.primaryContainer))
-                FilterChip(selected = state.clockLayout.intValue == 1, onClick = { state.clockLayout.intValue = 1 }, label = { Text("Vertical Magazine") }, shape = RoundedCornerShape(16.dp), colors = FilterChipDefaults.filterChipColors(selectedContainerColor = MaterialTheme.colorScheme.primaryContainer))
+                FilterChip(selected = state.clockLayout.intValue == 0, onClick = { state.clockLayout.intValue = 0 }, label = { Text("Horizontal", fontSize = 15.sp, fontWeight = FontWeight.Bold) }, shape = RoundedCornerShape(24.dp), modifier = Modifier.padding(vertical = 4.dp), colors = FilterChipDefaults.filterChipColors(selectedContainerColor = MaterialTheme.colorScheme.primaryContainer))
+                FilterChip(selected = state.clockLayout.intValue == 1, onClick = { state.clockLayout.intValue = 1 }, label = { Text("Vertical Magazine", fontSize = 15.sp, fontWeight = FontWeight.Bold) }, shape = RoundedCornerShape(24.dp), modifier = Modifier.padding(vertical = 4.dp), colors = FilterChipDefaults.filterChipColors(selectedContainerColor = MaterialTheme.colorScheme.primaryContainer))
             }
             Spacer(Modifier.height(24.dp))
             Text("Typography", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
@@ -73,11 +74,11 @@ fun EditorClockPanel(
             LazyRow(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(availableFonts) { fontFile ->
                     val displayName = if (fontFile == "default") "System Default" else fontFile.substringBeforeLast(".").split("_", "-").joinToString(" ") { word -> word.replaceFirstChar { if (it.isLowerCase()) it.titlecase(java.util.Locale.getDefault()) else it.toString() } }
-                    FilterChip(selected = state.clockFont.value == fontFile, onClick = { state.clockFont.value = fontFile }, label = { Text(displayName, fontWeight = FontWeight.Bold) }, shape = RoundedCornerShape(16.dp), colors = FilterChipDefaults.filterChipColors(selectedContainerColor = MaterialTheme.colorScheme.primaryContainer, selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer))
+                    FilterChip(selected = state.clockFont.value == fontFile, onClick = { state.clockFont.value = fontFile }, label = { Text(displayName, fontSize = 15.sp, fontWeight = FontWeight.Bold) }, shape = RoundedCornerShape(24.dp), modifier = Modifier.padding(vertical = 4.dp), colors = FilterChipDefaults.filterChipColors(selectedContainerColor = MaterialTheme.colorScheme.primaryContainer, selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer))
                 }
             }
             Spacer(Modifier.height(24.dp))
-            Text("Clock Style", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+            Text("Clock Style", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
             Spacer(Modifier.height(24.dp))
             Text("Thickness", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
             Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Default.LineWeight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant); Spacer(Modifier.width(16.dp)); Slider(value = state.strokeWidth.floatValue, onValueChange = { state.strokeWidth.floatValue = it }, valueRange = 0f..25f, modifier = Modifier.weight(1f)) }

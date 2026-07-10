@@ -16,6 +16,7 @@ import androidx.compose.ui.layout.ContentScale
 fun ImmersivePreview(
     wallpaper: Wallpaper,
     viewModel: WallpaperViewModel,
+    sharedElementModifier: Modifier = Modifier,
     onBack: () -> Unit
 ) {
     
@@ -35,7 +36,7 @@ fun ImmersivePreview(
             wallpaper = wallpaper,
             contentDescription = "Full Screen Preview",
             viewModel = viewModel,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize().then(sharedElementModifier),
             contentScale = ContentScale.Crop,
             allowMagic = false
         )
