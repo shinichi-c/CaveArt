@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "com.android.CaveArt"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.android.CaveArt"
@@ -60,6 +60,7 @@ kotlin {
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.activity.compose)
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
@@ -75,7 +76,6 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
    
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.9.4")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.appcompat:appcompat:1.7.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.10.2")
