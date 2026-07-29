@@ -67,7 +67,7 @@ fun HeroCarouselWithIndicator(
             val interactionSource = remember { MutableInteractionSource() }
             val isPressed by interactionSource.collectIsPressedAsState()
             val bouncySpring = spring<Float>(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow)
-            val dpSpring = spring<androidx.compose.ui.unit.Dp>(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow)
+            val dpSpring = spring<Dp>(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow)
             val itemScale by animateFloatAsState(targetValue = if (isPressed) 0.85f else 1f, animationSpec = bouncySpring, label = "squishScale")
             val cornerRadius by animateDpAsState(targetValue = if (isPressed) 16.dp else 32.dp, animationSpec = dpSpring, label = "squishCorner")
 
