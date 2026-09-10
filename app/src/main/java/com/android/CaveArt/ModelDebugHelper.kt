@@ -16,7 +16,7 @@ data class DebugResult(
     val error: String? = null
 )
 
-object PixelDebugHelper {
+object ModelDebugHelper {
 	
     suspend fun runFullPipelineDiagnostic(context: Context, original: Bitmap): List<DebugResult> {
         val results = mutableListOf<DebugResult>()
@@ -59,7 +59,6 @@ object PixelDebugHelper {
 
             if (fgMask != null) {
                 val stats = analyzeBitmapStats(fgMask)
-                
                 val tintedPreview = tintBitmapGreen(fgMask)
 
                 results.add(DebugResult(
@@ -80,7 +79,6 @@ object PixelDebugHelper {
         }
         
         val maskForMatting = fgMask ?: coarseMask
-        
         val mattingHelper = DeepMattingHelper(context)
 
         try {

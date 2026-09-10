@@ -91,8 +91,8 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     
     private val _isFloatingDockEnabled = mutableStateOf(prefs.getBoolean("floating_dock", true))
     val isFloatingDockEnabled: Boolean by _isFloatingDockEnabled
-    fun setFloatingDockEnabled(enabled: Boolean) {
-        _isFloatingDockEnabled.value = enabled
+    fun setFloatingDockEnabled(enabled: Boolean) { 
+        _isFloatingDockEnabled.value = enabled 
         prefs.edit().putBoolean("floating_dock", enabled).apply()
     }
 
@@ -250,41 +250,71 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     val isFilamentEnabled: Boolean by _isFilamentEnabled
     
     var currentMagicShape by mutableStateOf(MagicShape.SQUIRCLE)
-    var currentBackgroundColor by mutableStateOf(AndroidColor.parseColor("#4CAF50"))
+    var currentBackgroundColor by mutableStateOf(0xFF1E2022.toInt())
     var is3DPopEnabled by mutableStateOf(true)
     var magicScale by mutableFloatStateOf(1.0f)
     var isCentered by mutableStateOf(false)
     var currentAnimationStyle by mutableStateOf(AnimationStyle.EXPRESSIVE_HORIZON)
     var currentAnimParams by mutableStateOf<Map<String, Float>>(emptyMap())
 
-    fun setMagicShapeEnabled(enabled: Boolean) { _isMagicShapeEnabled.value = enabled; if (enabled) { _isAnimationEnabled.value = false; _isFilamentEnabled.value = false } }
-    fun setAnimationEnabled(enabled: Boolean) { _isAnimationEnabled.value = enabled; if (enabled) { _isMagicShapeEnabled.value = false; _isFilamentEnabled.value = false } }
-    fun setFilamentEnabled(enabled: Boolean) { _isFilamentEnabled.value = enabled; if (enabled) { _isMagicShapeEnabled.value = false; _isAnimationEnabled.value = false } }
+    fun setMagicShapeEnabled(enabled: Boolean) { 
+        _isMagicShapeEnabled.value = enabled
+        if (enabled) { 
+            _isAnimationEnabled.value = false
+            _isFilamentEnabled.value = false 
+        } 
+    }
+    fun setAnimationEnabled(enabled: Boolean) { 
+        _isAnimationEnabled.value = enabled
+        if (enabled) { 
+            _isMagicShapeEnabled.value = false
+            _isFilamentEnabled.value = false 
+        } 
+    }
+    fun setFilamentEnabled(enabled: Boolean) { 
+        _isFilamentEnabled.value = enabled
+        if (enabled) { 
+            _isMagicShapeEnabled.value = false
+            _isAnimationEnabled.value = false 
+        } 
+    }
     
-    fun updateMagicConfig(shape: MagicShape, color: Int) { currentMagicShape = shape; currentBackgroundColor = color }
+    fun updateMagicConfig(shape: MagicShape, color: Int) { 
+        currentMagicShape = shape
+        currentBackgroundColor = color 
+    }
     fun toggle3DPop() { is3DPopEnabled = !is3DPopEnabled }
     fun updateMagicScale(scale: Float) { magicScale = scale }
     fun toggleCentered() { isCentered = !isCentered }
+    
     fun updateAnimationStyle(style: AnimationStyle) { 
         currentAnimationStyle = style 
         val anim = AnimationFactory.getAnimation(style)
         val defaults = mutableMapOf<String, Float>()
         anim.getCustomSettings().forEach { setting ->
-            when(setting) {
+            when (setting) {
                 is AnimSetting.Slider -> defaults[setting.id] = setting.defaultValue
-                is AnimSetting.Toggle -> defaults[setting.id] = if(setting.defaultValue) 1f else 0f
+                is AnimSetting.Toggle -> defaults[setting.id] = if (setting.defaultValue) 1f else 0f
             }
         }
         currentAnimParams = defaults
     }
-    fun updateAnimParam(key: String, value: Float) { currentAnimParams = currentAnimParams.toMutableMap().apply { put(key, value) } }
+    fun updateAnimParam(key: String, value: Float) { 
+        currentAnimParams = currentAnimParams.toMutableMap().apply { put(key, value) } 
+    }
     
     var allWallpapers by mutableStateOf<List<Wallpaper>>(emptyList())
 
     init {
         viewModelScope.launch {
             isLoading = true
-            launch(MLThread.dispatcher) { try { segmentationHelper.warmUp(); refineHelper.warmUp(); mattingHelper.warmUp() } catch (e: Exception) {} }
+            launch(MLThread.dispatcher) { 
+                try { 
+                    segmentationHelper.warmUp()
+                    refineHelper.warmUp()
+                    mattingHelper.warmUp() 
+                } catch (e: Exception) {} 
+            }
             val initialList = loadBasicWallpaperList(application.applicationContext)
             allWallpapers = initialList
             isLoading = false
@@ -300,18 +330,30 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     }
     
     private val maxMemory = (Runtime.getRuntime().maxMemory() / 1024).toInt()
-    private val bitmapCache = object : LruCache<String, Bitmap>(maxMemory / 8) { override fun sizeOf(key: String, bitmap: Bitmap) = bitmap.byteCount / 1024 }
-    private val cutoutCache = object : LruCache<String, Bitmap>(maxMemory / 32) { override fun sizeOf(key: String, bitmap: Bitmap) = bitmap.byteCount / 1024 }
-    private val originalCache = object : LruCache<String, Bitmap>(maxMemory / 32) { override fun sizeOf(key: String, bitmap: Bitmap) = bitmap.byteCount / 1024 }
+    private val bitmapCache = object : LruCache<String, Bitmap>(maxMemory / 8) { 
+        override fun sizeOf(key: String, bitmap: Bitmap) = bitmap.byteCount / 1024 
+    }
+    private val cutoutCache = object : LruCache<String, Bitmap>(maxMemory / 32) { 
+        override fun sizeOf(key: String, bitmap: Bitmap) = bitmap.byteCount / 1024 
+    }
+    private val originalCache = object : LruCache<String, Bitmap>(maxMemory / 32) { 
+        override fun sizeOf(key: String, bitmap: Bitmap) = bitmap.byteCount / 1024 
+    }
 
     private suspend fun getCachedOriginal(context: Context, wallpaper: Wallpaper, maxDim: Int = 1024): Bitmap? = withContext(Dispatchers.IO) {
         val cacheKey = "orig_${wallpaper.id}_$maxDim"
         originalCache.get(cacheKey)?.let { return@withContext it }
         try {
-            val bitmap = if (wallpaper.uri != null) BitmapHelper.decodeSampledBitmapFromUri(context, wallpaper.uri, maxDim) else BitmapHelper.decodeSampledBitmapFromResource(context.resources, wallpaper.resourceId, maxDim)
+            val bitmap = if (wallpaper.uri != null) {
+                BitmapHelper.decodeSampledBitmapFromUri(context, wallpaper.uri, maxDim)
+            } else {
+                BitmapHelper.decodeSampledBitmapFromResource(context.resources, wallpaper.resourceId, maxDim)
+            }
             originalCache.put(cacheKey, bitmap)
             return@withContext bitmap
-        } catch (e: Exception) { return@withContext null }
+        } catch (e: Exception) { 
+            return@withContext null 
+        }
     }
     
     private suspend fun generateCutoutInternal(originalBitmap: Bitmap): Bitmap? {
@@ -336,20 +378,28 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
                 cutout = cutoutCache.get(wallpaper.id) ?: generateCutoutInternal(original)?.also { cutoutCache.put(wallpaper.id, it) }
             }
             Pair(original, cutout)
-        } catch(e: Exception) { Pair(null, null) }
+        } catch(e: Exception) { 
+            Pair(null, null) 
+        }
     }
 
     suspend fun getMaskForClock(context: Context, wallpaper: Wallpaper): Bitmap? = withContext(Dispatchers.Default) {
         try {
             val original = getCachedOriginal(context, wallpaper, 1024) ?: return@withContext null
             cutoutCache.get(wallpaper.id) ?: generateCutoutInternal(original)?.also { cutoutCache.put(wallpaper.id, it) }
-        } catch (e: Exception) { null }
+        } catch (e: Exception) { 
+            null 
+        }
     }
 
     suspend fun getOrCreateProcessedBitmap(context: Context, wallpaper: Wallpaper, allowMagic: Boolean = true, maxDim: Int = 1024): Bitmap? {
         val needsCutout = allowMagic && (isMagicShapeEnabled || (isAnimationEnabled && AnimationFactory.getAnimation(currentAnimationStyle).needsSegmentationMask()))
         val paramKey = currentAnimParams.entries.joinToString { "${it.key}=${it.value}" }
-        val cacheKey = if(needsCutout) "final_${wallpaper.id}_${currentMagicShape}_${currentBackgroundColor}_${is3DPopEnabled}_${magicScale}_${isCentered}_${currentAnimationStyle.name}_$paramKey" else "preview_${wallpaper.id}_$maxDim"
+        val cacheKey = if (needsCutout) {
+            "final_${wallpaper.id}_${currentMagicShape}_${currentBackgroundColor}_${is3DPopEnabled}_${magicScale}_${isCentered}_${currentAnimationStyle.name}_$paramKey"
+        } else {
+            "preview_${wallpaper.id}_$maxDim"
+        }
         
         bitmapCache.get(cacheKey)?.let { return it }
         
@@ -357,21 +407,40 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
             try {
                 val originalBitmap = getCachedOriginal(context, wallpaper, maxDim) ?: return@withContext null
                 var cutout: Bitmap? = null
-                if (needsCutout) cutout = cutoutCache.get(wallpaper.id) ?: generateCutoutInternal(originalBitmap)?.also { cutoutCache.put(wallpaper.id, it) }
+                if (needsCutout) {
+                    cutout = cutoutCache.get(wallpaper.id) ?: generateCutoutInternal(originalBitmap)?.also { cutoutCache.put(wallpaper.id, it) }
+                }
 
                 val resultBitmap = if (allowMagic && isMagicShapeEnabled && cutout != null) {
-                    ShapeEffectHelper.createShapeCropBitmapWithPreCutout(originalBitmap, cutout, LiveWallpaperConfig(shapeName = currentMagicShape.name, backgroundColor = currentBackgroundColor, is3DPopEnabled = is3DPopEnabled, scale = magicScale, isCentered = isCentered, isMagicShapeEnabled = true, animParams = currentAnimParams))
+                    ShapeEffectHelper.createShapeCropBitmapWithPreCutout(
+                        originalBitmap, 
+                        cutout, 
+                        LiveWallpaperConfig(
+                            shapeName = currentMagicShape.name, 
+                            backgroundColor = currentBackgroundColor, 
+                            is3DPopEnabled = is3DPopEnabled, 
+                            scale = magicScale, 
+                            isCentered = isCentered, 
+                            isMagicShapeEnabled = true, 
+                            animParams = currentAnimParams
+                        )
+                    )
                 } else {
                     originalBitmap
                 }
                 bitmapCache.put(cacheKey, resultBitmap)
                 resultBitmap
-            } catch (e: Exception) { null }
+            } catch (e: Exception) { 
+                null 
+            }
         }
     }
 
     suspend fun getHighQualityComponents(context: Context, wallpaper: Wallpaper): Pair<Bitmap?, Bitmap?> = withContext(Dispatchers.IO) {
-        val original = try { if (wallpaper.uri != null) BitmapHelper.decodeSampledBitmapFromUri(context, wallpaper.uri, 2500) else BitmapHelper.decodeSampledBitmapFromResource(context.resources, wallpaper.resourceId, 2500) } catch (e: Exception) { null }
+        val original = try { 
+            if (wallpaper.uri != null) BitmapHelper.decodeSampledBitmapFromUri(context, wallpaper.uri, 2500) 
+            else BitmapHelper.decodeSampledBitmapFromResource(context.resources, wallpaper.resourceId, 2500) 
+        } catch (e: Exception) { null }
         val needsCutout = isMagicShapeEnabled || (isAnimationEnabled && AnimationFactory.getAnimation(currentAnimationStyle).needsSegmentationMask())
         val cutout = if (needsCutout && original != null) generateCutoutInternal(original) else null
         Pair(original, cutout)
@@ -396,11 +465,17 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         if (wallpaper.mlTags.isNotEmpty()) return
         val detectedTags = mlProcessingSemaphore.withPermit {
             try {
-                val small = if (wallpaper.uri != null) BitmapHelper.decodeSampledBitmapFromUri(context, wallpaper.uri, 300) else BitmapHelper.decodeSampledBitmapFromResource(context.resources, wallpaper.resourceId, 300)
+                val small = if (wallpaper.uri != null) {
+                    BitmapHelper.decodeSampledBitmapFromUri(context, wallpaper.uri, 300)
+                } else {
+                    BitmapHelper.decodeSampledBitmapFromResource(context.resources, wallpaper.resourceId, 300)
+                }
                 val tags = ImageLabelingHelper.getTagsFromBitmap(small)
                 small.recycle()
                 tags
-            } catch (e: Exception) { emptyList<String>() }
+            } catch (e: Exception) { 
+                emptyList<String>() 
+            }
         }
         if (detectedTags.isNotEmpty()) {
             wallpaper.mlTags = detectedTags
@@ -415,10 +490,17 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         viewModelScope.launch(Dispatchers.IO) {
             isRunningDebug = true
             try {
-                val original = try { if (target.uri != null) BitmapHelper.decodeSampledBitmapFromUri(context, target.uri, 512) else BitmapHelper.decodeSampledBitmapFromResource(context.resources, target.resourceId, 512) } catch (e: Exception) { null }
+                val original = try { 
+                    if (target.uri != null) BitmapHelper.decodeSampledBitmapFromUri(context, target.uri, 512) 
+                    else BitmapHelper.decodeSampledBitmapFromResource(context.resources, target.resourceId, 512) 
+                } catch (e: Exception) { null }
+                
                 if (original != null) {
-                    val res = PixelDebugHelper.runFullPipelineDiagnostic(context, original)
-                    withContext(Dispatchers.Main) { debugResults = res; isRunningDebug = false }
+                    val res = ModelDebugHelper.runFullPipelineDiagnostic(context, original)
+                    withContext(Dispatchers.Main) { 
+                        debugResults = res
+                        isRunningDebug = false 
+                    }
                 } else {
                     withContext(Dispatchers.Main) { isRunningDebug = false }
                 }
