@@ -2,34 +2,52 @@ package com.android.CaveArt
 
 import android.graphics.Bitmap
 import android.graphics.RectF
+import android.view.HapticFeedbackConstants
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.CornerSize
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asComposePath
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import coil3.compose.rememberAsyncImagePainter
 import kotlin.random.Random
 
@@ -38,26 +56,52 @@ data class Particle(
     val speed: Float, val swaySpeed: Float, val initialAlpha: Float
 )
 
+fun safeColor(colorInt: Int): Color {
+    return Color(
+        alpha = (colorInt shr 24) and 0xFF,
+        red = (colorInt shr 16) and 0xFF,
+        green = (colorInt shr 8) and 0xFF,
+        blue = colorInt and 0xFF
+    )
+}
+
+fun isDefaultColor(colorInt: Int): Boolean {
+    return colorInt == 0xFF1A1C1E.toInt() || 
+           colorInt == 0xFF1E2022.toInt() || 
+           colorInt == 0xFF4CAF50.toInt() || 
+           colorInt == 0
+}
+
 @Composable
 fun AsyncWallpaperImage(
-    wallpaper: Wallpaper, contentDescription: String?, viewModel: WallpaperViewModel,
-    modifier: Modifier = Modifier, contentScale: ContentScale = ContentScale.Crop, allowMagic: Boolean = true
+    wallpaper: Wallpaper,
+    contentDescription: String?,
+    viewModel: WallpaperViewModel,
+    modifier: Modifier = Modifier,
+    contentScale: ContentScale = ContentScale.Crop,
+    allowMagic: Boolean = true
 ) {
     if (!allowMagic) {
         val model = wallpaper.uri ?: wallpaper.resourceId
         androidx.compose.foundation.Image(
             painter = rememberAsyncImagePainter(model),
-            contentDescription = contentDescription, contentScale = contentScale, modifier = modifier
+            contentDescription = contentDescription,
+            contentScale = contentScale,
+            modifier = modifier
         )
     } else {
         val context = LocalContext.current
         var bitmap by remember(wallpaper) { mutableStateOf<Bitmap?>(null) }
-        LaunchedEffect(wallpaper) { bitmap = viewModel.getOrCreateProcessedBitmap(context, wallpaper, true) }
+        LaunchedEffect(wallpaper) {
+            bitmap = viewModel.getOrCreateProcessedBitmap(context, wallpaper, true)
+        }
 
         if (bitmap != null) {
             androidx.compose.foundation.Image(
-                bitmap = bitmap!!.asImageBitmap(), contentDescription = contentDescription,
-                contentScale = contentScale, modifier = modifier
+                bitmap = bitmap!!.asImageBitmap(),
+                contentDescription = contentDescription,
+                contentScale = contentScale,
+                modifier = modifier
             )
         } else {
             Box(modifier = modifier.background(MaterialTheme.colorScheme.surfaceVariant))
@@ -66,16 +110,285 @@ fun AsyncWallpaperImage(
 }
 
 @Composable
+fun ExpressiveSectionCard(
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(28.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.85f)
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            content = content
+        )
+    }
+}
+
+@Composable
+fun ExpressiveCapsuleSlider(
+    value: Float,
+    onValueChange: (Float) -> Unit,
+    valueRange: ClosedFloatingPointRange<Float>,
+    modifier: Modifier = Modifier,
+    icon: ImageVector? = null,
+    label: String = ""
+) {
+    val view = LocalView.current
+
+    Column(modifier = modifier.fillMaxWidth()) {
+        if (label.isNotEmpty()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp, vertical = 2.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold, fontSize = 14.sp),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f)
+                ) {
+                    Text(
+                        text = String.format("%.1f", value),
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Black, fontSize = 11.5.sp),
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 2.5.dp)
+                    )
+                }
+            }
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            if (icon != null) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+
+            Slider(
+                value = value.coerceIn(valueRange.start, valueRange.endInclusive),
+                onValueChange = {
+                    onValueChange(it)
+                    view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                },
+                valueRange = valueRange,
+                modifier = Modifier.weight(1f),
+                colors = SliderDefaults.colors(
+                    thumbColor = MaterialTheme.colorScheme.primary,
+                    activeTrackColor = MaterialTheme.colorScheme.primary,
+                    inactiveTrackColor = MaterialTheme.colorScheme.surfaceContainerHighest
+                )
+            )
+        }
+    }
+}
+
+@Composable
+fun ExpressiveChunkySlider(
+    value: Float,
+    onValueChange: (Float) -> Unit,
+    valueRange: ClosedFloatingPointRange<Float>,
+    modifier: Modifier = Modifier,
+    icon: ImageVector? = null,
+    label: String = ""
+) {
+    ExpressiveCapsuleSlider(
+        value = value,
+        onValueChange = onValueChange,
+        valueRange = valueRange,
+        modifier = modifier,
+        icon = icon,
+        label = label
+    )
+}
+
+@Composable
+fun <T> ExpressiveSegmentedPill(
+    items: List<T>,
+    selectedItem: T,
+    onItemSelected: (T) -> Unit,
+    labelProvider: (T) -> String,
+    modifier: Modifier = Modifier,
+    iconProvider: ((T) -> ImageVector?)? = null
+) {
+    val view = LocalView.current
+    val selectedIndex = items.indexOf(selectedItem).coerceAtLeast(0)
+
+    BoxWithConstraints(
+        modifier = modifier
+            .height(54.dp)
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.7f))
+            .padding(4.dp)
+    ) {
+        val tabWidth = maxWidth / items.size
+        val indicatorOffset by animateDpAsState(
+            targetValue = tabWidth * selectedIndex,
+            animationSpec = spring(stiffness = 500f, dampingRatio = 0.75f),
+            label = "tabIndicator"
+        )
+
+        Box(
+            modifier = Modifier
+                .offset(x = indicatorOffset)
+                .width(tabWidth)
+                .fillMaxHeight()
+                .shadow(6.dp, CircleShape)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.primaryContainer)
+        )
+
+        Row(modifier = Modifier.fillMaxSize()) {
+            items.forEach { item ->
+                val isSelected = item == selectedItem
+                val icon = iconProvider?.invoke(item)
+
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .clip(CircleShape)
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) {
+                            if (!isSelected) {
+                                view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                                onItemSelected(item)
+                            }
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        if (icon != null) {
+                            Icon(
+                                imageVector = icon,
+                                contentDescription = null,
+                                tint = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(17.dp)
+                            )
+                            Spacer(Modifier.width(6.dp))
+                        }
+                        Text(
+                            text = labelProvider(item),
+                            style = MaterialTheme.typography.labelLarge.copy(fontSize = 13.5.sp),
+                            fontWeight = if (isSelected) FontWeight.Black else FontWeight.Bold,
+                            color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Crash-Proof Expressive Color Halo Selector
+ * Uses GPU scale transformations instead of Modifier.padding() to prevent negative padding crashes.
+ */
+@Composable
+fun ExpressiveColorHaloSelector(
+    colors: List<Int>,
+    selectedColor: Int,
+    onColorSelected: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val view = LocalView.current
+
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        colors.forEach { colorInt ->
+            val isSelected = colorInt == selectedColor
+            val composeColor = safeColor(colorInt)
+            val isBright = composeColor.luminance() > 0.5f
+            
+            val innerScale by animateFloatAsState(
+                targetValue = if (isSelected) 0.78f else 0.94f,
+                animationSpec = spring(stiffness = 600f, dampingRatio = Spring.DampingRatioMediumBouncy),
+                label = "haloScale"
+            )
+
+            Box(
+                modifier = Modifier
+                    .size(46.dp)
+                    .clip(CircleShape)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) {
+                        if (!isSelected) {
+                            view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                            onColorSelected(colorInt)
+                        }
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                if (isSelected) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .border(2.5.dp, MaterialTheme.colorScheme.primary, CircleShape)
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            scaleX = innerScale
+                            scaleY = innerScale
+                        }
+                        .clip(CircleShape)
+                        .background(composeColor),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (isSelected) {
+                        Icon(
+                            imageVector = Icons.Default.Check,
+                            contentDescription = null,
+                            tint = if (isBright) Color.Black else Color.White,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 fun StaggeredRow(index: Int, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     var isVisible by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
-        kotlinx.coroutines.delay(index * 40L)
+        kotlinx.coroutines.delay(index * 35L)
         isVisible = true
     }
     AnimatedVisibility(
         visible = isVisible,
         enter = slideInVertically(
-            initialOffsetY = { 80 },
+            initialOffsetY = { 60 },
             animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow)
         ) + fadeIn(tween(300)),
         modifier = modifier
@@ -87,27 +400,39 @@ fun StaggeredRow(index: Int, modifier: Modifier = Modifier, content: @Composable
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AmbientBottomSheet(
-    onDismissRequest: () -> Unit, sheetState: SheetState,
-    viewModel: WallpaperViewModel, currentWallpaper: Wallpaper?,
+    onDismissRequest: () -> Unit,
+    sheetState: SheetState,
+    viewModel: WallpaperViewModel,
+    currentWallpaper: Wallpaper?,
     content: @Composable ColumnScope.() -> Unit
 ) {
     ModalBottomSheet(
-        onDismissRequest = onDismissRequest, 
+        onDismissRequest = onDismissRequest,
         sheetState = sheetState,
-        containerColor = Color.Transparent, 
+        containerColor = Color.Transparent,
         dragHandle = null,
-        scrimColor = MaterialTheme.colorScheme.scrim.copy(alpha = 0.6f) 
+        scrimColor = MaterialTheme.colorScheme.scrim.copy(alpha = 0.6f)
     ) {
-        Box(modifier = Modifier.fillMaxWidth().clip(MaterialTheme.shapes.extraLarge.copy(bottomStart = CornerSize(0.dp), bottomEnd = CornerSize(0.dp)))) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(MaterialTheme.shapes.extraLarge.copy(bottomStart = CornerSize(0.dp), bottomEnd = CornerSize(0.dp)))
+        ) {
             if (viewModel.isAmbientBlurEnabled && currentWallpaper != null) {
-                AsyncWallpaperImage(wallpaper = currentWallpaper, contentDescription = null, viewModel = viewModel, modifier = Modifier.matchParentSize().blur(100.dp), allowMagic = false)
-                Box(modifier = Modifier.matchParentSize().background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f)))
+                AsyncWallpaperImage(
+                    wallpaper = currentWallpaper,
+                    contentDescription = null,
+                    viewModel = viewModel,
+                    modifier = Modifier.matchParentSize().blur(100.dp),
+                    allowMagic = false
+                )
+                Box(modifier = Modifier.matchParentSize().background(MaterialTheme.colorScheme.surface.copy(alpha = 0.72f)))
             } else {
-                Box(modifier = Modifier.matchParentSize().background(MaterialTheme.colorScheme.surfaceContainerHigh))
+                Box(modifier = Modifier.matchParentSize().background(MaterialTheme.colorScheme.surfaceContainerHighest))
             }
             Column(modifier = Modifier.fillMaxWidth()) {
-                Box(modifier = Modifier.fillMaxWidth().padding(vertical = 14.dp), contentAlignment = Alignment.Center) { 
-                    Box(modifier = Modifier.width(48.dp).height(6.dp).background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f), CircleShape)) 
+                Box(modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp), contentAlignment = Alignment.Center) {
+                    Box(modifier = Modifier.width(42.dp).height(5.dp).background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f), CircleShape))
                 }
                 content()
             }
@@ -117,8 +442,14 @@ fun AmbientBottomSheet(
 
 @Composable
 fun LoadingOverlay(title: String) {
-    Box(Modifier.fillMaxSize().background(Color.Black.copy(0.6f)).clickable(enabled = false) {}, contentAlignment = Alignment.Center) {
-        Card(shape = MaterialTheme.shapes.large, elevation = CardDefaults.cardElevation(0.dp)) {
+    Box(
+        Modifier.fillMaxSize().background(Color.Black.copy(0.6f)).clickable(enabled = false) {},
+        contentAlignment = Alignment.Center
+    ) {
+        Card(
+            shape = MaterialTheme.shapes.extraLarge,
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        ) {
             Column(Modifier.padding(40.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 CircularProgressIndicator(strokeWidth = 6.dp, modifier = Modifier.size(64.dp))
                 Spacer(Modifier.height(24.dp))
@@ -131,9 +462,21 @@ fun LoadingOverlay(title: String) {
 @Composable
 fun ParticleLoadingOverlay(color: Color) {
     val density = LocalDensity.current
-    val particles = remember { List(350) { Particle(Random.nextFloat(), Random.nextFloat(), Random.nextFloat() * 3f + 1f, Random.nextFloat() * 0.05f + 0.01f, Random.nextFloat() * 2f + 1f, Random.nextFloat() * 0.7f + 0.1f) } }
+    val particles = remember {
+        List(350) {
+            Particle(
+                Random.nextFloat(), Random.nextFloat(), Random.nextFloat() * 3f + 1f,
+                Random.nextFloat() * 0.05f + 0.01f, Random.nextFloat() * 2f + 1f, Random.nextFloat() * 0.7f + 0.1f
+            )
+        }
+    }
     var time by remember { mutableFloatStateOf(0f) }
-    LaunchedEffect(Unit) { val startTime = withFrameNanos { it }; while (true) { withFrameNanos { frameTime -> time = (frameTime - startTime) / 1_000_000_000f } } }
+    LaunchedEffect(Unit) {
+        val startTime = withFrameNanos { it }
+        while (true) {
+            withFrameNanos { frameTime -> time = (frameTime - startTime) / 1_000_000_000f }
+        }
+    }
 
     Canvas(modifier = Modifier.fillMaxSize()) {
         particles.forEachIndexed { index, p ->
@@ -141,7 +484,12 @@ fun ParticleLoadingOverlay(color: Color) {
             if (yProgress < 0) yProgress += 1f
             val rawSway = kotlin.math.sin((time * p.swaySpeed + index).toDouble()).toFloat()
             val blinkFactor = ((kotlin.math.sin((time * p.swaySpeed * 3f + index).toDouble()).toFloat() + 1) / 2f).let { it * it }
-            drawCircle(color = color, radius = p.radius * density.density, center = Offset((p.initialX * size.width) + (rawSway * 15.dp.toPx()), yProgress * size.height), alpha = (p.initialAlpha * blinkFactor).coerceIn(0f, 1f))
+            drawCircle(
+                color = color,
+                radius = p.radius * density.density,
+                center = Offset((p.initialX * size.width) + (rawSway * 15.dp.toPx()), yProgress * size.height),
+                alpha = (p.initialAlpha * blinkFactor).coerceIn(0f, 1f)
+            )
         }
     }
 }
@@ -155,17 +503,27 @@ fun ShapeIcon(shape: MagicShape, color: Color, modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun DestinationButton(icon: ImageVector, title: String, subtitle: String, isSetting: Boolean, onClick: () -> Unit) {
+fun DestinationButton(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    isSetting: Boolean,
+    onClick: () -> Unit
+) {
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
-    val scale by animateFloatAsState(if (isPressed) 0.94f else 1f, spring(dampingRatio = Spring.DampingRatioMediumBouncy))
-    
+    val scale by animateFloatAsState(if (isPressed) 0.94f else 1f, spring(dampingRatio = Spring.DampingRatioMediumBouncy), label = "destScale")
+
     Button(
-        onClick = onClick, enabled = !isSetting, 
-        modifier = Modifier.fillMaxWidth().height(104.dp).graphicsLayer { scaleX = scale; scaleY = scale },
+        onClick = onClick,
+        enabled = !isSetting,
+        modifier = Modifier.fillMaxWidth().height(96.dp).graphicsLayer { scaleX = scale; scaleY = scale },
         shape = MaterialTheme.shapes.extraLarge,
-        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondaryContainer, contentColor = MaterialTheme.colorScheme.onSecondaryContainer),
-        contentPadding = PaddingValues(24.dp)
+        colors = ButtonDefaults.buttonColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+            contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+        ),
+        contentPadding = PaddingValues(20.dp)
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -176,13 +534,13 @@ fun DestinationButton(icon: ImageVector, title: String, subtitle: String, isSett
                 ) {
                     Icon(icon, null, Modifier.padding(12.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
                 }
-                Spacer(Modifier.size(20.dp))
-                Column { 
+                Spacer(Modifier.size(16.dp))
+                Column {
                     Text(title, style = MaterialTheme.typography.titleLarge)
-                    Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f)) 
+                    Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f))
                 }
             }
-            if (isSetting) CircularProgressIndicator(modifier = Modifier.size(28.dp), color = MaterialTheme.colorScheme.primary)
+            if (isSetting) CircularProgressIndicator(modifier = Modifier.size(24.dp), color = MaterialTheme.colorScheme.primary)
         }
     }
 }
@@ -190,7 +548,10 @@ fun DestinationButton(icon: ImageVector, title: String, subtitle: String, isSett
 @Composable
 fun CategoryChip(title: String, isSelected: Boolean, onClick: () -> Unit) {
     FilterChip(
-        selected = isSelected, onClick = onClick, label = { Text(title, fontWeight = FontWeight.Bold) },
-        shape = MaterialTheme.shapes.large, modifier = Modifier.padding(4.dp)
+        selected = isSelected,
+        onClick = onClick,
+        label = { Text(title, fontWeight = FontWeight.Bold) },
+        shape = CircleShape,
+        modifier = Modifier.padding(4.dp)
     )
 }

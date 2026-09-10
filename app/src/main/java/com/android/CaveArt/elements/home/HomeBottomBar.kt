@@ -1,34 +1,31 @@
 package com.android.CaveArt
 
+import android.view.HapticFeedbackConstants
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 
 @Composable
 fun ConnectedWallpaperActions(
@@ -36,194 +33,338 @@ fun ConnectedWallpaperActions(
     viewModel: WallpaperViewModel,
     isDockExpanded: Boolean,
     isFloating: Boolean,
+    isPinned: Boolean = false,
     onDockExpandedChange: (Boolean) -> Unit,
     onSetWallpaperClick: () -> Unit,
     onMagicClick: () -> Unit,
     onAnimationClick: () -> Unit,
     onFilamentClick: () -> Unit,
-    onLockscreenClick: () -> Unit,
     onAddClick: () -> Unit,
     onSettingsClick: () -> Unit,
     carouselContent: @Composable () -> Unit,
-    linearBarContent: @Composable () -> Unit 
+    linearBarContent: @Composable () -> Unit
 ) {
     val enabled = currentWallpaper != null
+    val view = LocalView.current
     
-    val dockShape = if (isFloating) MaterialTheme.shapes.extraLarge else RoundedCornerShape(topStart = 48.dp, topEnd = 48.dp, bottomStart = 0.dp, bottomEnd = 0.dp)
-    val outerPadding = if (isFloating) PaddingValues(horizontal = 16.dp, vertical = 16.dp) else PaddingValues(0.dp)
-    val innerPadding = if (isFloating) PaddingValues(top = 28.dp, bottom = 24.dp) else PaddingValues(top = 28.dp, bottom = 12.dp)
-    
-    val shadowMod = if (isFloating) {
-        Modifier.shadow(12.dp, dockShape, ambientColor = Color.Black.copy(alpha=0.03f), spotColor = Color.Black.copy(alpha=0.08f))
+    val swipeModifier = if (!isPinned) {
+        Modifier.pointerInput(isPinned) {
+            detectVerticalDragGestures { _, dragAmount ->
+                if (dragAmount < -15f) onDockExpandedChange(true)
+                if (dragAmount > 15f) onDockExpandedChange(false)
+            }
+        }
     } else {
-        Modifier.shadow(24.dp, dockShape, ambientColor = Color.Black.copy(alpha=0.08f), spotColor = Color.Black.copy(alpha=0.15f))
+        Modifier
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .let { if (isFloating) it.windowInsetsPadding(WindowInsets.navigationBars) else it }
-            .padding(outerPadding)
-            .then(shadowMod)
-            .clip(dockShape)
-            .pointerInput(Unit) {
-                detectHorizontalDragGestures { change, _ -> change.consume() }
-            }
-            
-            .pointerInput(Unit) {
-                detectVerticalDragGestures { _, dragAmount ->
-                    if (dragAmount < -15f) onDockExpandedChange(true)
-                    if (dragAmount > 15f) onDockExpandedChange(false)
-                }
-            }
-            
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = {}
-            )
-    ) {
-    	
-        if (viewModel.isAmbientBlurEnabled && currentWallpaper != null) {
-            AsyncWallpaperImage(
-                wallpaper = currentWallpaper,
-                contentDescription = null,
-                viewModel = viewModel,
-                modifier = Modifier.matchParentSize().blur(80.dp),
-                allowMagic = false
-            )
-            
-            Box(modifier = Modifier.matchParentSize().background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.85f)))
-        } else {
-            Box(modifier = Modifier.matchParentSize().background(MaterialTheme.colorScheme.surfaceVariant))
-        }
-
+    if (isFloating) {
+        
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .let { if (!isFloating) it.windowInsetsPadding(WindowInsets.navigationBars) else it }
-                .animateContentSize(animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow))
-                .padding(innerPadding), 
-            horizontalAlignment = Alignment.CenterHorizontally
+                .navigationBarsPadding()
+                .padding(horizontal = 16.dp, vertical = 10.dp)
+                .then(swipeModifier),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-
+            
             AnimatedVisibility(
                 visible = isDockExpanded,
-                enter = expandVertically(animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow), expandFrom = Alignment.Top) + fadeIn(),
-                exit = shrinkVertically(animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow), shrinkTowards = Alignment.Top) + fadeOut()
+                enter = expandVertically(
+                    animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
+                    expandFrom = Alignment.Bottom
+                ) + fadeIn(tween(250)),
+                exit = shrinkVertically(
+                    animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow),
+                    shrinkTowards = Alignment.Bottom
+                ) + fadeOut(tween(200))
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(bottom = 12.dp)) {
-                    carouselContent()
-                    Spacer(Modifier.height(12.dp))
-                    linearBarContent() 
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(28.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.95f),
+                    shadowElevation = 0.dp
+                ) {
+                    Column(
+                        modifier = Modifier.padding(vertical = 10.dp, horizontal = 10.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        carouselContent()
+                        Spacer(Modifier.height(6.dp))
+                        linearBarContent()
+                    }
                 }
             }
             
-            Row(
+            Surface(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.CenterVertically
+                    .wrapContentWidth()
+                    .height(64.dp)
+                    .shadow(
+                        elevation = 12.dp,
+                        shape = CircleShape,
+                        ambientColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.25f),
+                        spotColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)
+                    ),
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.primaryContainer
             ) {
-                BottomBarToolItem(Icons.Default.AccessTime, "Clock", enabled, onLockscreenClick)
-                BottomBarToolItem(Icons.Default.ViewInAr, "3D", enabled, onFilamentClick)
-                BottomBarToolItem(Icons.Default.Animation, "Animate", enabled, onAnimationClick)
-                BottomBarToolItem(Icons.Default.AutoAwesome, "Magic", enabled, onMagicClick)
-                BottomBarToolItem(Icons.Default.Settings, "Settings", true, onSettingsClick)
-            }
+                Row(
+                    modifier = Modifier
+                        .wrapContentWidth()
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    ExpressiveMonetToolbarIcon(
+                        icon = Icons.Rounded.AutoAwesome,
+                        label = "Magic",
+                        enabled = enabled,
+                        isActive = viewModel.isMagicShapeEnabled,
+                        onClick = {
+                            view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                            onMagicClick()
+                        }
+                    )
+                    ExpressiveMonetToolbarIcon(
+                        icon = Icons.Rounded.Animation,
+                        label = "Motion",
+                        enabled = enabled,
+                        isActive = viewModel.isAnimationEnabled,
+                        onClick = {
+                            view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                            onAnimationClick()
+                        }
+                    )
+                    ExpressiveMonetToolbarIcon(
+                        icon = Icons.Rounded.ViewInAr,
+                        label = "3D",
+                        enabled = enabled,
+                        isActive = viewModel.isFilamentEnabled,
+                        onClick = {
+                            view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                            onFilamentClick()
+                        }
+                    )
+                    ExpressiveMonetToolbarIcon(
+                        icon = Icons.Rounded.Settings,
+                        label = "Settings",
+                        enabled = true,
+                        isActive = false,
+                        onClick = {
+                            view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                            onSettingsClick()
+                        }
+                    )
 
-            Spacer(modifier = Modifier.height(20.dp))
+                    Spacer(Modifier.width(2.dp))
+
+                    ExpressiveHighlightedApplyButton(
+                        enabled = enabled,
+                        onClick = {
+                            view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                            onSetWallpaperClick()
+                        }
+                    )
+                }
+            }
+        }
+    } else {
+        
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(swipeModifier)
+        ) {
             
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 24.dp), 
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                verticalAlignment = Alignment.CenterVertically
+            AnimatedVisibility(
+                visible = isDockExpanded,
+                enter = expandVertically(
+                    animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
+                    expandFrom = Alignment.Bottom
+                ) + fadeIn(tween(250)),
+                exit = shrinkVertically(
+                    animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow),
+                    shrinkTowards = Alignment.Bottom
+                ) + fadeOut(tween(200))
             ) {
-                BottomBarActionButton("Add Photo", true, onAddClick, true)
-                BottomBarActionButton("Apply", enabled, onSetWallpaperClick, true)
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                    shape = RoundedCornerShape(26.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.95f),
+                    shadowElevation = 0.dp
+                ) {
+                    Column(
+                        modifier = Modifier.padding(vertical = 10.dp, horizontal = 10.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        carouselContent()
+                        Spacer(Modifier.height(6.dp))
+                        linearBarContent()
+                    }
+                }
+            }
+            
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(topStart = 30.dp, topEnd = 30.dp),
+                color = MaterialTheme.colorScheme.primaryContainer,
+                tonalElevation = 6.dp
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .windowInsetsPadding(WindowInsets.navigationBars)
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    ExpressiveMonetToolbarIcon(
+                        icon = Icons.Rounded.AutoAwesome,
+                        label = "Magic",
+                        enabled = enabled,
+                        isActive = viewModel.isMagicShapeEnabled,
+                        onClick = {
+                            view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                            onMagicClick()
+                        }
+                    )
+                    ExpressiveMonetToolbarIcon(
+                        icon = Icons.Rounded.Animation,
+                        label = "Motion",
+                        enabled = enabled,
+                        isActive = viewModel.isAnimationEnabled,
+                        onClick = {
+                            view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                            onAnimationClick()
+                        }
+                    )
+                    ExpressiveMonetToolbarIcon(
+                        icon = Icons.Rounded.ViewInAr,
+                        label = "3D",
+                        enabled = enabled,
+                        isActive = viewModel.isFilamentEnabled,
+                        onClick = {
+                            view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                            onFilamentClick()
+                        }
+                    )
+                    ExpressiveMonetToolbarIcon(
+                        icon = Icons.Rounded.Settings,
+                        label = "Settings",
+                        enabled = true,
+                        isActive = false,
+                        onClick = {
+                            view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                            onSettingsClick()
+                        }
+                    )
+                    ExpressiveHighlightedApplyButton(
+                        enabled = enabled,
+                        onClick = {
+                            view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                            onSetWallpaperClick()
+                        }
+                    )
+                }
             }
         }
     }
 }
 
 @Composable
-fun RowScope.BottomBarToolItem(
+private fun ExpressiveMonetToolbarIcon(
     icon: ImageVector,
     label: String,
+    enabled: Boolean,
+    isActive: Boolean = false,
+    onClick: () -> Unit
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.84f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
+        label = "monetIconSquish"
+    )
+
+    Box(
+        modifier = Modifier
+            .size(50.dp)
+            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .clip(CircleShape)
+            .background(
+                if (isActive) MaterialTheme.colorScheme.surface.copy(alpha = 0.95f)
+                else Color.Transparent
+            )
+            .clickable(
+                interactionSource = interactionSource,
+                indication = LocalIndication.current,
+                enabled = enabled,
+                onClick = onClick
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = label,
+            tint = when {
+                !enabled -> MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.38f)
+                isActive -> MaterialTheme.colorScheme.primary
+                else -> MaterialTheme.colorScheme.onPrimaryContainer
+            },
+            modifier = Modifier.size(24.dp)
+        )
+    }
+}
+
+@Composable
+private fun ExpressiveHighlightedApplyButton(
     enabled: Boolean,
     onClick: () -> Unit
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
-    
     val scale by animateFloatAsState(
-        targetValue = if (isPressed) 0.75f else 1f, 
+        targetValue = if (isPressed) 0.90f else 1f,
         animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
-        label = "bounce"
+        label = "applyBtnSquish"
     )
 
-    Column(
+    Surface(
         modifier = Modifier
-            .weight(1f)
+            .size(50.dp)
             .graphicsLayer { scaleX = scale; scaleY = scale }
-            .clip(MaterialTheme.shapes.large)
-            .clickable(interactionSource = interactionSource, indication = LocalIndication.current, enabled = enabled) { onClick() }
-            .padding(vertical = 12.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+            .shadow(
+                elevation = if (enabled) 8.dp else 0.dp,
+                shape = CircleShape,
+                ambientColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f),
+                spotColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+            )
+            .clip(CircleShape)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = LocalIndication.current,
+                enabled = enabled,
+                onClick = onClick
+            ),
+        shape = CircleShape,
+        color = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = label,
-            tint = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f),
-            modifier = Modifier.size(28.dp)
-        )
-        Spacer(Modifier.height(6.dp))
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
-            color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-    }
-}
-
-@Composable
-fun RowScope.BottomBarActionButton(
-    text: String, 
-    enabled: Boolean, 
-    onClick: () -> Unit, 
-    isPrimary: Boolean = false
-) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val isPressed by interactionSource.collectIsPressedAsState()
-    val scale by animateFloatAsState(
-        targetValue = if (isPressed) 0.9f else 1f, 
-        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
-        label = "bounce"
-    )
-
-    val bgColor = if (isPrimary) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer
-    val textColor = if (!enabled) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f) else if (isPrimary) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSecondaryContainer
-
-    Box(
-        modifier = Modifier
-            .weight(1f)
-            .graphicsLayer { scaleX = scale; scaleY = scale }
-            .clip(MaterialTheme.shapes.extraLarge)
-            .background(if (enabled) bgColor else MaterialTheme.colorScheme.surfaceVariant)
-            .clickable(interactionSource = interactionSource, indication = LocalIndication.current, enabled = enabled) { onClick() }
-            .padding(vertical = 18.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = text,
-            style = MaterialTheme.typography.titleMedium.copy(letterSpacing = 0.5.sp),
-            color = textColor
-        )
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.Check,
+                contentDescription = "Set Wallpaper",
+                tint = if (enabled) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+                modifier = Modifier.size(24.dp)
+            )
+        }
     }
 }
