@@ -1,6 +1,7 @@
 package com.android.CaveArt
 
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -13,6 +14,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.BlurOn
+import androidx.compose.material.icons.rounded.Dock
+import androidx.compose.material.icons.rounded.FitScreen
+import androidx.compose.material.icons.rounded.SwipeVertical
+import androidx.compose.material.icons.rounded.Vibration
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -24,9 +30,11 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -43,7 +51,6 @@ fun SettingsScreen(
     val context = LocalContext.current
 
     Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
-        
         if (viewModel.isAmbientBlurEnabled && currentWallpaper != null) {
             AsyncWallpaperImage(
                 wallpaper = currentWallpaper,
@@ -53,7 +60,11 @@ fun SettingsScreen(
                 contentScale = ContentScale.Crop,
                 allowMagic = false
             )
-            Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface.copy(alpha = 0.75f)))
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.78f))
+            )
         }
 
         Scaffold(
@@ -63,9 +74,9 @@ fun SettingsScreen(
                     title = {
                         Text(
                             text = "Settings",
-                            style = MaterialTheme.typography.displaySmall.copy(
+                            style = MaterialTheme.typography.headlineLarge.copy(
                                 fontWeight = FontWeight.Black,
-                                letterSpacing = (-1.0).sp
+                                letterSpacing = (-0.8).sp
                             )
                         )
                     },
@@ -86,19 +97,19 @@ fun SettingsScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(paddingValues)
-                    .padding(horizontal = 20.dp)
+                    .padding(horizontal = 18.dp)
                     .verticalScroll(rememberScrollState())
                     .navigationBarsPadding(),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                
+            	
                 ExpressiveSectionCard {
-                    Text(
-                        text = "Fast Scroll Indicator",
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Black),
-                        color = MaterialTheme.colorScheme.primary
+                    SectionHeader(
+                        icon = Icons.Rounded.SwipeVertical,
+                        title = "Fast Scroll Indicator",
+                        subtitle = "Select dynamic scrubber physics"
                     )
-                    Spacer(Modifier.height(10.dp))
+                    Spacer(Modifier.height(12.dp))
 
                     LazyRow(
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -138,15 +149,15 @@ fun SettingsScreen(
                     }
 
                     Spacer(Modifier.height(18.dp))
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f))
                     Spacer(Modifier.height(14.dp))
 
-                    Text(
-                        text = "Dock Style",
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Black),
-                        color = MaterialTheme.colorScheme.primary
+                    SectionHeader(
+                        icon = Icons.Rounded.Dock,
+                        title = "Dock Style",
+                        subtitle = "Choose toolbar dock elevation"
                     )
-                    Spacer(Modifier.height(10.dp))
+                    Spacer(Modifier.height(12.dp))
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -164,11 +175,11 @@ fun SettingsScreen(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .height(76.dp)
-                                        .clip(RoundedCornerShape(20.dp))
+                                        .clip(RoundedCornerShape(22.dp))
                                         .border(
                                             width = if (isSelected) 2.5.dp else 1.dp,
                                             color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
-                                            shape = RoundedCornerShape(20.dp)
+                                            shape = RoundedCornerShape(22.dp)
                                         )
                                         .clickable { viewModel.setFloatingDockEnabled(floating) },
                                     colors = CardDefaults.cardColors(
@@ -192,82 +203,37 @@ fun SettingsScreen(
                 }
                 
                 ExpressiveSectionCard {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Fixed Alignment",
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                            )
-                            Text(
-                                text = if (viewModel.isFixedAlignmentEnabled) "Static image (No parallax on scroll)" else "Scrolls alongside pages (Parallax)",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Spacer(Modifier.width(12.dp))
-                        Switch(
-                            checked = viewModel.isFixedAlignmentEnabled,
-                            onCheckedChange = { viewModel.setFixedAlignmentEnabled(it) }
-                        )
-                    }
+                    ExpressiveToggleRow(
+                        icon = Icons.Rounded.FitScreen,
+                        title = "Fixed Alignment",
+                        description = if (viewModel.isFixedAlignmentEnabled) "Static image (No scroll parallax)" else "Smooth parallax scrolling",
+                        checked = viewModel.isFixedAlignmentEnabled,
+                        onCheckedChange = { viewModel.setFixedAlignmentEnabled(it) }
+                    )
 
-                    Spacer(Modifier.height(14.dp))
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
-                    Spacer(Modifier.height(14.dp))
+                    Spacer(Modifier.height(12.dp))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f))
+                    Spacer(Modifier.height(12.dp))
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Haptic Feedback",
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                            )
-                            Text(
-                                text = if (viewModel.isHapticsEnabled) "Tactile clicks & tick vibrations active" else "Vibrations disabled",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Spacer(Modifier.width(12.dp))
-                        Switch(
-                            checked = viewModel.isHapticsEnabled,
-                            onCheckedChange = { viewModel.setHapticsEnabled(it) }
-                        )
-                    }
+                    ExpressiveToggleRow(
+                        icon = Icons.Rounded.Vibration,
+                        title = "Haptic Feedback",
+                        description = if (viewModel.isHapticsEnabled) "Tactile clicks active on touch" else "Vibrations disabled",
+                        checked = viewModel.isHapticsEnabled,
+                        onCheckedChange = { viewModel.setHapticsEnabled(it) }
+                    )
 
-                    Spacer(Modifier.height(14.dp))
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
-                    Spacer(Modifier.height(14.dp))
+                    Spacer(Modifier.height(12.dp))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f))
+                    Spacer(Modifier.height(12.dp))
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Ambient Glow",
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                            )
-                            Text(
-                                text = if (viewModel.isAmbientBlurEnabled) "Dynamic blurred backlight enabled" else "Solid surface background",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Spacer(Modifier.width(12.dp))
-                        Switch(
-                            checked = viewModel.isAmbientBlurEnabled,
-                            onCheckedChange = { viewModel.setAmbientBlurEnabled(it) }
-                        )
-                    }
+                    ExpressiveToggleRow(
+                        icon = Icons.Rounded.BlurOn,
+                        title = "Ambient Glow",
+                        description = if (viewModel.isAmbientBlurEnabled) "Dynamic wallpaper backlighting" else "Solid system surface",
+                        checked = viewModel.isAmbientBlurEnabled,
+                        onCheckedChange = { viewModel.setAmbientBlurEnabled(it) }
+                    )
                 }
                 
                 ExpressiveSectionCard {
@@ -276,23 +242,27 @@ fun SettingsScreen(
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Black),
                         color = MaterialTheme.colorScheme.primary
                     )
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(6.dp))
                     Text(
-                        text = "Test neural segmentation, foreground refinement, and deep matting models.",
+                        text = "Real-time inspection of 3-stage neural segmentation, despilling, and matting.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
-                    Spacer(Modifier.height(14.dp))
+                    Spacer(Modifier.height(16.dp))
 
                     Button(
                         onClick = { viewModel.runModelDiagnostics(context, currentWallpaper) },
                         enabled = !viewModel.isRunningDebug && currentWallpaper != null,
-                        modifier = Modifier.fillMaxWidth().height(50.dp),
-                        shape = CircleShape
+                        modifier = Modifier.fillMaxWidth().height(52.dp),
+                        shape = CircleShape,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary
+                        )
                     ) {
                         if (viewModel.isRunningDebug) {
-                            CircularProgressIndicator(Modifier.size(20.dp), color = Color.White)
+                            CircularProgressIndicator(Modifier.size(22.dp), color = Color.White)
                         } else {
                             Text("Run Model Diagnostic", fontWeight = FontWeight.Black)
                         }
@@ -302,14 +272,14 @@ fun SettingsScreen(
                         viewModel.debugResults.forEach { res ->
                             Card(
                                 modifier = Modifier.padding(top = 12.dp).fillMaxWidth(),
-                                shape = RoundedCornerShape(18.dp),
+                                shape = RoundedCornerShape(22.dp),
                                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest)
                             ) {
                                 Column(Modifier.padding(14.dp)) {
                                     Text(res.testName, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
                                     Text("Input: ${res.inputType}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
                                     if (res.error != null) {
-                                        Text("Error: ${res.error}", color = Color.Red, style = MaterialTheme.typography.bodySmall)
+                                        Text("Error: ${res.error}", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                                     } else {
                                         Text("Min: ${"%.2f".format(res.minOutput)} | Max: ${"%.2f".format(res.maxOutput)}", style = MaterialTheme.typography.bodySmall)
                                         Spacer(Modifier.height(6.dp))
@@ -317,7 +287,7 @@ fun SettingsScreen(
                                             androidx.compose.foundation.Image(
                                                 bitmap = res.previewBitmap.asImageBitmap(),
                                                 contentDescription = null,
-                                                modifier = Modifier.fillMaxWidth().height(160.dp).clip(RoundedCornerShape(12.dp)).background(Color.Black)
+                                                modifier = Modifier.fillMaxWidth().height(160.dp).clip(RoundedCornerShape(14.dp)).background(Color.Black)
                                             )
                                         }
                                     }
@@ -327,9 +297,68 @@ fun SettingsScreen(
                     }
                 }
 
-                Spacer(Modifier.height(20.dp))
+                Spacer(Modifier.height(24.dp))
             }
         }
+    }
+}
+
+@Composable
+private fun SectionHeader(icon: ImageVector, title: String, subtitle: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Surface(
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.primaryContainer,
+            modifier = Modifier.size(38.dp)
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(icon, null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(20.dp))
+            }
+        }
+        Spacer(Modifier.width(12.dp))
+        Column {
+            Text(title, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
+            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun ExpressiveToggleRow(
+    icon: ImageVector,
+    title: String,
+    description: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Surface(
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.surfaceContainerHighest,
+            modifier = Modifier.size(38.dp)
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(icon, null, tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(20.dp))
+            }
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
+            Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Spacer(Modifier.width(12.dp))
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                checkedTrackColor = MaterialTheme.colorScheme.primary
+            )
+        )
     }
 }
 
@@ -392,7 +421,6 @@ fun LiveDockTile(isFloating: Boolean) {
 @Composable
 fun LiveScrollTile(style: Int) {
     val infiniteTransition = rememberInfiniteTransition(label = "LiveTile")
-
     val progress by infiniteTransition.animateFloat(
         initialValue = -1f, targetValue = 1f,
         animationSpec = infiniteRepeatable(animation = tween(1200, easing = FastOutSlowInEasing), repeatMode = RepeatMode.Reverse),
@@ -409,9 +437,7 @@ fun LiveScrollTile(style: Int) {
         val thumbX = cx + (progress * maxDragPx)
 
         when (style) {
-            0 -> {
-                drawRoundRect(color = color, topLeft = Offset(thumbX - 10.dp.toPx(), cy - 3.dp.toPx()), size = Size(20.dp.toPx(), 6.dp.toPx()), cornerRadius = CornerRadius(3.dp.toPx()))
-            }
+            0 -> drawRoundRect(color = color, topLeft = Offset(thumbX - 10.dp.toPx(), cy - 3.dp.toPx()), size = Size(20.dp.toPx(), 6.dp.toPx()), cornerRadius = CornerRadius(3.dp.toPx()))
             1 -> {
                 drawRoundRect(color = trackColor, topLeft = Offset(0f, cy - 6.dp.toPx()), size = Size(w, 12.dp.toPx()), cornerRadius = CornerRadius(6.dp.toPx()))
                 drawRoundRect(color = color, topLeft = Offset(thumbX - 8.dp.toPx(), cy - 4.dp.toPx()), size = Size(16.dp.toPx(), 8.dp.toPx()), cornerRadius = CornerRadius(4.dp.toPx()))
