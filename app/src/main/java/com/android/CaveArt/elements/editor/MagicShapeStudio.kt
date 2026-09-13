@@ -56,18 +56,32 @@ fun MagicShapeStudio(
     val isDarkTheme = isSystemInDarkTheme()
 
     var activeTab by remember { mutableStateOf(MagicTab.SHAPES) }
-    var monetPalette by remember(wallpaper.id) { mutableStateOf(MonetEngine.getDefaultPalette()) }
     var currentBitmap by remember { mutableStateOf<Bitmap?>(null) }
     
+    val cachedPalette = remember(wallpaper.id, isDarkTheme) {
+        MonetEngine.getCachedPalette(wallpaper.id, isDarkTheme)
+    }
+
+    var monetPalette by remember(wallpaper.id, isDarkTheme) { 
+        mutableStateOf(cachedPalette ?: MonetEngine.getDefaultPalette()) 
+    }
+    
     LaunchedEffect(wallpaper.id) {
+        val preferredColor = viewModel.getColorForWallpaper(wallpaper.id)
+            ?: cachedPalette?.firstOrNull()
+        if (preferredColor != null) {
+            viewModel.updateMagicConfig(viewModel.currentMagicShape, preferredColor)
+        }
+    }
+    
+    LaunchedEffect(wallpaper.id, isDarkTheme) {
         withContext(Dispatchers.IO) {
-            val palette = MonetEngine.getPalette(context, wallpaper)
+            val palette = MonetEngine.getThemePalette(context, wallpaper, isDarkTheme).allColors
             withContext(Dispatchers.Main) {
                 monetPalette = palette
                 
-                if (isDefaultColor(viewModel.currentBackgroundColor)) {
-                    viewModel.updateMagicConfig(viewModel.currentMagicShape, palette.first())
-                }
+                val chosenColor = viewModel.getColorForWallpaper(wallpaper.id) ?: palette.first()
+                viewModel.updateMagicConfig(viewModel.currentMagicShape, chosenColor)
             }
         }
     }
@@ -105,7 +119,6 @@ fun MagicShapeStudio(
                 verticalArrangement = Arrangement.SpaceBetween,
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                
                 Box(
                     modifier = Modifier
                         .weight(1f)
@@ -296,6 +309,7 @@ fun MagicShapeStudio(
                                             colors = monetPalette,
                                             selectedColor = viewModel.currentBackgroundColor,
                                             onColorSelected = { colorInt ->
+                                                viewModel.saveColorForWallpaper(wallpaper.id, colorInt)
                                                 viewModel.updateMagicConfig(viewModel.currentMagicShape, colorInt)
                                             }
                                         )
@@ -376,9 +390,6 @@ private fun SectionHeaderWithChevron(title: String) {
     }
 }
 
-/**
- * Crash-Proof Shape Preview Card (GPU-scaled halo)
- */
 @Composable
 private fun ShapePreviewCard(
     shape: MagicShape,
