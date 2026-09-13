@@ -1,9 +1,13 @@
 package com.android.CaveArt
 
 import android.graphics.Bitmap
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffXfermode
+import android.graphics.RectF
 import android.view.HapticFeedbackConstants
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -15,6 +19,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -24,8 +29,9 @@ import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
@@ -33,7 +39,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 private enum class MagicTab(val label: String) {
@@ -54,56 +60,71 @@ fun MagicShapeStudio(
     val context = LocalContext.current
     val view = LocalView.current
     val isDarkTheme = isSystemInDarkTheme()
+    val scope = rememberCoroutineScope()
 
     var activeTab by remember { mutableStateOf(MagicTab.SHAPES) }
-    var currentBitmap by remember { mutableStateOf<Bitmap?>(null) }
-    
+    var previewOriginal by remember { mutableStateOf<Bitmap?>(null) }
+    var previewCutout by remember { mutableStateOf<Bitmap?>(null) }
+
     val cachedPalette = remember(wallpaper.id, isDarkTheme) {
         MonetEngine.getCachedPalette(wallpaper.id, isDarkTheme)
     }
+    var monetPalette by remember(wallpaper.id, isDarkTheme) {
+        mutableStateOf(cachedPalette ?: MonetEngine.getDefaultPalette())
+    }
 
-    var monetPalette by remember(wallpaper.id, isDarkTheme) { 
-        mutableStateOf(cachedPalette ?: MonetEngine.getDefaultPalette()) 
-    }
-    
     LaunchedEffect(wallpaper.id) {
-        val preferredColor = viewModel.getColorForWallpaper(wallpaper.id)
+        val initialColor = viewModel.getColorForWallpaper(wallpaper.id)
             ?: cachedPalette?.firstOrNull()
-        if (preferredColor != null) {
-            viewModel.updateMagicConfig(viewModel.currentMagicShape, preferredColor)
+        if (initialColor != null) {
+            viewModel.updateMagicConfig(viewModel.currentMagicShape, initialColor)
         }
+        val comp = viewModel.getHighQualityComponents(context, wallpaper)
+        previewOriginal = comp.first
+        previewCutout = comp.second
     }
-    
+
     LaunchedEffect(wallpaper.id, isDarkTheme) {
         withContext(Dispatchers.IO) {
             val palette = MonetEngine.getThemePalette(context, wallpaper, isDarkTheme).allColors
             withContext(Dispatchers.Main) {
                 monetPalette = palette
-                
                 val chosenColor = viewModel.getColorForWallpaper(wallpaper.id) ?: palette.first()
                 viewModel.updateMagicConfig(viewModel.currentMagicShape, chosenColor)
             }
         }
     }
 
-    LaunchedEffect(
-        wallpaper.id, viewModel.currentMagicShape, viewModel.currentBackgroundColor,
-        viewModel.is3DPopEnabled, viewModel.magicScale, viewModel.isCentered, monetPalette
-    ) {
-        delay(30)
-        val processed = withContext(Dispatchers.Default) {
-            viewModel.getOrCreateProcessedBitmap(context, wallpaper, allowMagic = true)
+    var fromShape by remember { mutableStateOf<MagicShape>(viewModel.currentMagicShape) }
+    var toShape by remember { mutableStateOf<MagicShape>(viewModel.currentMagicShape) }
+    val morphProgress = remember { Animatable(1f) }
+
+    fun triggerShapeMorph(newShape: MagicShape) {
+        if (newShape == toShape) return
+        fromShape = toShape
+        toShape = newShape
+        viewModel.updateMagicConfig(newShape, viewModel.currentBackgroundColor)
+        scope.launch {
+            morphProgress.snapTo(0f)
+            morphProgress.animateTo(
+                targetValue = 1f,
+                animationSpec = spring(
+                    dampingRatio = 0.72f,
+                    stiffness = Spring.StiffnessMediumLow
+                )
+            )
         }
-        if (processed != null) currentBitmap = processed
     }
 
     Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
-        if (viewModel.isAmbientBlurEnabled && currentBitmap != null) {
-            androidx.compose.foundation.Image(
-                bitmap = currentBitmap!!.asImageBitmap(),
+        if (viewModel.isAmbientBlurEnabled && previewOriginal != null) {
+            AsyncWallpaperImage(
+                wallpaper = wallpaper,
                 contentDescription = null,
+                viewModel = viewModel,
                 modifier = Modifier.fillMaxSize().blur(90.dp),
-                contentScale = ContentScale.Crop
+                contentScale = ContentScale.Crop,
+                allowMagic = false
             )
             Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface.copy(alpha = 0.75f)))
         }
@@ -141,13 +162,73 @@ fun MagicShapeStudio(
                         colors = CardDefaults.cardColors(containerColor = Color.Black)
                     ) {
                         Box(modifier = Modifier.fillMaxSize()) {
-                            if (currentBitmap != null) {
-                                androidx.compose.foundation.Image(
-                                    bitmap = currentBitmap!!.asImageBitmap(),
-                                    contentDescription = "Preview",
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentScale = ContentScale.Crop
-                                )
+                            if (previewOriginal != null) {
+                                val paint = remember {
+                                    android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG or android.graphics.Paint.FILTER_BITMAP_FLAG)
+                                }
+                                val maskXferPaint = remember {
+                                    android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                                        xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_IN)
+                                    }
+                                }
+                                val screenShapeRect = remember { RectF() }
+                                val liveShapePath = remember { android.graphics.Path() }
+                                val bodyMatrix = remember { android.graphics.Matrix() }
+
+                                Canvas(modifier = Modifier.fillMaxSize()) {
+                                    val progress = morphProgress.value
+                                    val config = LiveWallpaperConfig(
+                                        shapeName = toShape.name,
+                                        backgroundColor = viewModel.currentBackgroundColor,
+                                        is3DPopEnabled = viewModel.is3DPopEnabled,
+                                        scale = viewModel.magicScale,
+                                        isCentered = viewModel.isCentered,
+                                        isMagicShapeEnabled = true
+                                    )
+
+                                    val geo = ShapeEffectHelper.getUnifiedGeometry(
+                                        previewOriginal!!.width, previewOriginal!!.height,
+                                        size.width, size.height, previewCutout, config
+                                    )
+
+                                    val currentImgScale = geo.baseScale * config.scale
+                                    val anchorX = if (config.isCentered) geo.subjectCenterX else previewOriginal!!.width / 2f
+                                    val anchorY = if (config.isCentered) geo.subjectCenterY else previewOriginal!!.height / 2f
+
+                                    bodyMatrix.reset()
+                                    bodyMatrix.postTranslate(-anchorX, -anchorY)
+                                    bodyMatrix.postScale(currentImgScale, currentImgScale)
+                                    bodyMatrix.postTranslate(size.width / 2f, size.height / 2f)
+
+                                    screenShapeRect.set(geo.shapeBoundsRel)
+                                    bodyMatrix.mapRect(screenShapeRect)
+
+                                    val vShift = if (config.is3DPopEnabled) screenShapeRect.height() * 0.12f else 0f
+                                    screenShapeRect.offset(0f, vShift)
+
+                                    PixelShapeMorpher.buildMorphedPath(
+                                        fromShape = fromShape,
+                                        toShape = toShape,
+                                        progress = progress,
+                                        bounds = screenShapeRect,
+                                        targetPath = liveShapePath
+                                    )
+
+                                    drawIntoCanvas { canvas ->
+                                        ShapeEffectHelper.drawLivePixelShape(
+                                            canvas = canvas.nativeCanvas,
+                                            original = previewOriginal!!,
+                                            cutout = previewCutout,
+                                            geo = geo,
+                                            config = config,
+                                            shapePath = liveShapePath,
+                                            screenShapeRect = screenShapeRect,
+                                            bodyMatrix = bodyMatrix,
+                                            bitmapPaint = paint,
+                                            maskXferPaint = maskXferPaint
+                                        )
+                                    }
+                                }
                             } else {
                                 AsyncWallpaperImage(
                                     wallpaper = wallpaper,
@@ -200,7 +281,7 @@ fun MagicShapeStudio(
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Icon(
-                                imageVector = Icons.Rounded.ArrowBack,
+                                imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
                                 contentDescription = "Back",
                                 tint = MaterialTheme.colorScheme.onSurface,
                                 modifier = Modifier.size(22.dp)
@@ -208,7 +289,7 @@ fun MagicShapeStudio(
                         }
                     }
                 }
-                
+
                 Surface(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -282,19 +363,19 @@ fun MagicShapeStudio(
                             when (currentTab) {
                                 MagicTab.SHAPES -> {
                                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                        SectionHeaderWithChevron("Geometric Shapes")
+                                        SectionHeaderWithChevron("Official Material 3 Shapes")
                                         LazyRow(
                                             horizontalArrangement = Arrangement.spacedBy(12.dp),
                                             modifier = Modifier.fillMaxWidth()
                                         ) {
                                             items(MagicShape.values()) { shape ->
-                                                val isSelected = viewModel.currentMagicShape == shape
+                                                val isSelected = toShape == shape
                                                 ShapePreviewCard(
                                                     shape = shape,
                                                     isSelected = isSelected,
                                                     onClick = {
                                                         view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                                                        viewModel.updateMagicConfig(shape, viewModel.currentBackgroundColor)
+                                                        triggerShapeMorph(shape)
                                                     }
                                                 )
                                             }
@@ -310,7 +391,7 @@ fun MagicShapeStudio(
                                             selectedColor = viewModel.currentBackgroundColor,
                                             onColorSelected = { colorInt ->
                                                 viewModel.saveColorForWallpaper(wallpaper.id, colorInt)
-                                                viewModel.updateMagicConfig(viewModel.currentMagicShape, colorInt)
+                                                viewModel.updateMagicConfig(toShape, colorInt)
                                             }
                                         )
                                     }
@@ -397,14 +478,14 @@ private fun ShapePreviewCard(
     onClick: () -> Unit
 ) {
     val innerScale by animateFloatAsState(
-        targetValue = if (isSelected) 0.82f else 0.96f,
+        targetValue = if (isSelected) 0.85f else 0.98f,
         animationSpec = spring(stiffness = 600f, dampingRatio = Spring.DampingRatioMediumBouncy),
         label = "shapeHaloScale"
     )
 
     Box(
         modifier = Modifier
-            .size(68.dp)
+            .size(64.dp)
             .clip(CircleShape)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
@@ -434,7 +515,7 @@ private fun ShapePreviewCard(
             ShapeIcon(
                 shape = shape,
                 color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(26.dp)
+                modifier = Modifier.size(38.dp)
             )
         }
     }

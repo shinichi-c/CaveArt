@@ -97,5 +97,7 @@ dependencies {
     implementation("com.google.android.filament:gltfio-android:1.70.0")
     implementation("com.google.android.filament:filament-utils-android:1.70.0")
 
+implementation("androidx.graphics:graphics-shapes:1.0.1")
+
     compileOnly("io.github.libxposed:api:101.0.1")
 }

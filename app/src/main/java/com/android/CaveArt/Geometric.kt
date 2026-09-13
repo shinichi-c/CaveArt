@@ -11,7 +11,7 @@ object Geometric {
         cutout: Bitmap,
         originalWidth: Int,
         originalHeight: Int,
-        paddingFactor: Float
+        paddingFactor: Float = 1.0f
     ): RectF {
         val w = cutout.width
         val h = cutout.height
@@ -25,9 +25,9 @@ object Geometric {
         var foundSubject = false
         
         for (y in 0 until h) {
+            val rowOffset = y * w
             for (x in 0 until w) {
-                
-                val alpha = (pixels[y * w + x] shr 24) and 0xFF
+                val alpha = (pixels[rowOffset + x] ushr 24) and 0xFF
                 if (alpha > 40) {
                     if (x < minX) minX = x
                     if (x > maxX) maxX = x
@@ -54,7 +54,8 @@ object Geometric {
             val subjectHeight = finalMaxY - finalMinY
             
             val maxDim = max(subjectWidth, subjectHeight)
-            val radius = (maxDim * paddingFactor) / 2f
+            val framingMultiplier = 1.45f
+            val radius = (maxDim * framingMultiplier * paddingFactor) / 2f
 
             return RectF(
                 centerX - radius,
@@ -65,7 +66,7 @@ object Geometric {
         } else {
             val cx = originalWidth / 2f
             val cy = originalHeight / 2f
-            val r = min(originalWidth, originalHeight) / 2f * paddingFactor
+            val r = (min(originalWidth, originalHeight) * 0.75f / 2f) * paddingFactor
             return RectF(cx - r, cy - r, cx + r, cy + r)
         }
     }
