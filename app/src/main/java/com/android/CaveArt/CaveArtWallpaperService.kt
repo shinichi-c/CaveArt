@@ -40,7 +40,6 @@ class CaveArtWallpaperService : WallpaperService() {
         private var cachedGeometry: UnifiedGeometry? = null
         
         private val _bodyMatrix = Matrix()
-        private val _shapeMatrix = Matrix()
 
         private var isVisible = false
         private var lastFrameTimeNanos = 0L
@@ -156,28 +155,19 @@ class CaveArtWallpaperService : WallpaperService() {
                         )
                     } else if (config.isMagicShapeEnabled) {
                         val timeSeconds = System.nanoTime() / 1_000_000_000f
-                        val breathScale = 1.0f + (sin(timeSeconds * 1.5f) * 0.02f)
-                        val breathY = sin(timeSeconds * 1.2f) * 8f
+                        val breathY = sin(timeSeconds * 1.2f) * 6f
+                        
+                        geo.setupMatrices(
+                            imgW = bmp.width,
+                            imgH = bmp.height,
+                            screenW = canvas.width.toFloat(),
+                            screenH = canvas.height.toFloat(),
+                            config = config,
+                            outBodyMatrix = _bodyMatrix,
+                            outScreenShapeRect = screenShapeRect
+                        )
+                        _bodyMatrix.postTranslate(0f, breathY)
 
-                        val currentImgScale = geo.baseScale * config.scale * breathScale
-
-                        val anchorX = if (config.isCentered) geo.subjectCenterX else bmp.width / 2f
-                        val anchorY = if (config.isCentered) geo.subjectCenterY else bmp.height / 2f
-
-                        _bodyMatrix.reset()
-                        _bodyMatrix.postTranslate(-anchorX, -anchorY)
-                        _bodyMatrix.postScale(currentImgScale, currentImgScale)
-                        _bodyMatrix.postTranslate(canvas.width / 2f, (canvas.height / 2f) + breathY)
-                        
-                        canvas.drawColor(config.backgroundColor)
-                        
-                        screenShapeRect.set(geo.shapeBoundsRel)
-                        _shapeMatrix.set(_bodyMatrix)
-                        _shapeMatrix.mapRect(screenShapeRect)
-                        
-                        val vShift = if (config.is3DPopEnabled) screenShapeRect.height() * 0.12f else 0f
-                        screenShapeRect.offset(0f, vShift)
-                        
                         val shapeEnum = try { MagicShape.valueOf(config.shapeName) } catch (e: Exception) { MagicShape.SQUIRCLE }
                         clipPath.rewind()
                         PixelShapeMorpher.buildMorphedPath(
@@ -188,18 +178,18 @@ class CaveArtWallpaperService : WallpaperService() {
                             targetPath = clipPath
                         )
 
-                        canvas.save()
-                        canvas.clipPath(clipPath)
-                        canvas.drawBitmap(bmp, _bodyMatrix, bitmapPaint)
-                        canvas.restore()
-                        
-                        if (config.is3DPopEnabled && maskBitmap != null) {
-                            val popMatrix = Matrix(_bodyMatrix)
-                            val id = canvas.saveLayer(0f, 0f, canvas.width.toFloat(), canvas.height.toFloat(), null)
-                            canvas.drawBitmap(maskBitmap!!, popMatrix, bitmapPaint)
-                            canvas.drawBitmap(bmp, popMatrix, maskXferPaint)
-                            canvas.restoreToCount(id)
-                        }
+                        ShapeEffectHelper.drawLivePixelShape(
+                            canvas = canvas,
+                            original = bmp,
+                            cutout = maskBitmap,
+                            geo = geo,
+                            config = config,
+                            shapePath = clipPath,
+                            screenShapeRect = screenShapeRect,
+                            bodyMatrix = _bodyMatrix,
+                            bitmapPaint = bitmapPaint,
+                            maskXferPaint = maskXferPaint
+                        )
                     } else {
                         canvas.drawColor(Color.BLACK)
                         _bodyMatrix.reset()
@@ -264,7 +254,7 @@ class CaveArtWallpaperService : WallpaperService() {
                         BitmapHelper.decodeSampledBitmapFromResource(resources, config.resourceId, 2500)
                     } else null
                 } catch (e: Exception) { 
-                    e.printStackTrace()
+                    e.printStackTrace() 
                     null 
                 }
 
