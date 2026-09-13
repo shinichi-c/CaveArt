@@ -112,7 +112,7 @@ fun ClockStudio(
     var isDraggingClock by remember { mutableStateOf(false) }
     var isDraggingDate by remember { mutableStateOf(false) }
     var isCalculatingMap by remember { mutableStateOf(false) }
-    var extractedColors by remember { mutableStateOf(listOf(android.graphics.Color.WHITE, android.graphics.Color.BLACK)) }
+    var extractedColors by remember { mutableStateOf<List<Int>>(emptyList()) }
 
     var timeString by remember { mutableStateOf("") }
     var dateText by remember { mutableStateOf("") }
@@ -166,40 +166,16 @@ fun ClockStudio(
             delay(1000L)
         }
     }
-
-    LaunchedEffect(wallpaper) {
-        state.clockColor.intValue = android.graphics.Color.WHITE
+    
+    LaunchedEffect(wallpaper, isDarkTheme) {
         withContext(Dispatchers.IO) {
-            val bitmap = if (wallpaper.uri != null) {
-                BitmapHelper.decodeSampledBitmapFromUri(context, wallpaper.uri, 112)
-            } else {
-                BitmapHelper.decodeSampledBitmapFromResource(context.resources, wallpaper.resourceId, 112)
-            }
-            if (bitmap != null) {
-                val pixels = IntArray(bitmap.width * bitmap.height)
-                bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
-                var finalColors = com.materialkolor.score.Score.score(
-                    com.materialkolor.quantize.QuantizerCelebi.quantize(pixels, 128)
-                ).distinct().take(5)
+            val dynamicTheme = MonetEngine.getThemePalette(context, wallpaper, isDarkTheme)
+            withContext(Dispatchers.Main) {
+                extractedColors = dynamicTheme.allColors
 
-                val hct = com.materialkolor.hct.Hct.fromInt(finalColors.firstOrNull() ?: android.graphics.Color.WHITE)
-                val hue = hct.hue
-                val tonePrimary = if (isDarkTheme) 85.0 else 40.0
-                val toneSecondary = if (isDarkTheme) 80.0 else 30.0
-
-                finalColors = listOf(
-                    com.materialkolor.hct.Hct.from(hue, maxOf(48.0, hct.chroma), tonePrimary).toInt(),
-                    com.materialkolor.hct.Hct.from(hue, 16.0, toneSecondary).toInt(),
-                    com.materialkolor.hct.Hct.from(hue + 60.0, 24.0, tonePrimary).toInt(),
-                    com.materialkolor.hct.Hct.from(hue, 4.0, if (isDarkTheme) 90.0 else 20.0).toInt(),
-                    com.materialkolor.hct.Hct.from(hue + 180.0, maxOf(48.0, hct.chroma), tonePrimary).toInt()
-                )
-
-                withContext(Dispatchers.Main) {
-                    extractedColors = listOf(android.graphics.Color.WHITE, android.graphics.Color.BLACK) + finalColors
-                    if (finalColors.isNotEmpty()) state.clockColor.intValue = finalColors.first()
+                if (state.clockColor.intValue == 0 || isDefaultColor(state.clockColor.intValue)) {
+                    state.clockColor.intValue = dynamicTheme.tonalSpot.firstOrNull() ?: dynamicTheme.seedColor
                 }
-                bitmap.recycle()
             }
         }
     }
@@ -334,7 +310,6 @@ fun ClockStudio(
             val cardElevation by animateDpAsState(targetElevation, label = "cardElevation")
 
             if (isLandscape) {
-                
                 Row(
                     modifier = Modifier
                         .fillMaxSize()
@@ -405,7 +380,6 @@ fun ClockStudio(
                     }
                 }
             } else {
-                
                 Box(
                     modifier = Modifier
                         .fillMaxSize()

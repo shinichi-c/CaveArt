@@ -125,6 +125,15 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
 
     var isClockStretchEnabled by mutableStateOf(clockPrefs.getBoolean("clock_stretch", false))
     var clockCollisionMap by mutableStateOf(clockPrefs.getString("clock_collision_map", "") ?: "")
+    
+    private val wallpaperColorMap = mutableMapOf<String, Int>()
+
+    fun getColorForWallpaper(wallpaperId: String): Int? = wallpaperColorMap[wallpaperId]
+
+    fun saveColorForWallpaper(wallpaperId: String, color: Int) {
+        wallpaperColorMap[wallpaperId] = color
+        currentBackgroundColor = color
+    }
 
     fun getAvailableFonts(context: Context): List<String> {
         return try {

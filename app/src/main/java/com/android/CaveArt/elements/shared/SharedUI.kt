@@ -1,19 +1,23 @@
 package com.android.CaveArt
 
+import android.app.Activity
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.RectF
 import android.view.HapticFeedbackConstants
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.CornerSize
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -21,6 +25,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.rounded.Colorize
+import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -28,24 +34,19 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asComposePath
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.rememberAsyncImagePainter
@@ -58,9 +59,9 @@ data class Particle(
 
 fun safeColor(colorInt: Int): Color {
     return Color(
-        alpha = (colorInt shr 24) and 0xFF,
-        red = (colorInt shr 16) and 0xFF,
-        green = (colorInt shr 8) and 0xFF,
+        alpha = (colorInt ushr 24) and 0xFF,
+        red = (colorInt ushr 16) and 0xFF,
+        green = (colorInt ushr 8) and 0xFF,
         blue = colorInt and 0xFF
     )
 }
@@ -302,8 +303,7 @@ fun <T> ExpressiveSegmentedPill(
 }
 
 /**
- * Crash-Proof Expressive Color Halo Selector
- * Uses GPU scale transformations instead of Modifier.padding() to prevent negative padding crashes.
+ * Expressive Color Halo Selector with Android 17 Native EyeDropper & Custom Color Picker.
  */
 @Composable
 fun ExpressiveColorHaloSelector(
@@ -312,70 +312,266 @@ fun ExpressiveColorHaloSelector(
     onColorSelected: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     val view = LocalView.current
+    var showCustomPicker by remember { mutableStateOf(false) }
+    
+    val eyeDropperLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val pickedColor = result.data?.getIntExtra("android.intent.extra.COLOR", selectedColor)
+                ?: selectedColor
+            onColorSelected(pickedColor)
+        }
+    }
+
+    val displayColors = remember(colors, selectedColor) {
+        if (selectedColor != 0 && !isDefaultColor(selectedColor) && !colors.contains(selectedColor)) {
+            listOf(selectedColor) + colors
+        } else {
+            colors
+        }
+    }
 
     Row(
         modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        colors.forEach { colorInt ->
-            val isSelected = colorInt == selectedColor
-            val composeColor = safeColor(colorInt)
-            val isBright = composeColor.luminance() > 0.5f
-            
-            val innerScale by animateFloatAsState(
-                targetValue = if (isSelected) 0.78f else 0.94f,
-                animationSpec = spring(stiffness = 600f, dampingRatio = Spring.DampingRatioMediumBouncy),
-                label = "haloScale"
-            )
-
-            Box(
-                modifier = Modifier
-                    .size(46.dp)
-                    .clip(CircleShape)
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null
-                    ) {
-                        if (!isSelected) {
-                            view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
-                            onColorSelected(colorInt)
-                        }
-                    },
-                contentAlignment = Alignment.Center
-            ) {
-                if (isSelected) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .border(2.5.dp, MaterialTheme.colorScheme.primary, CircleShape)
-                    )
+        
+        Surface(
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.surfaceContainerHighest,
+            modifier = Modifier
+                .size(46.dp)
+                .clip(CircleShape)
+                .clickable {
+                    view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                    val eyeDropperIntent = Intent("android.intent.action.OPEN_EYE_DROPPER")
+                    if (context.packageManager.resolveActivity(eyeDropperIntent, 0) != null) {
+                        eyeDropperLauncher.launch(eyeDropperIntent)
+                    } else {
+                        showCustomPicker = true
+                    }
                 }
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    imageVector = Icons.Rounded.Colorize,
+                    contentDescription = "Pick Custom Color",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
+        
+        LazyRow(
+            modifier = Modifier.weight(1f),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            contentPadding = PaddingValues(horizontal = 2.dp)
+        ) {
+            items(displayColors) { colorInt ->
+                val isSelected = colorInt == selectedColor
+                val composeColor = safeColor(colorInt)
+                val isBright = composeColor.luminance() > 0.5f
+
+                val innerScale by animateFloatAsState(
+                    targetValue = if (isSelected) 0.78f else 0.94f,
+                    animationSpec = spring(stiffness = 600f, dampingRatio = Spring.DampingRatioMediumBouncy),
+                    label = "haloScale"
+                )
 
                 Box(
                     modifier = Modifier
-                        .fillMaxSize()
-                        .graphicsLayer {
-                            scaleX = innerScale
-                            scaleY = innerScale
-                        }
+                        .size(46.dp)
                         .clip(CircleShape)
-                        .background(composeColor),
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) {
+                            if (!isSelected) {
+                                view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                                onColorSelected(colorInt)
+                            }
+                        },
                     contentAlignment = Alignment.Center
                 ) {
                     if (isSelected) {
-                        Icon(
-                            imageVector = Icons.Default.Check,
-                            contentDescription = null,
-                            tint = if (isBright) Color.Black else Color.White,
-                            modifier = Modifier.size(16.dp)
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .border(2.5.dp, MaterialTheme.colorScheme.primary, CircleShape)
                         )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer {
+                                scaleX = innerScale
+                                scaleY = innerScale
+                            }
+                            .clip(CircleShape)
+                            .background(composeColor),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (isSelected) {
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = null,
+                                tint = if (isBright) Color.Black else Color.White,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
                     }
                 }
             }
         }
     }
+
+    if (showCustomPicker) {
+        ExpressiveCustomColorPickerDialog(
+            initialColor = selectedColor,
+            onDismiss = { showCustomPicker = false },
+            onColorConfirmed = { chosen ->
+                onColorSelected(chosen)
+                showCustomPicker = false
+            }
+        )
+    }
+}
+
+/**
+ * Android 17 Full Spectrum HSV Color Picker Dialog
+ */
+@Composable
+fun ExpressiveCustomColorPickerDialog(
+    initialColor: Int,
+    onDismiss: () -> Unit,
+    onColorConfirmed: (Int) -> Unit
+) {
+    val hsv = remember(initialColor) {
+        val array = FloatArray(3)
+        android.graphics.Color.colorToHSV(initialColor, array)
+        array
+    }
+
+    var hue by remember { mutableFloatStateOf(hsv[0]) }
+    var saturation by remember { mutableFloatStateOf(if (hsv[1] == 0f) 0.8f else hsv[1]) }
+    var value by remember { mutableFloatStateOf(if (hsv[2] == 0f) 0.9f else hsv[2]) }
+
+    val currentColorInt = remember(hue, saturation, value) {
+        android.graphics.Color.HSVToColor(floatArrayOf(hue, saturation, value))
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Icon(Icons.Rounded.Palette, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                Text("Custom Color", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Black))
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(width = 90.dp, height = 48.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(safeColor(currentColorInt))
+                            .border(1.5.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp))
+                    )
+
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.surfaceContainerHighest
+                    ) {
+                        Text(
+                            text = String.format("#%06X", (0xFFFFFF and currentColorInt)),
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, letterSpacing = 1.sp),
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
+                        )
+                    }
+                }
+                
+                Column {
+                    Text("Hue", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold))
+                    Spacer(Modifier.height(6.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(14.dp)
+                            .clip(CircleShape)
+                            .background(
+                                Brush.horizontalGradient(
+                                    colors = listOf(
+                                        Color.Red, Color.Yellow, Color.Green,
+                                        Color.Cyan, Color.Blue, Color.Magenta, Color.Red
+                                    )
+                                )
+                            )
+                    )
+                    Slider(
+                        value = hue,
+                        onValueChange = { hue = it },
+                        valueRange = 0f..360f,
+                        colors = SliderDefaults.colors(
+                            thumbColor = safeColor(currentColorInt),
+                            activeTrackColor = Color.Transparent,
+                            inactiveTrackColor = Color.Transparent
+                        )
+                    )
+                }
+                
+                Column {
+                    Text("Vibrancy / Saturation", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold))
+                    Spacer(Modifier.height(4.dp))
+                    Slider(
+                        value = saturation,
+                        onValueChange = { saturation = it },
+                        valueRange = 0.05f..1f
+                    )
+                }
+                
+                Column {
+                    Text("Luminance / Tone", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold))
+                    Spacer(Modifier.height(4.dp))
+                    Slider(
+                        value = value,
+                        onValueChange = { value = it },
+                        valueRange = 0.1f..1f
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onColorConfirmed(currentColorInt) },
+                shape = CircleShape
+            ) {
+                Text("Apply Color", fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
 }
 
 @Composable
