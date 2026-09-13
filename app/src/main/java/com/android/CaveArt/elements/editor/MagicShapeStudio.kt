@@ -5,6 +5,7 @@ import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
 import android.graphics.RectF
 import android.view.HapticFeedbackConstants
+import android.widget.Toast
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
@@ -66,6 +67,13 @@ fun MagicShapeStudio(
     var previewOriginal by remember { mutableStateOf<Bitmap?>(null) }
     var previewCutout by remember { mutableStateOf<Bitmap?>(null) }
 
+    var popEligibility by remember {
+        mutableStateOf(PopEligibility(isEligible = false, reason = "Analyzing...", subjectBounds = null, coveragePercent = 0f, borderDistances = null))
+    }
+    var safeScaleRange by remember {
+        mutableStateOf(SafeScaleRange(minScale = 0.8f, maxScale = 1.3f, defaultScale = 1.0f))
+    }
+
     val cachedPalette = remember(wallpaper.id, isDarkTheme) {
         MonetEngine.getCachedPalette(wallpaper.id, isDarkTheme)
     }
@@ -82,6 +90,27 @@ fun MagicShapeStudio(
         val comp = viewModel.getHighQualityComponents(context, wallpaper)
         previewOriginal = comp.first
         previewCutout = comp.second
+
+        withContext(Dispatchers.Default) {
+            val analysis = SubjectPopAnalyzer.analyzeEligibility(comp.second)
+            val range = SubjectPopAnalyzer.calculateSafeScaleRange(
+                subjectBounds = analysis.subjectBounds,
+                imgW = comp.first?.width ?: 1080,
+                imgH = comp.first?.height ?: 1920
+            )
+
+            withContext(Dispatchers.Main) {
+                popEligibility = analysis
+                safeScaleRange = range
+                val safeScale = viewModel.magicScale.coerceIn(range.minScale, range.maxScale)
+                if (safeScale != viewModel.magicScale) {
+                    viewModel.updateMagicScale(safeScale)
+                }
+                if (!analysis.isEligible && viewModel.is3DPopEnabled) {
+                    viewModel.toggle3DPop()
+                }
+            }
+        }
     }
 
     LaunchedEffect(wallpaper.id, isDarkTheme) {
@@ -191,20 +220,15 @@ fun MagicShapeStudio(
                                         size.width, size.height, previewCutout, config
                                     )
 
-                                    val currentImgScale = geo.baseScale * config.scale
-                                    val anchorX = if (config.isCentered) geo.subjectCenterX else previewOriginal!!.width / 2f
-                                    val anchorY = if (config.isCentered) geo.subjectCenterY else previewOriginal!!.height / 2f
-
-                                    bodyMatrix.reset()
-                                    bodyMatrix.postTranslate(-anchorX, -anchorY)
-                                    bodyMatrix.postScale(currentImgScale, currentImgScale)
-                                    bodyMatrix.postTranslate(size.width / 2f, size.height / 2f)
-
-                                    screenShapeRect.set(geo.shapeBoundsRel)
-                                    bodyMatrix.mapRect(screenShapeRect)
-
-                                    val vShift = if (config.is3DPopEnabled) screenShapeRect.height() * 0.12f else 0f
-                                    screenShapeRect.offset(0f, vShift)
+                                    geo.setupMatrices(
+                                        imgW = previewOriginal!!.width,
+                                        imgH = previewOriginal!!.height,
+                                        screenW = size.width,
+                                        screenH = size.height,
+                                        config = config,
+                                        outBodyMatrix = bodyMatrix,
+                                        outScreenShapeRect = screenShapeRect
+                                    )
 
                                     PixelShapeMorpher.buildMorphedPath(
                                         fromShape = fromShape,
@@ -239,26 +263,40 @@ fun MagicShapeStudio(
                                 )
                             }
 
+                            val isSupported = popEligibility.isEligible
                             Surface(
                                 modifier = Modifier
                                     .align(Alignment.BottomEnd)
                                     .padding(14.dp)
-                                    .size(46.dp)
+                                    .size(48.dp)
                                     .shadow(8.dp, RoundedCornerShape(16.dp))
                                     .clip(RoundedCornerShape(16.dp))
                                     .clickable {
-                                        view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
-                                        viewModel.toggle3DPop()
+                                        if (isSupported) {
+                                            view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                                            viewModel.toggle3DPop()
+                                        } else {
+                                            view.performHapticFeedback(HapticFeedbackConstants.REJECT)
+                                            Toast.makeText(context, popEligibility.reason, Toast.LENGTH_SHORT).show()
+                                        }
                                     },
                                 shape = RoundedCornerShape(16.dp),
-                                color = if (viewModel.is3DPopEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.88f)
+                                color = when {
+                                    !isSupported -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                                    viewModel.is3DPopEnabled -> MaterialTheme.colorScheme.primary
+                                    else -> MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.88f)
+                                }
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     Icon(
-                                        imageVector = Icons.Rounded.Layers,
+                                        imageVector = if (isSupported) Icons.Rounded.Layers else Icons.Rounded.LayersClear,
                                         contentDescription = "Toggle 3D Pop Depth",
-                                        tint = if (viewModel.is3DPopEnabled) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
-                                        modifier = Modifier.size(22.dp)
+                                        tint = when {
+                                            !isSupported -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                                            viewModel.is3DPopEnabled -> MaterialTheme.colorScheme.onPrimary
+                                            else -> MaterialTheme.colorScheme.onSurface
+                                        },
+                                        modifier = Modifier.size(24.dp)
                                     )
                                 }
                             }
@@ -404,17 +442,37 @@ fun MagicShapeStudio(
                                             horizontalArrangement = Arrangement.SpaceBetween,
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
+                                            Column {
+                                                Text("3D Depth Pop", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold))
+                                                Text(
+                                                    text = popEligibility.reason,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = if (popEligibility.isEligible) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                                                )
+                                            }
+                                            Switch(
+                                                checked = viewModel.is3DPopEnabled && popEligibility.isEligible,
+                                                enabled = popEligibility.isEligible,
+                                                onCheckedChange = { viewModel.toggle3DPop() }
+                                            )
+                                        }
+
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
                                             Text("Center Subject", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold))
                                             Switch(
                                                 checked = viewModel.isCentered,
                                                 onCheckedChange = { viewModel.toggleCentered() }
                                             )
                                         }
-
+                                        
                                         ExpressiveCapsuleSlider(
-                                            value = viewModel.magicScale,
+                                            value = viewModel.magicScale.coerceIn(safeScaleRange.minScale, safeScaleRange.maxScale),
                                             onValueChange = { viewModel.updateMagicScale(it) },
-                                            valueRange = 0.5f..1.5f,
+                                            valueRange = safeScaleRange.minScale..safeScaleRange.maxScale,
                                             icon = Icons.Rounded.ZoomIn,
                                             label = "Cutout Scale"
                                         )
