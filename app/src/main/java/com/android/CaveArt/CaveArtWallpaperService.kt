@@ -168,7 +168,7 @@ class CaveArtWallpaperService : WallpaperService() {
                         _bodyMatrix.postTranslate(-anchorX, -anchorY)
                         _bodyMatrix.postScale(currentImgScale, currentImgScale)
                         _bodyMatrix.postTranslate(canvas.width / 2f, (canvas.height / 2f) + breathY)
-
+                        
                         canvas.drawColor(config.backgroundColor)
                         
                         screenShapeRect.set(geo.shapeBoundsRel)
@@ -178,15 +178,21 @@ class CaveArtWallpaperService : WallpaperService() {
                         val vShift = if (config.is3DPopEnabled) screenShapeRect.height() * 0.12f else 0f
                         screenShapeRect.offset(0f, vShift)
                         
+                        val shapeEnum = try { MagicShape.valueOf(config.shapeName) } catch (e: Exception) { MagicShape.SQUIRCLE }
                         clipPath.rewind()
-                        val shapeEnum = try { MagicShape.valueOf(config.shapeName) } catch(e:Exception) { MagicShape.SQUIRCLE }
-                        ShapePathProvider.updatePathForShape(clipPath, shapeEnum, screenShapeRect)
+                        PixelShapeMorpher.buildMorphedPath(
+                            fromShape = shapeEnum,
+                            toShape = shapeEnum,
+                            progress = 1.0f,
+                            bounds = screenShapeRect,
+                            targetPath = clipPath
+                        )
 
                         canvas.save()
                         canvas.clipPath(clipPath)
                         canvas.drawBitmap(bmp, _bodyMatrix, bitmapPaint)
                         canvas.restore()
-
+                        
                         if (config.is3DPopEnabled && maskBitmap != null) {
                             val popMatrix = Matrix(_bodyMatrix)
                             val id = canvas.saveLayer(0f, 0f, canvas.width.toFloat(), canvas.height.toFloat(), null)
@@ -201,7 +207,9 @@ class CaveArtWallpaperService : WallpaperService() {
                         canvas.drawBitmap(bmp, _bodyMatrix, bitmapPaint)
                     }
                 }
-            } catch (e: Exception) { e.printStackTrace() } finally {
+            } catch (e: Exception) { 
+                e.printStackTrace() 
+            } finally {
                 if (canvas != null) try { holder.unlockCanvasAndPost(canvas) } catch (e: Exception) {}
             }
         }
@@ -225,7 +233,7 @@ class CaveArtWallpaperService : WallpaperService() {
                 withContext(Dispatchers.Main) {
                     if (currentAnimationStyle != newConfig.animationStyle) {
                         currentAnimationStyle = newConfig.animationStyle
-                        val style = try { AnimationStyle.valueOf(newConfig.animationStyle) } catch(e:Exception) { AnimationStyle.NANO_ASSEMBLY }
+                        val style = try { AnimationStyle.valueOf(newConfig.animationStyle) } catch (e: Exception) { AnimationStyle.NANO_ASSEMBLY }
                         currentAnimation = AnimationFactory.getAnimation(style)
                     }
                     config = newConfig
@@ -252,9 +260,9 @@ class CaveArtWallpaperService : WallpaperService() {
                         options.inPreferredConfig = Bitmap.Config.ARGB_8888
                         
                         BitmapFactory.decodeFile(config.imagePath, options)
-                    }
-                    else if (config.resourceId != 0) BitmapHelper.decodeSampledBitmapFromResource(resources, config.resourceId, 2500)
-                    else null
+                    } else if (config.resourceId != 0) {
+                        BitmapHelper.decodeSampledBitmapFromResource(resources, config.resourceId, 2500)
+                    } else null
                 } catch (e: Exception) { 
                     e.printStackTrace()
                     null 
@@ -268,9 +276,10 @@ class CaveArtWallpaperService : WallpaperService() {
                         options.inSampleSize = finalSampleSize
                         options.inPreferredConfig = Bitmap.Config.ARGB_8888
                         BitmapFactory.decodeFile(config.cutoutPath, options)
-                    }
-                    else null
-                } catch (e: Exception) { null }
+                    } else null
+                } catch (e: Exception) { 
+                    null 
+                }
 
                 if (loadedMask != null && loadedOriginal != null) {
                     if (loadedMask.width != loadedOriginal.width || loadedMask.height != loadedOriginal.height) {
