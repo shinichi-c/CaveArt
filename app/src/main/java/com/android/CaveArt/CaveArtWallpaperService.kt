@@ -156,7 +156,7 @@ class CaveArtWallpaperService : WallpaperService() {
                     } else if (config.isMagicShapeEnabled) {
                         val timeSeconds = System.nanoTime() / 1_000_000_000f
                         val breathY = sin(timeSeconds * 1.2f) * 6f
-                        
+
                         geo.setupMatrices(
                             imgW = bmp.width,
                             imgH = bmp.height,

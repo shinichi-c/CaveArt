@@ -1,18 +1,23 @@
 package com.android.CaveArt
 
+import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.Path
 import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
 import android.graphics.RectF
+import android.net.Uri
 import android.view.HapticFeedbackConstants
 import android.widget.Toast
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
@@ -21,6 +26,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -33,6 +39,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
@@ -66,12 +73,13 @@ fun MagicShapeStudio(
     var activeTab by remember { mutableStateOf(MagicTab.SHAPES) }
     var previewOriginal by remember { mutableStateOf<Bitmap?>(null) }
     var previewCutout by remember { mutableStateOf<Bitmap?>(null) }
+    var isAssetsLoading by remember { mutableStateOf(true) }
 
     var popEligibility by remember {
         mutableStateOf(PopEligibility(isEligible = false, reason = "Analyzing...", subjectBounds = null, coveragePercent = 0f, borderDistances = null))
     }
     var safeScaleRange by remember {
-        mutableStateOf(SafeScaleRange(minScale = 0.8f, maxScale = 1.3f, defaultScale = 1.0f))
+        mutableStateOf(SafeScaleRange(minScale = 0.8f, maxScale = 1.35f, defaultScale = 1.0f))
     }
 
     val cachedPalette = remember(wallpaper.id, isDarkTheme) {
@@ -82,6 +90,7 @@ fun MagicShapeStudio(
     }
 
     LaunchedEffect(wallpaper.id) {
+        isAssetsLoading = true
         val initialColor = viewModel.getColorForWallpaper(wallpaper.id)
             ?: cachedPalette?.firstOrNull()
         if (initialColor != null) {
@@ -109,6 +118,7 @@ fun MagicShapeStudio(
                 if (!analysis.isEligible && viewModel.is3DPopEnabled) {
                     viewModel.toggle3DPop()
                 }
+                isAssetsLoading = false
             }
         }
     }
@@ -190,8 +200,8 @@ fun MagicShapeStudio(
                         shape = MaterialTheme.shapes.extraLarge,
                         colors = CardDefaults.cardColors(containerColor = Color.Black)
                     ) {
-                        Box(modifier = Modifier.fillMaxSize()) {
-                            if (previewOriginal != null) {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            if (previewOriginal != null && !isAssetsLoading) {
                                 val paint = remember {
                                     android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG or android.graphics.Paint.FILTER_BITMAP_FLAG)
                                 }
@@ -201,7 +211,7 @@ fun MagicShapeStudio(
                                     }
                                 }
                                 val screenShapeRect = remember { RectF() }
-                                val liveShapePath = remember { android.graphics.Path() }
+                                val liveShapePath = remember { Path() }
                                 val bodyMatrix = remember { android.graphics.Matrix() }
 
                                 Canvas(modifier = Modifier.fillMaxSize()) {
@@ -261,70 +271,77 @@ fun MagicShapeStudio(
                                     modifier = Modifier.fillMaxSize(),
                                     allowMagic = false
                                 )
+                                M3ExpressiveMorphLoadingIndicator(sizeDp = 52.dp)
                             }
-
-                            val isSupported = popEligibility.isEligible
+                            
                             Surface(
                                 modifier = Modifier
-                                    .align(Alignment.BottomEnd)
-                                    .padding(14.dp)
-                                    .size(48.dp)
-                                    .shadow(8.dp, RoundedCornerShape(16.dp))
-                                    .clip(RoundedCornerShape(16.dp))
-                                    .clickable {
-                                        if (isSupported) {
-                                            view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
-                                            viewModel.toggle3DPop()
-                                        } else {
-                                            view.performHapticFeedback(HapticFeedbackConstants.REJECT)
-                                            Toast.makeText(context, popEligibility.reason, Toast.LENGTH_SHORT).show()
-                                        }
-                                    },
-                                shape = RoundedCornerShape(16.dp),
-                                color = when {
-                                    !isSupported -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                                    viewModel.is3DPopEnabled -> MaterialTheme.colorScheme.primary
-                                    else -> MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.88f)
-                                }
+                                    .align(Alignment.BottomCenter)
+                                    .padding(bottom = 16.dp),
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.88f),
+                                shadowElevation = 10.dp,
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
                             ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        imageVector = if (isSupported) Icons.Rounded.Layers else Icons.Rounded.LayersClear,
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    
+                                    ExpressiveCenterModePill(
+                                        icon = if (viewModel.isCentered) Icons.Rounded.CenterFocusStrong else Icons.Rounded.CenterFocusWeak,
+                                        contentDescription = "Toggle Center Mode",
+                                        isActive = viewModel.isCentered,
+                                        onClick = {
+                                            view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                                            viewModel.toggleCentered()
+                                        }
+                                    )
+
+                                    VerticalDivider(
+                                        modifier = Modifier
+                                            .height(20.dp)
+                                            .width(1.dp),
+                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
+                                    )
+                                    
+                                    val isPopSupported = popEligibility.isEligible
+                                    ExpressiveCenterModePill(
+                                        icon = if (isPopSupported) Icons.Rounded.Layers else Icons.Rounded.LayersClear,
                                         contentDescription = "Toggle 3D Pop Depth",
-                                        tint = when {
-                                            !isSupported -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
-                                            viewModel.is3DPopEnabled -> MaterialTheme.colorScheme.onPrimary
-                                            else -> MaterialTheme.colorScheme.onSurface
-                                        },
-                                        modifier = Modifier.size(24.dp)
+                                        isActive = viewModel.is3DPopEnabled && isPopSupported,
+                                        isEnabled = true,
+                                        onClick = {
+                                            if (isPopSupported) {
+                                                view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                                                viewModel.toggle3DPop()
+                                            } else {
+                                                view.performHapticFeedback(HapticFeedbackConstants.REJECT)
+                                                Toast.makeText(context, popEligibility.reason, Toast.LENGTH_SHORT).show()
+                                            }
+                                        }
                                     )
                                 }
                             }
                         }
                     }
-
-                    Surface(
+                    
+                    IconButton(
+                        onClick = {
+                            view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                            onBack()
+                        },
                         modifier = Modifier
                             .align(Alignment.TopStart)
-                            .padding(top = 4.dp)
-                            .size(46.dp)
-                            .shadow(8.dp, CircleShape)
-                            .clip(CircleShape)
-                            .clickable {
-                                view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                                onBack()
-                            },
-                        shape = CircleShape,
-                        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.85f)
+                            .padding(4.dp)
                     ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
-                                contentDescription = "Back",
-                                tint = MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
+                            contentDescription = "Back",
+                            tint = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.size(24.dp)
+                        )
                     }
                 }
 
@@ -341,7 +358,7 @@ fun MagicShapeStudio(
                             .navigationBarsPadding()
                             .padding(horizontal = 20.dp, vertical = 12.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         Box(
                             modifier = Modifier
@@ -400,8 +417,12 @@ fun MagicShapeStudio(
                         ) { currentTab ->
                             when (currentTab) {
                                 MagicTab.SHAPES -> {
-                                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                        SectionHeaderWithChevron("Official Material 3 Shapes")
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 4.dp),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
                                         LazyRow(
                                             horizontalArrangement = Arrangement.spacedBy(12.dp),
                                             modifier = Modifier.fillMaxWidth()
@@ -418,12 +439,26 @@ fun MagicShapeStudio(
                                                 )
                                             }
                                         }
+                                        
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                                            horizontalArrangement = Arrangement.End
+                                        ) {
+                                            M3DocLinkPill(
+                                                label = "M3 Shapes Principles",
+                                                url = "https://m3.material.io/styles/shape/overview-principles"
+                                            )
+                                        }
                                     }
                                 }
 
                                 MagicTab.PALETTE -> {
-                                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                        SectionHeaderWithChevron("Wallpaper Color Harmonization")
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 4.dp),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
                                         ExpressiveColorHaloSelector(
                                             colors = monetPalette,
                                             selectedColor = viewModel.currentBackgroundColor,
@@ -432,43 +467,26 @@ fun MagicShapeStudio(
                                                 viewModel.updateMagicConfig(toShape, colorInt)
                                             }
                                         )
+                                        
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                                            horizontalArrangement = Arrangement.End
+                                        ) {
+                                            M3DocLinkPill(
+                                                label = "M3 Color System",
+                                                url = "https://m3.material.io/styles/color/system/overview"
+                                            )
+                                        }
                                     }
                                 }
 
                                 MagicTab.APPEARANCE -> {
-                                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Column {
-                                                Text("3D Depth Pop", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold))
-                                                Text(
-                                                    text = popEligibility.reason,
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    color = if (popEligibility.isEligible) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
-                                                )
-                                            }
-                                            Switch(
-                                                checked = viewModel.is3DPopEnabled && popEligibility.isEligible,
-                                                enabled = popEligibility.isEligible,
-                                                onCheckedChange = { viewModel.toggle3DPop() }
-                                            )
-                                        }
-
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text("Center Subject", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold))
-                                            Switch(
-                                                checked = viewModel.isCentered,
-                                                onCheckedChange = { viewModel.toggleCentered() }
-                                            )
-                                        }
-                                        
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 4.dp),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
                                         ExpressiveCapsuleSlider(
                                             value = viewModel.magicScale.coerceIn(safeScaleRange.minScale, safeScaleRange.maxScale),
                                             onValueChange = { viewModel.updateMagicScale(it) },
@@ -508,24 +526,97 @@ fun MagicShapeStudio(
     }
 }
 
+/**
+ * Compact Icon Button used inside the bottom-center preview control pill.
+ */
 @Composable
-private fun SectionHeaderWithChevron(title: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
+private fun ExpressiveCenterModePill(
+    icon: ImageVector,
+    contentDescription: String,
+    isActive: Boolean,
+    isEnabled: Boolean = true,
+    onClick: () -> Unit
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.86f else 1.0f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
+        label = "iconPillSquish"
+    )
+
+    Box(
+        modifier = Modifier
+            .size(38.dp)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .clip(CircleShape)
+            .background(
+                if (isActive) MaterialTheme.colorScheme.primaryContainer
+                else Color.Transparent
+            )
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                enabled = isEnabled,
+                onClick = onClick
+            ),
+        contentAlignment = Alignment.Center
     ) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-            color = MaterialTheme.colorScheme.onSurface
-        )
         Icon(
-            imageVector = Icons.Rounded.ChevronRight,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(18.dp)
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = when {
+                !isEnabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f)
+                isActive -> MaterialTheme.colorScheme.onPrimaryContainer
+                else -> MaterialTheme.colorScheme.onSurfaceVariant
+            },
+            modifier = Modifier.size(20.dp)
         )
+    }
+}
+
+@Composable
+private fun M3DocLinkPill(
+    label: String,
+    url: String,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val view = LocalView.current
+    Surface(
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f),
+        modifier = modifier
+            .clip(CircleShape)
+            .clickable {
+                view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                context.startActivity(intent)
+            }
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold
+                ),
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Icon(
+                imageVector = Icons.AutoMirrored.Rounded.OpenInNew,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(12.dp)
+            )
+        }
     }
 }
 
