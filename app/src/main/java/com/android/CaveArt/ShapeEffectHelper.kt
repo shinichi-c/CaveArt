@@ -26,11 +26,13 @@ data class UnifiedGeometry(
         outScreenShapeRect: RectF
     ) {
         if (config.isCentered && targetTranslateX != 0f) {
+            
             outBodyMatrix.reset()
             outBodyMatrix.postScale(targetImgScale, targetImgScale)
             outBodyMatrix.postTranslate(targetTranslateX, targetTranslateY)
             outScreenShapeRect.set(shapeBoundsRel)
         } else {
+            
             val currentImgScale = baseScale * config.scale
             val anchorX = if (config.isCentered) subjectCenterX else imgW / 2f
             val anchorY = if (config.isCentered) subjectCenterY else imgH / 2f
@@ -66,31 +68,34 @@ object ShapeEffectHelper {
             val sCenterX = sb.centerX()
             val sTop = sb.top
             val sBottom = sb.bottom
-            
-            val shapeDiameter = screenW * 0.74f
+            val shapeDiameter = screenW * 0.86f
             val shapeRadius = shapeDiameter / 2f
             val shapeCenterX = screenW / 2f
-            val shapeCenterY = screenH * 0.43f
-            
+            val shapeCenterY = screenH / 2f
             val isBottomCropped = (imgH - sBottom) < (imgH * 0.05f)
-            
+
             val minScaleForWidth = (shapeDiameter * 1.05f) / imgW.toFloat()
             val availablePhotoHeight = (imgH - sTop).coerceAtLeast(sH)
-            val minScaleForHeight = (shapeDiameter * 1.08f) / availablePhotoHeight
+            val minScaleForHeight = (shapeDiameter * 1.05f) / availablePhotoHeight
             val absoluteMinSafeScale = max(minScaleForWidth, minScaleForHeight)
+            
+            val widthTarget = shapeDiameter * 0.82f
+            val heightTarget = shapeDiameter * 0.88f
+            val scaleByWidth = widthTarget / sW
+            val scaleByHeight = heightTarget / sH
+            val baseSubjectScale = min(scaleByWidth, scaleByHeight * 1.15f)
 
-            val baseSubjectScale = (shapeDiameter * 0.82f / sW)
             val desiredScale = baseSubjectScale * config.scale
             val finalImgScale = max(desiredScale, absoluteMinSafeScale)
             
-            val popBreakoutRatio = if (config.is3DPopEnabled) 0.22f else 0.0f
+            val popBreakoutRatio = if (config.is3DPopEnabled) 0.20f else 0.0f
             val popAmount = sH * finalImgScale * popBreakoutRatio
 
             var targetTx = shapeCenterX - (sCenterX * finalImgScale)
             var targetTy = (shapeCenterY - shapeRadius - popAmount) - (sTop * finalImgScale)
 
             var adjustedShapeCenterY = shapeCenterY
-            
+
             if (isBottomCropped) {
                 val photoBottom = targetTy + (imgH * finalImgScale)
                 val shapeBottom = adjustedShapeCenterY + shapeRadius
@@ -141,7 +146,7 @@ object ShapeEffectHelper {
                     is3DPopEnabled = config.is3DPopEnabled
                 )
             } else {
-                val r = min(imgW, imgH) * 0.38f
+                val r = min(imgW, imgH) * 0.42f
                 PopFraming(
                     shapeBounds = RectF(imgW / 2f - r, imgH / 2f - r, imgW / 2f + r, imgH / 2f + r),
                     popClipTop = 0f,
@@ -186,8 +191,7 @@ object ShapeEffectHelper {
             val layerId = canvas.saveLayer(0f, 0f, canvas.width.toFloat(), canvas.height.toFloat(), null)
             
             canvas.save()
-            
-            val breakoutCutoffY = screenShapeRect.top + (screenShapeRect.height() * 0.30f)
+            val breakoutCutoffY = screenShapeRect.top + (screenShapeRect.height() * 0.32f)
             canvas.clipRect(0f, 0f, canvas.width.toFloat(), breakoutCutoffY)
             
             canvas.drawBitmap(cutout, bodyMatrix, bitmapPaint)

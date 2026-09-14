@@ -3,12 +3,14 @@ package com.android.CaveArt
 import android.app.Activity
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.Path
 import android.graphics.RectF
 import android.view.HapticFeedbackConstants
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -39,14 +41,18 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asComposePath
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.rememberAsyncImagePainter
@@ -302,9 +308,6 @@ fun <T> ExpressiveSegmentedPill(
     }
 }
 
-/**
- * Expressive Color Halo Selector with Android 17 Native EyeDropper & Custom Color Picker.
- */
 @Composable
 fun ExpressiveColorHaloSelector(
     colors: List<Int>,
@@ -315,7 +318,7 @@ fun ExpressiveColorHaloSelector(
     val context = LocalContext.current
     val view = LocalView.current
     var showCustomPicker by remember { mutableStateOf(false) }
-    
+
     val eyeDropperLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -339,7 +342,6 @@ fun ExpressiveColorHaloSelector(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        
         Surface(
             shape = CircleShape,
             color = MaterialTheme.colorScheme.surfaceContainerHighest,
@@ -365,7 +367,7 @@ fun ExpressiveColorHaloSelector(
                 )
             }
         }
-        
+
         LazyRow(
             modifier = Modifier.weight(1f),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -442,9 +444,6 @@ fun ExpressiveColorHaloSelector(
     }
 }
 
-/**
- * Android 17 Full Spectrum HSV Color Picker Dialog
- */
 @Composable
 fun ExpressiveCustomColorPickerDialog(
     initialColor: Int,
@@ -507,7 +506,7 @@ fun ExpressiveCustomColorPickerDialog(
                         )
                     }
                 }
-                
+
                 Column {
                     Text("Hue", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold))
                     Spacer(Modifier.height(6.dp))
@@ -536,7 +535,7 @@ fun ExpressiveCustomColorPickerDialog(
                         )
                     )
                 }
-                
+
                 Column {
                     Text("Vibrancy / Saturation", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold))
                     Spacer(Modifier.height(4.dp))
@@ -546,7 +545,7 @@ fun ExpressiveCustomColorPickerDialog(
                         valueRange = 0.05f..1f
                     )
                 }
-                
+
                 Column {
                     Text("Luminance / Tone", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold))
                     Spacer(Modifier.height(4.dp))
@@ -636,20 +635,118 @@ fun AmbientBottomSheet(
     }
 }
 
+/**
+ * Upgraded Material 3 Expressive Loading Overlay using Morphing Shapes
+ */
 @Composable
 fun LoadingOverlay(title: String) {
     Box(
-        Modifier.fillMaxSize().background(Color.Black.copy(0.6f)).clickable(enabled = false) {},
+        Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.65f))
+            .clickable(enabled = false) {},
         contentAlignment = Alignment.Center
     ) {
-        Card(
-            shape = MaterialTheme.shapes.extraLarge,
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        Surface(
+            shape = RoundedCornerShape(32.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            shadowElevation = 24.dp,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
+            modifier = Modifier
+                .wrapContentSize()
+                .padding(32.dp)
         ) {
-            Column(Modifier.padding(40.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                CircularProgressIndicator(strokeWidth = 6.dp, modifier = Modifier.size(64.dp))
-                Spacer(Modifier.height(24.dp))
-                Text(title, style = MaterialTheme.typography.titleMedium)
+            Column(
+                modifier = Modifier.padding(horizontal = 36.dp, vertical = 32.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                M3ExpressiveMorphLoadingIndicator(
+                    color = MaterialTheme.colorScheme.primary,
+                    sizeDp = 54.dp
+                )
+                Spacer(Modifier.height(20.dp))
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = (-0.2).sp
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Material 3 Expressive Shape-Morphing Loading Animation
+ */
+@Composable
+fun M3ExpressiveMorphLoadingIndicator(
+    modifier: Modifier = Modifier,
+    color: Color = MaterialTheme.colorScheme.primary,
+    sizeDp: Dp = 48.dp
+) {
+    val infiniteTransition = rememberInfiniteTransition(label = "M3Loading")
+    val progress by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 4f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2800, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "MorphProgress"
+    )
+    val rotation by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(4000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "Rotation"
+    )
+
+    val shapes = listOf(
+        MagicShape.CIRCLE,
+        MagicShape.SQUIRCLE,
+        MagicShape.COOKIE_4,
+        MagicShape.COOKIE_9,
+        MagicShape.CIRCLE
+    )
+
+    val livePath = remember { Path() }
+    val rect = remember { RectF() }
+
+    Surface(
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.75f),
+        shadowElevation = 8.dp,
+        modifier = modifier.size(sizeDp + 16.dp)
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Canvas(
+                modifier = Modifier
+                    .size(sizeDp)
+                    .graphicsLayer { rotationZ = rotation }
+            ) {
+                val stage = progress.toInt().coerceIn(0, 3)
+                val stageProgress = progress - stage
+                val from = shapes[stage]
+                val to = shapes[stage + 1]
+
+                rect.set(0f, 0f, size.width, size.height)
+                PixelShapeMorpher.buildMorphedPath(from, to, stageProgress, rect, livePath)
+
+                drawIntoCanvas { canvas ->
+                    val paint = android.graphics.Paint().apply {
+                        this.color = color.toArgb()
+                        this.style = android.graphics.Paint.Style.FILL
+                        this.isAntiAlias = true
+                    }
+                    canvas.nativeCanvas.drawPath(livePath, paint)
+                }
             }
         }
     }
