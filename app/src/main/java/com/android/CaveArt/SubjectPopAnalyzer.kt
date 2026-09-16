@@ -7,6 +7,7 @@ import kotlin.math.min
 
 data class PopEligibility(
     val isEligible: Boolean,
+    val isAbstract: Boolean = false,
     val reason: String,
     val subjectBounds: RectF?,
     val coveragePercent: Float,
@@ -34,17 +35,22 @@ data class SafeScaleRange(
 
 object SubjectPopAnalyzer {
 
-    private const val MIN_WIDTH_RATIO = 0.10f
-    private const val MIN_HEIGHT_RATIO = 0.08f
-    private const val MIN_PIXEL_COVERAGE = 0.015f
-    private const val MAX_COVERAGE_RATIO = 0.88f
+    private const val MIN_WIDTH_RATIO = 0.12f
+    private const val MIN_HEIGHT_RATIO = 0.10f
+    private const val MIN_PIXEL_COVERAGE = 0.025f
+    private const val MAX_COVERAGE_RATIO = 0.82f
     private const val SAFE_BORDER_PADDING_RATIO = 0.02f
 
+    /**
+     * Inspects the mask with solidity, headroom, and border-touch checks
+     * to identify real subjects vs. abstract/pattern wallpapers.
+     */
     fun analyzeEligibility(mask: Bitmap?): PopEligibility {
         if (mask == null) {
             return PopEligibility(
                 isEligible = false,
-                reason = "No subject detected in photo",
+                isAbstract = true,
+                reason = "Abstract wallpaper: 3D Pop disabled for clean framing",
                 subjectBounds = null,
                 coveragePercent = 0f,
                 borderDistances = null
@@ -67,7 +73,7 @@ object SubjectPopAnalyzer {
             val offset = y * w
             for (x in 0 until w) {
                 val alpha = (pixels[offset + x] ushr 24) and 0xFF
-                if (alpha > 40) {
+                if (alpha > 45) {
                     if (x < minX) minX = x
                     if (x > maxX) maxX = x
                     if (y < minY) minY = y
@@ -80,7 +86,8 @@ object SubjectPopAnalyzer {
         if (visiblePixels == 0 || minX >= maxX || minY >= maxY) {
             return PopEligibility(
                 isEligible = false,
-                reason = "Subject mask is empty",
+                isAbstract = true,
+                reason = "Abstract pattern: 3D Pop disabled for clean framing",
                 subjectBounds = null,
                 coveragePercent = 0f,
                 borderDistances = null
@@ -98,20 +105,62 @@ object SubjectPopAnalyzer {
             fromBottom = (h - maxY).toFloat()
         )
 
-        if (sW < w * MIN_WIDTH_RATIO || sH < h * MIN_HEIGHT_RATIO || coverage < MIN_PIXEL_COVERAGE) {
+        val touchesTop = minY < (h * 0.035f)
+        val touchesBottom = maxY > (h * 0.965f)
+        val touchesLeft = minX < (w * 0.035f)
+        val touchesRight = maxX > (w * 0.965f)
+        
+        if (touchesTop && (touchesLeft || touchesRight)) {
             return PopEligibility(
                 isEligible = false,
-                reason = "Subject is too small for depth pop (${(coverage * 100).toInt()}%)",
+                isAbstract = true,
+                reason = "Abstract wallpaper: 3D Pop disabled for clean framing",
                 subjectBounds = RectF(minX.toFloat(), minY.toFloat(), maxX.toFloat(), maxY.toFloat()),
                 coveragePercent = coverage * 100f,
                 borderDistances = borderDistances
             )
         }
 
-        if (coverage > MAX_COVERAGE_RATIO && (sW > w * 0.94f && sH > h * 0.94f)) {
+        if (touchesTop && touchesBottom) {
             return PopEligibility(
                 isEligible = false,
-                reason = "Subject fills entire screen; no background to pop from",
+                isAbstract = true,
+                reason = "Full-bleed background: 3D Pop disabled for clean framing",
+                subjectBounds = RectF(minX.toFloat(), minY.toFloat(), maxX.toFloat(), maxY.toFloat()),
+                coveragePercent = coverage * 100f,
+                borderDistances = borderDistances
+            )
+        }
+        
+        val boundingArea = sW * sH
+        val fillRatio = visiblePixels.toFloat() / boundingArea.coerceAtLeast(1f)
+        if (fillRatio < 0.28f && coverage > 0.08f) {
+            return PopEligibility(
+                isEligible = false,
+                isAbstract = true,
+                reason = "Abstract pattern: 3D Pop disabled for clean framing",
+                subjectBounds = RectF(minX.toFloat(), minY.toFloat(), maxX.toFloat(), maxY.toFloat()),
+                coveragePercent = coverage * 100f,
+                borderDistances = borderDistances
+            )
+        }
+        
+        if (sW < w * MIN_WIDTH_RATIO || sH < h * MIN_HEIGHT_RATIO || coverage < MIN_PIXEL_COVERAGE) {
+            return PopEligibility(
+                isEligible = false,
+                isAbstract = false,
+                reason = "Subject too small for depth pop (${(coverage * 100).toInt()}%)",
+                subjectBounds = RectF(minX.toFloat(), minY.toFloat(), maxX.toFloat(), maxY.toFloat()),
+                coveragePercent = coverage * 100f,
+                borderDistances = borderDistances
+            )
+        }
+
+        if (coverage > MAX_COVERAGE_RATIO && (sW > w * 0.92f && sH > h * 0.92f)) {
+            return PopEligibility(
+                isEligible = false,
+                isAbstract = true,
+                reason = "Full-bleed photo: 3D Pop disabled for clean framing",
                 subjectBounds = RectF(minX.toFloat(), minY.toFloat(), maxX.toFloat(), maxY.toFloat()),
                 coveragePercent = coverage * 100f,
                 borderDistances = borderDistances
@@ -120,6 +169,7 @@ object SubjectPopAnalyzer {
 
         return PopEligibility(
             isEligible = true,
+            isAbstract = false,
             reason = "3D Pop Ready",
             subjectBounds = RectF(minX.toFloat(), minY.toFloat(), maxX.toFloat(), maxY.toFloat()),
             coveragePercent = coverage * 100f,

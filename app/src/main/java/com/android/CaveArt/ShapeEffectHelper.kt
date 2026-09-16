@@ -26,13 +26,11 @@ data class UnifiedGeometry(
         outScreenShapeRect: RectF
     ) {
         if (config.isCentered && targetTranslateX != 0f) {
-            
             outBodyMatrix.reset()
             outBodyMatrix.postScale(targetImgScale, targetImgScale)
             outBodyMatrix.postTranslate(targetTranslateX, targetTranslateY)
             outScreenShapeRect.set(shapeBoundsRel)
         } else {
-            
             val currentImgScale = baseScale * config.scale
             val anchorX = if (config.isCentered) subjectCenterX else imgW / 2f
             val anchorY = if (config.isCentered) subjectCenterY else imgH / 2f
@@ -61,83 +59,115 @@ object ShapeEffectHelper {
         val eligibility = SubjectPopAnalyzer.analyzeEligibility(mask)
         val baseScale = max(screenW / imgW, screenH / imgH)
 
-        if (config.isCentered && eligibility.isEligible && eligibility.subjectBounds != null) {
-            val sb = eligibility.subjectBounds
-            val sW = sb.width()
-            val sH = sb.height()
-            val sCenterX = sb.centerX()
-            val sTop = sb.top
-            val sBottom = sb.bottom
+        if (config.isCentered) {
+            
             val shapeDiameter = screenW * 0.86f
             val shapeRadius = shapeDiameter / 2f
             val shapeCenterX = screenW / 2f
             val shapeCenterY = screenH / 2f
-            val isBottomCropped = (imgH - sBottom) < (imgH * 0.05f)
 
-            val minScaleForWidth = (shapeDiameter * 1.05f) / imgW.toFloat()
-            val availablePhotoHeight = (imgH - sTop).coerceAtLeast(sH)
-            val minScaleForHeight = (shapeDiameter * 1.05f) / availablePhotoHeight
-            val absoluteMinSafeScale = max(minScaleForWidth, minScaleForHeight)
-            
-            val widthTarget = shapeDiameter * 0.82f
-            val heightTarget = shapeDiameter * 0.88f
-            val scaleByWidth = widthTarget / sW
-            val scaleByHeight = heightTarget / sH
-            val baseSubjectScale = min(scaleByWidth, scaleByHeight * 1.15f)
-
-            val desiredScale = baseSubjectScale * config.scale
-            val finalImgScale = max(desiredScale, absoluteMinSafeScale)
-            
-            val popBreakoutRatio = if (config.is3DPopEnabled) 0.20f else 0.0f
-            val popAmount = sH * finalImgScale * popBreakoutRatio
-
-            var targetTx = shapeCenterX - (sCenterX * finalImgScale)
-            var targetTy = (shapeCenterY - shapeRadius - popAmount) - (sTop * finalImgScale)
-
-            var adjustedShapeCenterY = shapeCenterY
-
-            if (isBottomCropped) {
-                val photoBottom = targetTy + (imgH * finalImgScale)
-                val shapeBottom = adjustedShapeCenterY + shapeRadius
-                if (photoBottom < shapeBottom) {
-                    val deficit = shapeBottom - photoBottom
-                    adjustedShapeCenterY -= deficit
-                }
-            } else {
-                val photoBottom = targetTy + (imgH * finalImgScale)
-                val shapeBottom = adjustedShapeCenterY + shapeRadius
-                if (photoBottom < shapeBottom) {
-                    targetTy += (shapeBottom - photoBottom)
-                }
-            }
-            
-            val shapeLeft = shapeCenterX - shapeRadius
-            val shapeRight = shapeCenterX + shapeRadius
-            val photoRight = targetTx + (imgW * finalImgScale)
-
-            if (targetTx > shapeLeft) targetTx = shapeLeft
-            if (photoRight < shapeRight) targetTx += (shapeRight - photoRight)
-
-            val finalScreenShapeRect = RectF(
+            val screenShapeRect = RectF(
                 shapeCenterX - shapeRadius,
-                adjustedShapeCenterY - shapeRadius,
+                shapeCenterY - shapeRadius,
                 shapeCenterX + shapeRadius,
-                adjustedShapeCenterY + shapeRadius
+                shapeCenterY + shapeRadius
             )
 
-            return UnifiedGeometry(
-                baseScale = baseScale,
-                shiftX = 0f,
-                shiftY = 0f,
-                subjectCenterX = sCenterX,
-                subjectCenterY = sb.centerY(),
-                shapeBoundsRel = finalScreenShapeRect,
-                is3DPopEligible = true,
-                targetImgScale = finalImgScale,
-                targetTranslateX = targetTx,
-                targetTranslateY = targetTy
-            )
+            if (eligibility.isEligible && eligibility.subjectBounds != null && config.is3DPopEnabled) {
+                
+                val sb = eligibility.subjectBounds
+                val sW = sb.width()
+                val sH = sb.height()
+                val sCenterX = sb.centerX()
+                val sTop = sb.top
+                val sBottom = sb.bottom
+
+                val isBottomCropped = (imgH - sBottom) < (imgH * 0.05f)
+
+                val minScaleForWidth = (shapeDiameter * 1.05f) / imgW.toFloat()
+                val availablePhotoHeight = (imgH - sTop).coerceAtLeast(sH)
+                val minScaleForHeight = (shapeDiameter * 1.08f) / availablePhotoHeight
+                val absoluteMinSafeScale = max(minScaleForWidth, minScaleForHeight)
+
+                val widthTarget = shapeDiameter * 0.82f
+                val heightTarget = shapeDiameter * 0.88f
+                val scaleByWidth = widthTarget / sW
+                val scaleByHeight = heightTarget / sH
+                val baseSubjectScale = min(scaleByWidth, scaleByHeight * 1.15f)
+
+                val desiredScale = baseSubjectScale * config.scale
+                val finalImgScale = max(desiredScale, absoluteMinSafeScale)
+
+                val popBreakoutRatio = 0.20f
+                val popAmount = sH * finalImgScale * popBreakoutRatio
+
+                var targetTx = shapeCenterX - (sCenterX * finalImgScale)
+                var targetTy = (shapeCenterY - shapeRadius - popAmount) - (sTop * finalImgScale)
+
+                var adjustedShapeCenterY = shapeCenterY
+
+                if (isBottomCropped) {
+                    val photoBottom = targetTy + (imgH * finalImgScale)
+                    val shapeBottom = adjustedShapeCenterY + shapeRadius
+                    if (photoBottom < shapeBottom) {
+                        val deficit = shapeBottom - photoBottom
+                        adjustedShapeCenterY -= deficit
+                    }
+                } else {
+                    val photoBottom = targetTy + (imgH * finalImgScale)
+                    val shapeBottom = adjustedShapeCenterY + shapeRadius
+                    if (photoBottom < shapeBottom) {
+                        targetTy += (shapeBottom - photoBottom)
+                    }
+                }
+
+                val shapeLeft = shapeCenterX - shapeRadius
+                val shapeRight = shapeCenterX + shapeRadius
+                val photoRight = targetTx + (imgW * finalImgScale)
+
+                if (targetTx > shapeLeft) targetTx = shapeLeft
+                if (photoRight < shapeRight) targetTx += (shapeRight - photoRight)
+
+                val finalScreenShapeRect = RectF(
+                    shapeCenterX - shapeRadius,
+                    adjustedShapeCenterY - shapeRadius,
+                    shapeCenterX + shapeRadius,
+                    adjustedShapeCenterY + shapeRadius
+                )
+
+                return UnifiedGeometry(
+                    baseScale = baseScale,
+                    shiftX = 0f,
+                    shiftY = 0f,
+                    subjectCenterX = sCenterX,
+                    subjectCenterY = sb.centerY(),
+                    shapeBoundsRel = finalScreenShapeRect,
+                    is3DPopEligible = true,
+                    targetImgScale = finalImgScale,
+                    targetTranslateX = targetTx,
+                    targetTranslateY = targetTy
+                )
+            } else {
+                
+                val fillScale = max(shapeDiameter / imgW.toFloat(), shapeDiameter / imgH.toFloat()) * 1.08f * config.scale
+                val targetTx = shapeCenterX - (imgW * fillScale / 2f)
+                val targetTy = shapeCenterY - (imgH * fillScale / 2f)
+
+                return UnifiedGeometry(
+                    baseScale = baseScale,
+                    shiftX = 0f,
+                    shiftY = 0f,
+                    subjectCenterX = imgW / 2f,
+                    subjectCenterY = imgH / 2f,
+                    shapeBoundsRel = screenShapeRect,
+                    is3DPopEligible = false,
+                    targetImgScale = fillScale,
+                    targetTranslateX = targetTx,
+                    targetTranslateY = targetTy
+                )
+            }
         } else {
+            
             val framing = if (eligibility.isEligible && eligibility.subjectBounds != null) {
                 SubjectPopAnalyzer.calculatePopFraming(
                     subjectBounds = eligibility.subjectBounds,
@@ -191,7 +221,7 @@ object ShapeEffectHelper {
             val layerId = canvas.saveLayer(0f, 0f, canvas.width.toFloat(), canvas.height.toFloat(), null)
             
             canvas.save()
-            val breakoutCutoffY = screenShapeRect.top + (screenShapeRect.height() * 0.32f)
+            val breakoutCutoffY = screenShapeRect.top + (screenShapeRect.height() * 0.30f)
             canvas.clipRect(0f, 0f, canvas.width.toFloat(), breakoutCutoffY)
             
             canvas.drawBitmap(cutout, bodyMatrix, bitmapPaint)
