@@ -39,11 +39,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
@@ -76,7 +78,7 @@ fun MagicShapeStudio(
     var isAssetsLoading by remember { mutableStateOf(true) }
 
     var popEligibility by remember {
-        mutableStateOf(PopEligibility(isEligible = false, reason = "Analyzing...", subjectBounds = null, coveragePercent = 0f, borderDistances = null))
+        mutableStateOf(PopEligibility(isEligible = false, isAbstract = false, reason = "Analyzing...", subjectBounds = null, coveragePercent = 0f, borderDistances = null))
     }
     var safeScaleRange by remember {
         mutableStateOf(SafeScaleRange(minScale = 0.8f, maxScale = 1.35f, defaultScale = 1.0f))
@@ -115,6 +117,7 @@ fun MagicShapeStudio(
                 if (safeScale != viewModel.magicScale) {
                     viewModel.updateMagicScale(safeScale)
                 }
+                
                 if (!analysis.isEligible && viewModel.is3DPopEnabled) {
                     viewModel.toggle3DPop()
                 }
@@ -274,6 +277,44 @@ fun MagicShapeStudio(
                                 M3ExpressiveMorphLoadingIndicator(sizeDp = 52.dp)
                             }
                             
+                            androidx.compose.animation.AnimatedVisibility(
+                                visible = popEligibility.isAbstract && !isAssetsLoading,
+                                enter = fadeIn(tween(250)) + slideInVertically { -20 },
+                                exit = fadeOut(tween(200)) + slideOutVertically { -20 },
+                                modifier = Modifier
+                                    .align(Alignment.TopCenter)
+                                    .padding(top = 16.dp)
+                            ) {
+                                Surface(
+                                    shape = CircleShape,
+                                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.88f),
+                                    shadowElevation = 8.dp,
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Text(
+                                            text = "🫟",
+                                            fontSize = 13.sp
+                                        )
+                                        Text(
+                                            text = "Abstract Pattern",
+                                            style = MaterialTheme.typography.labelSmall.copy(
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 11.5.sp,
+                                                letterSpacing = 0.2.sp
+                                            ),
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
+                                }
+                            }
+                            
+                            val canShow3DPop = popEligibility.isEligible && !popEligibility.isAbstract
+
                             Surface(
                                 modifier = Modifier
                                     .align(Alignment.BottomCenter)
@@ -298,30 +339,26 @@ fun MagicShapeStudio(
                                             viewModel.toggleCentered()
                                         }
                                     )
-
-                                    VerticalDivider(
-                                        modifier = Modifier
-                                            .height(20.dp)
-                                            .width(1.dp),
-                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
-                                    )
                                     
-                                    val isPopSupported = popEligibility.isEligible
-                                    ExpressiveCenterModePill(
-                                        icon = if (isPopSupported) Icons.Rounded.Layers else Icons.Rounded.LayersClear,
-                                        contentDescription = "Toggle 3D Pop Depth",
-                                        isActive = viewModel.is3DPopEnabled && isPopSupported,
-                                        isEnabled = true,
-                                        onClick = {
-                                            if (isPopSupported) {
+                                    if (canShow3DPop) {
+                                        VerticalDivider(
+                                            modifier = Modifier
+                                                .height(20.dp)
+                                                .width(1.dp),
+                                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
+                                        )
+
+                                        ExpressiveCenterModePill(
+                                            icon = Icons.Rounded.Layers,
+                                            contentDescription = "Toggle 3D Pop Depth",
+                                            isActive = viewModel.is3DPopEnabled,
+                                            isEnabled = true,
+                                            onClick = {
                                                 view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
                                                 viewModel.toggle3DPop()
-                                            } else {
-                                                view.performHapticFeedback(HapticFeedbackConstants.REJECT)
-                                                Toast.makeText(context, popEligibility.reason, Toast.LENGTH_SHORT).show()
                                             }
-                                        }
-                                    )
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -439,7 +476,7 @@ fun MagicShapeStudio(
                                                 )
                                             }
                                         }
-                                        
+
                                         Row(
                                             modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
                                             horizontalArrangement = Arrangement.End
@@ -467,7 +504,7 @@ fun MagicShapeStudio(
                                                 viewModel.updateMagicConfig(toShape, colorInt)
                                             }
                                         )
-                                        
+
                                         Row(
                                             modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
                                             horizontalArrangement = Arrangement.End
@@ -526,9 +563,6 @@ fun MagicShapeStudio(
     }
 }
 
-/**
- * Compact Icon Button used inside the bottom-center preview control pill.
- */
 @Composable
 private fun ExpressiveCenterModePill(
     icon: ImageVector,
