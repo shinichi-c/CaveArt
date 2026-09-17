@@ -12,58 +12,55 @@ data class UnifiedGeometry(
     val subjectCenterX: Float,
     val subjectCenterY: Float,
     val shapeBoundsRel: RectF,
+    val centeredShapeRect: RectF,
     val is3DPopEligible: Boolean,
     val targetImgScale: Float = baseScale,
     val targetTranslateX: Float = 0f,
     val targetTranslateY: Float = 0f
 ) {
-  
+    
     fun setupTransitionMatrices(
         imgW: Int,
         imgH: Int,
         screenW: Float,
         screenH: Float,
         config: LiveWallpaperConfig,
-        transitionProgress: Float,
+        transitionProgress: Float = 0f,
+        centerProgress: Float = if (config.isCentered) 1f else 0f,
         outBodyMatrix: Matrix,
         outScreenShapeRect: RectF
     ) {
+        val c = centerProgress.coerceIn(0f, 1f)
         val t = transitionProgress.coerceIn(0f, 1f)
-        val isCenterMode = config.isCentered && targetTranslateX != 0f
         
-        val startScale: Float
-        val startTx: Float
-        val startTy: Float
-        val startShapeCenterX: Float
-        val startShapeCenterY: Float
-        val startShapeRadius: Float
+        val naturalScale = baseScale * config.scale
+        val naturalTx = (screenW - imgW * naturalScale) / 2f
+        val naturalTy = (screenH - imgH * naturalScale) / 2f
 
-        if (isCenterMode) {
-            
-            startScale = targetImgScale
-            startTx = targetTranslateX
-            startTy = targetTranslateY
-            startShapeCenterX = shapeBoundsRel.centerX()
-            startShapeCenterY = shapeBoundsRel.centerY()
-            startShapeRadius = shapeBoundsRel.width() / 2f
-        } else {
-            
-            val currentImgScale = baseScale * config.scale
-            startScale = currentImgScale
-            startTx = (screenW - imgW * currentImgScale) / 2f
-            startTy = (screenH - imgH * currentImgScale) / 2f
-            
-            val tempMatrix = Matrix().apply {
-                postScale(currentImgScale, currentImgScale)
-                postTranslate(startTx, startTy)
-            }
-            val mappedScreenShape = RectF(shapeBoundsRel)
-            tempMatrix.mapRect(mappedScreenShape)
-
-            startShapeCenterX = mappedScreenShape.centerX()
-            startShapeCenterY = mappedScreenShape.centerY()
-            startShapeRadius = mappedScreenShape.width() / 2f
+        val naturalMatrix = Matrix().apply {
+            postScale(naturalScale, naturalScale)
+            postTranslate(naturalTx, naturalTy)
         }
+        val mappedNaturalShape = RectF(shapeBoundsRel)
+        naturalMatrix.mapRect(mappedNaturalShape)
+
+        val naturalShapeCenterX = mappedNaturalShape.centerX()
+        val naturalShapeCenterY = mappedNaturalShape.centerY()
+        val naturalShapeRadius = mappedNaturalShape.width() / 2f
+        
+        val centeredScale = targetImgScale
+        val centeredTx = targetTranslateX
+        val centeredTy = targetTranslateY
+        val centeredShapeCenterX = centeredShapeRect.centerX()
+        val centeredShapeCenterY = centeredShapeRect.centerY()
+        val centeredShapeRadius = centeredShapeRect.width() / 2f
+        
+        val startScale = naturalScale + (centeredScale - naturalScale) * c
+        val startTx = naturalTx + (centeredTx - naturalTx) * c
+        val startTy = naturalTy + (centeredTy - naturalTy) * c
+        val startShapeCenterX = naturalShapeCenterX + (centeredShapeCenterX - naturalShapeCenterX) * c
+        val startShapeCenterY = naturalShapeCenterY + (centeredShapeCenterY - naturalShapeCenterY) * c
+        val startShapeRadius = naturalShapeRadius + (centeredShapeRadius - naturalShapeRadius) * c
         
         val endScale = baseScale
         val endTx = (screenW - imgW * endScale) / 2f
@@ -79,7 +76,7 @@ data class UnifiedGeometry(
         outBodyMatrix.reset()
         outBodyMatrix.postScale(currentScale, currentScale)
         outBodyMatrix.postTranslate(currentTx, currentTy)
-        
+
         val currentShapeCenterX = startShapeCenterX + (endShapeCenterX - startShapeCenterX) * t
         val currentShapeCenterY = startShapeCenterY + (endShapeCenterY - startShapeCenterY) * t
         val currentRadius = startShapeRadius + (endShapeRadius - startShapeRadius) * t
@@ -101,7 +98,7 @@ data class UnifiedGeometry(
         outBodyMatrix: Matrix,
         outScreenShapeRect: RectF
     ) {
-        setupTransitionMatrices(imgW, imgH, screenW, screenH, config, 0f, outBodyMatrix, outScreenShapeRect)
+        setupTransitionMatrices(imgW, imgH, screenW, screenH, config, 0f, if (config.isCentered) 1f else 0f, outBodyMatrix, outScreenShapeRect)
     }
 }
 
@@ -117,139 +114,119 @@ object ShapeEffectHelper {
     ): UnifiedGeometry {
         val eligibility = SubjectPopAnalyzer.analyzeEligibility(mask)
         val baseScale = max(screenW / imgW, screenH / imgH)
+        
+        val shapeDiameter = screenW * 0.86f
+        val shapeRadius = shapeDiameter / 2f
+        val shapeCenterX = screenW / 2f
+        val shapeCenterY = screenH / 2f
 
-        if (config.isCentered) {
-            val shapeDiameter = screenW * 0.86f
-            val shapeRadius = shapeDiameter / 2f
-            val shapeCenterX = screenW / 2f
-            val shapeCenterY = screenH / 2f
+        val centeredShapeRect = RectF(
+            shapeCenterX - shapeRadius,
+            shapeCenterY - shapeRadius,
+            shapeCenterX + shapeRadius,
+            shapeCenterY + shapeRadius
+        )
 
-            val screenShapeRect = RectF(
-                shapeCenterX - shapeRadius,
-                shapeCenterY - shapeRadius,
-                shapeCenterX + shapeRadius,
-                shapeCenterY + shapeRadius
-            )
+        var targetImgScale = baseScale
+        var targetTx = (screenW - imgW * baseScale) / 2f
+        var targetTy = (screenH - imgH * baseScale) / 2f
 
-            if (eligibility.isEligible && eligibility.subjectBounds != null && config.is3DPopEnabled) {
-                val sb = eligibility.subjectBounds
-                val sW = sb.width()
-                val sH = sb.height()
-                val sCenterX = sb.centerX()
-                val sTop = sb.top
-                val sBottom = sb.bottom
+        if (eligibility.isEligible && eligibility.subjectBounds != null) {
+            val sb = eligibility.subjectBounds
+            val sW = sb.width()
+            val sH = sb.height()
+            val sCenterX = sb.centerX()
+            val sTop = sb.top
+            val sBottom = sb.bottom
 
-                val isBottomCropped = (imgH - sBottom) < (imgH * 0.05f)
+            val isBottomCropped = (imgH - sBottom) < (imgH * 0.05f)
 
-                val minScaleForWidth = (shapeDiameter * 1.05f) / imgW.toFloat()
-                val availablePhotoHeight = (imgH - sTop).coerceAtLeast(sH)
-                val minScaleForHeight = (shapeDiameter * 1.08f) / availablePhotoHeight
-                val absoluteMinSafeScale = max(minScaleForWidth, minScaleForHeight)
+            val minScaleForWidth = (shapeDiameter * 1.05f) / imgW.toFloat()
+            val availablePhotoHeight = (imgH - sTop).coerceAtLeast(sH)
+            val minScaleForHeight = (shapeDiameter * 1.08f) / availablePhotoHeight
+            val absoluteMinSafeScale = max(minScaleForWidth, minScaleForHeight)
 
-                val widthTarget = shapeDiameter * 0.82f
-                val heightTarget = shapeDiameter * 0.88f
-                val scaleByWidth = widthTarget / sW
-                val scaleByHeight = heightTarget / sH
-                val baseSubjectScale = min(scaleByWidth, scaleByHeight * 1.15f)
+            val widthTarget = shapeDiameter * 0.82f
+            val heightTarget = shapeDiameter * 0.88f
+            val scaleByWidth = widthTarget / sW
+            val scaleByHeight = heightTarget / sH
+            val baseSubjectScale = min(scaleByWidth, scaleByHeight * 1.15f)
 
-                val desiredScale = baseSubjectScale * config.scale
-                val finalImgScale = max(desiredScale, absoluteMinSafeScale)
+            val desiredScale = baseSubjectScale * config.scale
+            targetImgScale = max(desiredScale, absoluteMinSafeScale)
 
-                val popBreakoutRatio = 0.20f
-                val popAmount = sH * finalImgScale * popBreakoutRatio
+            val popBreakoutRatio = if (config.is3DPopEnabled) 0.20f else 0.0f
+            val popAmount = sH * targetImgScale * popBreakoutRatio
 
-                var targetTx = shapeCenterX - (sCenterX * finalImgScale)
-                var targetTy = (shapeCenterY - shapeRadius - popAmount) - (sTop * finalImgScale)
+            targetTx = shapeCenterX - (sCenterX * targetImgScale)
+            targetTy = (shapeCenterY - shapeRadius - popAmount) - (sTop * targetImgScale)
 
-                var adjustedShapeCenterY = shapeCenterY
-
-                if (isBottomCropped) {
-                    val photoBottom = targetTy + (imgH * finalImgScale)
-                    val shapeBottom = adjustedShapeCenterY + shapeRadius
-                    if (photoBottom < shapeBottom) {
-                        val deficit = shapeBottom - photoBottom
-                        adjustedShapeCenterY -= deficit
-                    }
-                } else {
-                    val photoBottom = targetTy + (imgH * finalImgScale)
-                    val shapeBottom = adjustedShapeCenterY + shapeRadius
-                    if (photoBottom < shapeBottom) {
-                        targetTy += (shapeBottom - photoBottom)
-                    }
+            var adjustedCenterY = shapeCenterY
+            if (isBottomCropped) {
+                val photoBottom = targetTy + (imgH * targetImgScale)
+                val shapeBottom = adjustedCenterY + shapeRadius
+                if (photoBottom < shapeBottom) {
+                    adjustedCenterY -= (shapeBottom - photoBottom)
                 }
-
-                val shapeLeft = shapeCenterX - shapeRadius
-                val shapeRight = shapeCenterX + shapeRadius
-                val photoRight = targetTx + (imgW * finalImgScale)
-
-                if (targetTx > shapeLeft) targetTx = shapeLeft
-                if (photoRight < shapeRight) targetTx += (shapeRight - photoRight)
-
-                val finalScreenShapeRect = RectF(
-                    shapeCenterX - shapeRadius,
-                    adjustedShapeCenterY - shapeRadius,
-                    shapeCenterX + shapeRadius,
-                    adjustedShapeCenterY + shapeRadius
-                )
-
-                return UnifiedGeometry(
-                    baseScale = baseScale,
-                    shiftX = 0f,
-                    shiftY = 0f,
-                    subjectCenterX = sCenterX,
-                    subjectCenterY = sb.centerY(),
-                    shapeBoundsRel = finalScreenShapeRect,
-                    is3DPopEligible = true,
-                    targetImgScale = finalImgScale,
-                    targetTranslateX = targetTx,
-                    targetTranslateY = targetTy
-                )
             } else {
-                val fillScale = max(shapeDiameter / imgW.toFloat(), shapeDiameter / imgH.toFloat()) * 1.08f * config.scale
-                val targetTx = shapeCenterX - (imgW * fillScale / 2f)
-                val targetTy = shapeCenterY - (imgH * fillScale / 2f)
-
-                return UnifiedGeometry(
-                    baseScale = baseScale,
-                    shiftX = 0f,
-                    shiftY = 0f,
-                    subjectCenterX = imgW / 2f,
-                    subjectCenterY = imgH / 2f,
-                    shapeBoundsRel = screenShapeRect,
-                    is3DPopEligible = false,
-                    targetImgScale = fillScale,
-                    targetTranslateX = targetTx,
-                    targetTranslateY = targetTy
-                )
+                val photoBottom = targetTy + (imgH * targetImgScale)
+                val shapeBottom = adjustedCenterY + shapeRadius
+                if (photoBottom < shapeBottom) {
+                    targetTy += (shapeBottom - photoBottom)
+                }
             }
+
+            val shapeLeft = shapeCenterX - shapeRadius
+            val shapeRight = shapeCenterX + shapeRadius
+            val photoRight = targetTx + (imgW * targetImgScale)
+
+            if (targetTx > shapeLeft) targetTx = shapeLeft
+            if (photoRight < shapeRight) targetTx += (shapeRight - photoRight)
+
+            centeredShapeRect.set(
+                shapeCenterX - shapeRadius,
+                adjustedCenterY - shapeRadius,
+                shapeCenterX + shapeRadius,
+                adjustedCenterY + shapeRadius
+            )
         } else {
-            val framing = if (eligibility.isEligible && eligibility.subjectBounds != null) {
-                SubjectPopAnalyzer.calculatePopFraming(
-                    subjectBounds = eligibility.subjectBounds,
-                    imgW = imgW,
-                    imgH = imgH,
-                    is3DPopEnabled = config.is3DPopEnabled
-                )
-            } else {
-                val r = min(imgW, imgH) * 0.42f
-                PopFraming(
-                    shapeBounds = RectF(imgW / 2f - r, imgH / 2f - r, imgW / 2f + r, imgH / 2f + r),
-                    popClipTop = 0f,
-                    isPopActive = false
-                )
-            }
-
-            val rawShape = framing.shapeBounds
-            return UnifiedGeometry(
-                baseScale = baseScale,
-                shiftX = 0f,
-                shiftY = 0f,
-                subjectCenterX = rawShape.centerX(),
-                subjectCenterY = rawShape.centerY(),
-                shapeBoundsRel = rawShape,
-                is3DPopEligible = eligibility.isEligible
+            
+            targetImgScale = max(shapeDiameter / imgW.toFloat(), shapeDiameter / imgH.toFloat()) * 1.08f * config.scale
+            targetTx = shapeCenterX - (imgW * targetImgScale / 2f)
+            targetTy = shapeCenterY - (imgH * targetImgScale / 2f)
+        }
+        
+        val naturalFraming = if (eligibility.isEligible && eligibility.subjectBounds != null) {
+            SubjectPopAnalyzer.calculatePopFraming(
+                subjectBounds = eligibility.subjectBounds,
+                imgW = imgW,
+                imgH = imgH,
+                is3DPopEnabled = config.is3DPopEnabled
+            )
+        } else {
+            val r = min(imgW, imgH) * 0.42f
+            PopFraming(
+                shapeBounds = RectF(imgW / 2f - r, imgH / 2f - r, imgW / 2f + r, imgH / 2f + r),
+                popClipTop = 0f,
+                isPopActive = false
             )
         }
+
+        val rawNaturalShape = naturalFraming.shapeBounds
+
+        return UnifiedGeometry(
+            baseScale = baseScale,
+            shiftX = 0f,
+            shiftY = 0f,
+            subjectCenterX = rawNaturalShape.centerX(),
+            subjectCenterY = rawNaturalShape.centerY(),
+            shapeBoundsRel = rawNaturalShape,
+            centeredShapeRect = centeredShapeRect,
+            is3DPopEligible = eligibility.isEligible,
+            targetImgScale = targetImgScale,
+            targetTranslateX = targetTx,
+            targetTranslateY = targetTy
+        )
     }
 
     fun drawLivePixelShape(
