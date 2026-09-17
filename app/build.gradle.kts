@@ -99,5 +99,7 @@ dependencies {
 
 implementation("androidx.graphics:graphics-shapes:1.0.1")
 
+implementation("androidx.dynamicanimation:dynamicanimation:1.0.0")
+
     compileOnly("io.github.libxposed:api:101.0.1")
 }

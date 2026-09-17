@@ -25,10 +25,8 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
@@ -50,7 +48,6 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
@@ -81,6 +78,8 @@ fun MagicShapeStudio(
     var previewOriginal by remember { mutableStateOf<Bitmap?>(null) }
     var previewCutout by remember { mutableStateOf<Bitmap?>(null) }
     var isAssetsLoading by remember { mutableStateOf(true) }
+    
+    val centerProgress = remember { Animatable(if (viewModel.isCentered) 1f else 0f) }
     
     var isHoldingPreview by remember { mutableStateOf(false) }
     val simulatedUnlockProgress = remember { Animatable(0f) }
@@ -260,6 +259,8 @@ fun MagicShapeStudio(
                                 Canvas(modifier = Modifier.fillMaxSize()) {
                                     val progress = morphProgress.value
                                     val unlockT = simulatedUnlockProgress.value
+                                    val centerT = centerProgress.value
+
                                     val config = LiveWallpaperConfig(
                                         shapeName = toShape.name,
                                         backgroundColor = viewModel.currentBackgroundColor,
@@ -273,7 +274,7 @@ fun MagicShapeStudio(
                                         previewOriginal!!.width, previewOriginal!!.height,
                                         size.width, size.height, previewCutout, config
                                     )
-
+                                    
                                     geo.setupTransitionMatrices(
                                         imgW = previewOriginal!!.width,
                                         imgH = previewOriginal!!.height,
@@ -281,6 +282,7 @@ fun MagicShapeStudio(
                                         screenH = size.height,
                                         config = config,
                                         transitionProgress = unlockT,
+                                        centerProgress = centerT,
                                         outBodyMatrix = bodyMatrix,
                                         outScreenShapeRect = screenShapeRect
                                     )
@@ -368,6 +370,15 @@ fun MagicShapeStudio(
                                         onClick = {
                                             view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
                                             viewModel.toggleCentered()
+                                            scope.launch {
+                                                centerProgress.animateTo(
+                                                    targetValue = if (viewModel.isCentered) 1f else 0f,
+                                                    animationSpec = spring(
+                                                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                        stiffness = Spring.StiffnessLow
+                                                    )
+                                                )
+                                            }
                                         }
                                     )
 
@@ -378,7 +389,7 @@ fun MagicShapeStudio(
                                                 .width(1.dp),
                                             color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
                                         )
-
+                                        
                                         ExpressiveCenterModePill(
                                             icon = Icons.Rounded.Layers,
                                             contentDescription = "Toggle 3D Pop Depth",
