@@ -16,12 +16,17 @@ data class LiveWallpaperConfig(
     val backgroundColor: Int = 0xFF4CAF50.toInt(),
     val is3DPopEnabled: Boolean = false,
     val scale: Float = 1.0f,
-    val isCentered: Boolean = false,
+    val isCentered: Boolean = true,
     val animationStyle: String = AnimationStyle.NANO_ASSEMBLY.name,
     val isMagicShapeEnabled: Boolean = true,
     val isAnimationEnabled: Boolean = true,
     val isFilamentEnabled: Boolean = false,
-    val animParams: Map<String, Float> = emptyMap()
+    val animParams: Map<String, Float> = emptyMap(),
+    
+    val shapeDisplayMode: String = "LOCK_ONLY",
+    val transitionEffect: String = "EXPAND",
+    val transitionDurationMs: Int = 750,
+    val isSpringBouncy: Boolean = true
 )
 
 object WallpaperConfigManager {

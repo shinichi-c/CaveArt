@@ -81,7 +81,11 @@ suspend fun setLiveWallpaper(
         isMagicShapeEnabled = viewModel.isMagicShapeEnabled,
         isAnimationEnabled = viewModel.isAnimationEnabled,
         isFilamentEnabled = viewModel.isFilamentEnabled,
-        animParams = viewModel.currentAnimParams
+        animParams = viewModel.currentAnimParams,
+        shapeDisplayMode = "LOCK_ONLY",
+        transitionEffect = "EXPAND",
+        transitionDurationMs = 750,
+        isSpringBouncy = true
     )
     
     WallpaperConfigManager.saveConfig(context, config)
@@ -156,5 +160,7 @@ suspend fun setDeviceWallpaper(
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) wallpaperManager.setBitmap(rawBitmap, null, true, destination)
             else wallpaperManager.setBitmap(rawBitmap)
         }
-    } catch (e: Exception) { e.printStackTrace() }
+    } catch (e: Exception) { 
+        e.printStackTrace() 
+    }
 }
