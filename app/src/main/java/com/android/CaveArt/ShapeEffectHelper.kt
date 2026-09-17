@@ -1,6 +1,7 @@
 package com.android.CaveArt
 
 import android.graphics.*
+import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 
@@ -16,6 +17,81 @@ data class UnifiedGeometry(
     val targetTranslateX: Float = 0f,
     val targetTranslateY: Float = 0f
 ) {
+  
+    fun setupTransitionMatrices(
+        imgW: Int,
+        imgH: Int,
+        screenW: Float,
+        screenH: Float,
+        config: LiveWallpaperConfig,
+        transitionProgress: Float,
+        outBodyMatrix: Matrix,
+        outScreenShapeRect: RectF
+    ) {
+        val t = transitionProgress.coerceIn(0f, 1f)
+        val isCenterMode = config.isCentered && targetTranslateX != 0f
+        
+        val startScale: Float
+        val startTx: Float
+        val startTy: Float
+        val startShapeCenterX: Float
+        val startShapeCenterY: Float
+        val startShapeRadius: Float
+
+        if (isCenterMode) {
+            
+            startScale = targetImgScale
+            startTx = targetTranslateX
+            startTy = targetTranslateY
+            startShapeCenterX = shapeBoundsRel.centerX()
+            startShapeCenterY = shapeBoundsRel.centerY()
+            startShapeRadius = shapeBoundsRel.width() / 2f
+        } else {
+            
+            val currentImgScale = baseScale * config.scale
+            startScale = currentImgScale
+            startTx = (screenW - imgW * currentImgScale) / 2f
+            startTy = (screenH - imgH * currentImgScale) / 2f
+            
+            val tempMatrix = Matrix().apply {
+                postScale(currentImgScale, currentImgScale)
+                postTranslate(startTx, startTy)
+            }
+            val mappedScreenShape = RectF(shapeBoundsRel)
+            tempMatrix.mapRect(mappedScreenShape)
+
+            startShapeCenterX = mappedScreenShape.centerX()
+            startShapeCenterY = mappedScreenShape.centerY()
+            startShapeRadius = mappedScreenShape.width() / 2f
+        }
+        
+        val endScale = baseScale
+        val endTx = (screenW - imgW * endScale) / 2f
+        val endTy = (screenH - imgH * endScale) / 2f
+        val endShapeCenterX = screenW / 2f
+        val endShapeCenterY = screenH / 2f
+        val endShapeRadius = hypot(screenW, screenH)
+        
+        val currentScale = startScale + (endScale - startScale) * t
+        val currentTx = startTx + (endTx - startTx) * t
+        val currentTy = startTy + (endTy - startTy) * t
+
+        outBodyMatrix.reset()
+        outBodyMatrix.postScale(currentScale, currentScale)
+        outBodyMatrix.postTranslate(currentTx, currentTy)
+        
+        val currentShapeCenterX = startShapeCenterX + (endShapeCenterX - startShapeCenterX) * t
+        val currentShapeCenterY = startShapeCenterY + (endShapeCenterY - startShapeCenterY) * t
+        val currentRadius = startShapeRadius + (endShapeRadius - startShapeRadius) * t
+
+        outScreenShapeRect.set(
+            currentShapeCenterX - currentRadius,
+            currentShapeCenterY - currentRadius,
+            currentShapeCenterX + currentRadius,
+            currentShapeCenterY + currentRadius
+        )
+    }
+
     fun setupMatrices(
         imgW: Int,
         imgH: Int,
@@ -25,24 +101,7 @@ data class UnifiedGeometry(
         outBodyMatrix: Matrix,
         outScreenShapeRect: RectF
     ) {
-        if (config.isCentered && targetTranslateX != 0f) {
-            outBodyMatrix.reset()
-            outBodyMatrix.postScale(targetImgScale, targetImgScale)
-            outBodyMatrix.postTranslate(targetTranslateX, targetTranslateY)
-            outScreenShapeRect.set(shapeBoundsRel)
-        } else {
-            val currentImgScale = baseScale * config.scale
-            val anchorX = if (config.isCentered) subjectCenterX else imgW / 2f
-            val anchorY = if (config.isCentered) subjectCenterY else imgH / 2f
-
-            outBodyMatrix.reset()
-            outBodyMatrix.postTranslate(-anchorX, -anchorY)
-            outBodyMatrix.postScale(currentImgScale, currentImgScale)
-            outBodyMatrix.postTranslate(screenW / 2f, screenH / 2f)
-
-            outScreenShapeRect.set(shapeBoundsRel)
-            outBodyMatrix.mapRect(outScreenShapeRect)
-        }
+        setupTransitionMatrices(imgW, imgH, screenW, screenH, config, 0f, outBodyMatrix, outScreenShapeRect)
     }
 }
 
@@ -60,7 +119,6 @@ object ShapeEffectHelper {
         val baseScale = max(screenW / imgW, screenH / imgH)
 
         if (config.isCentered) {
-            
             val shapeDiameter = screenW * 0.86f
             val shapeRadius = shapeDiameter / 2f
             val shapeCenterX = screenW / 2f
@@ -74,7 +132,6 @@ object ShapeEffectHelper {
             )
 
             if (eligibility.isEligible && eligibility.subjectBounds != null && config.is3DPopEnabled) {
-                
                 val sb = eligibility.subjectBounds
                 val sW = sb.width()
                 val sH = sb.height()
@@ -148,7 +205,6 @@ object ShapeEffectHelper {
                     targetTranslateY = targetTy
                 )
             } else {
-                
                 val fillScale = max(shapeDiameter / imgW.toFloat(), shapeDiameter / imgH.toFloat()) * 1.08f * config.scale
                 val targetTx = shapeCenterX - (imgW * fillScale / 2f)
                 val targetTy = shapeCenterY - (imgH * fillScale / 2f)
@@ -167,7 +223,6 @@ object ShapeEffectHelper {
                 )
             }
         } else {
-            
             val framing = if (eligibility.isEligible && eligibility.subjectBounds != null) {
                 SubjectPopAnalyzer.calculatePopFraming(
                     subjectBounds = eligibility.subjectBounds,
@@ -223,7 +278,6 @@ object ShapeEffectHelper {
             canvas.save()
             val breakoutCutoffY = screenShapeRect.top + (screenShapeRect.height() * 0.30f)
             canvas.clipRect(0f, 0f, canvas.width.toFloat(), breakoutCutoffY)
-            
             canvas.drawBitmap(cutout, bodyMatrix, bitmapPaint)
             canvas.drawBitmap(original, bodyMatrix, maskXferPaint)
             canvas.restore()

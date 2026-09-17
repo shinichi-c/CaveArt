@@ -2,6 +2,8 @@ package com.android.CaveArt
 
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.Matrix
+import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
@@ -16,14 +18,17 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
@@ -39,8 +44,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
@@ -76,6 +81,9 @@ fun MagicShapeStudio(
     var previewOriginal by remember { mutableStateOf<Bitmap?>(null) }
     var previewCutout by remember { mutableStateOf<Bitmap?>(null) }
     var isAssetsLoading by remember { mutableStateOf(true) }
+    
+    var isHoldingPreview by remember { mutableStateOf(false) }
+    val simulatedUnlockProgress = remember { Animatable(0f) }
 
     var popEligibility by remember {
         mutableStateOf(PopEligibility(isEligible = false, isAbstract = false, reason = "Analyzing...", subjectBounds = null, coveragePercent = 0f, borderDistances = null))
@@ -117,7 +125,6 @@ fun MagicShapeStudio(
                 if (safeScale != viewModel.magicScale) {
                     viewModel.updateMagicScale(safeScale)
                 }
-                
                 if (!analysis.isEligible && viewModel.is3DPopEnabled) {
                     viewModel.toggle3DPop()
                 }
@@ -203,22 +210,56 @@ fun MagicShapeStudio(
                         shape = MaterialTheme.shapes.extraLarge,
                         colors = CardDefaults.cardColors(containerColor = Color.Black)
                     ) {
-                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .pointerInput(Unit) {
+                                    detectTapGestures(
+                                        onPress = {
+                                            isHoldingPreview = true
+                                            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                            scope.launch {
+                                                simulatedUnlockProgress.animateTo(
+                                                    targetValue = 1f,
+                                                    animationSpec = spring(
+                                                        dampingRatio = 0.76f,
+                                                        stiffness = 320f
+                                                    )
+                                                )
+                                            }
+                                            tryAwaitRelease()
+                                            isHoldingPreview = false
+                                            view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                                            scope.launch {
+                                                simulatedUnlockProgress.animateTo(
+                                                    targetValue = 0f,
+                                                    animationSpec = spring(
+                                                        dampingRatio = 0.76f,
+                                                        stiffness = 320f
+                                                    )
+                                                )
+                                            }
+                                        }
+                                    )
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
                             if (previewOriginal != null && !isAssetsLoading) {
                                 val paint = remember {
-                                    android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG or android.graphics.Paint.FILTER_BITMAP_FLAG)
+                                    Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
                                 }
                                 val maskXferPaint = remember {
-                                    android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                                    Paint(Paint.ANTI_ALIAS_FLAG).apply {
                                         xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_IN)
                                     }
                                 }
                                 val screenShapeRect = remember { RectF() }
                                 val liveShapePath = remember { Path() }
-                                val bodyMatrix = remember { android.graphics.Matrix() }
+                                val bodyMatrix = remember { Matrix() }
 
                                 Canvas(modifier = Modifier.fillMaxSize()) {
                                     val progress = morphProgress.value
+                                    val unlockT = simulatedUnlockProgress.value
                                     val config = LiveWallpaperConfig(
                                         shapeName = toShape.name,
                                         backgroundColor = viewModel.currentBackgroundColor,
@@ -233,15 +274,20 @@ fun MagicShapeStudio(
                                         size.width, size.height, previewCutout, config
                                     )
 
-                                    geo.setupMatrices(
+                                    geo.setupTransitionMatrices(
                                         imgW = previewOriginal!!.width,
                                         imgH = previewOriginal!!.height,
                                         screenW = size.width,
                                         screenH = size.height,
                                         config = config,
+                                        transitionProgress = unlockT,
                                         outBodyMatrix = bodyMatrix,
                                         outScreenShapeRect = screenShapeRect
                                     )
+
+                                    val bgAlpha = ((1f - unlockT) * 255).toInt().coerceIn(0, 255)
+                                    val dynamicBg = (bgAlpha shl 24) or (viewModel.currentBackgroundColor and 0x00FFFFFF)
+                                    drawIntoCanvas { it.nativeCanvas.drawColor(dynamicBg) }
 
                                     PixelShapeMorpher.buildMorphedPath(
                                         fromShape = fromShape,
@@ -252,18 +298,25 @@ fun MagicShapeStudio(
                                     )
 
                                     drawIntoCanvas { canvas ->
-                                        ShapeEffectHelper.drawLivePixelShape(
-                                            canvas = canvas.nativeCanvas,
-                                            original = previewOriginal!!,
-                                            cutout = previewCutout,
-                                            geo = geo,
-                                            config = config,
-                                            shapePath = liveShapePath,
-                                            screenShapeRect = screenShapeRect,
-                                            bodyMatrix = bodyMatrix,
-                                            bitmapPaint = paint,
-                                            maskXferPaint = maskXferPaint
-                                        )
+                                        val nc = canvas.nativeCanvas
+                                        nc.save()
+                                        nc.clipPath(liveShapePath)
+                                        nc.drawBitmap(previewOriginal!!, bodyMatrix, paint)
+                                        nc.restore()
+
+                                        if (config.is3DPopEnabled && geo.is3DPopEligible && previewCutout != null && unlockT < 0.6f) {
+                                            val popAlpha = ((1f - (unlockT / 0.6f)) * 255).toInt().coerceIn(0, 255)
+                                            paint.alpha = popAlpha
+                                            val layerId = nc.saveLayer(0f, 0f, size.width, size.height, null)
+                                            nc.save()
+                                            val breakoutCutoffY = screenShapeRect.top + (screenShapeRect.height() * 0.30f)
+                                            nc.clipRect(0f, 0f, size.width, breakoutCutoffY)
+                                            nc.drawBitmap(previewCutout!!, bodyMatrix, paint)
+                                            nc.drawBitmap(previewOriginal!!, bodyMatrix, maskXferPaint)
+                                            nc.restore()
+                                            nc.restoreToCount(layerId)
+                                            paint.alpha = 255
+                                        }
                                     }
                                 }
                             } else {
@@ -277,41 +330,20 @@ fun MagicShapeStudio(
                                 M3ExpressiveMorphLoadingIndicator(sizeDp = 52.dp)
                             }
                             
-                            androidx.compose.animation.AnimatedVisibility(
-                                visible = popEligibility.isAbstract && !isAssetsLoading,
-                                enter = fadeIn(tween(250)) + slideInVertically { -20 },
-                                exit = fadeOut(tween(200)) + slideOutVertically { -20 },
+                            PreviewGuidancePill(
+                                visible = !isHoldingPreview,
+                                text = "Hold to preview unlock",
                                 modifier = Modifier
                                     .align(Alignment.TopCenter)
                                     .padding(top = 16.dp)
-                            ) {
-                                Surface(
-                                    shape = CircleShape,
-                                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.88f),
-                                    shadowElevation = 8.dp,
-                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        Text(
-                                            text = "🫟",
-                                            fontSize = 13.sp
-                                        )
-                                        Text(
-                                            text = "Abstract Pattern",
-                                            style = MaterialTheme.typography.labelSmall.copy(
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 11.5.sp,
-                                                letterSpacing = 0.2.sp
-                                            ),
-                                            color = MaterialTheme.colorScheme.onSurface
-                                        )
-                                    }
-                                }
-                            }
+                            )
+                            
+                            AbstractPatternBadge(
+                                visible = popEligibility.isAbstract && !isAssetsLoading,
+                                modifier = Modifier
+                                    .align(Alignment.TopCenter)
+                                    .padding(top = 48.dp)
+                            )
                             
                             val canShow3DPop = popEligibility.isEligible && !popEligibility.isAbstract
 
@@ -329,7 +361,6 @@ fun MagicShapeStudio(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
-                                    
                                     ExpressiveCenterModePill(
                                         icon = if (viewModel.isCentered) Icons.Rounded.CenterFocusStrong else Icons.Rounded.CenterFocusWeak,
                                         contentDescription = "Toggle Center Mode",
@@ -339,7 +370,7 @@ fun MagicShapeStudio(
                                             viewModel.toggleCentered()
                                         }
                                     )
-                                    
+
                                     if (canShow3DPop) {
                                         VerticalDivider(
                                             modifier = Modifier
@@ -521,7 +552,7 @@ fun MagicShapeStudio(
                                     Column(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .padding(vertical = 4.dp),
+                                            .padding(vertical = 6.dp),
                                         verticalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
                                         ExpressiveCapsuleSlider(
@@ -558,6 +589,75 @@ fun MagicShapeStudio(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PreviewGuidancePill(
+    visible: Boolean,
+    text: String,
+    modifier: Modifier = Modifier
+) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(),
+        exit = fadeOut(),
+        modifier = modifier
+    ) {
+        Surface(
+            shape = CircleShape,
+            color = Color.Black.copy(alpha = 0.45f)
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Icon(Icons.Rounded.TouchApp, null, Modifier.size(13.dp), tint = Color.White.copy(alpha = 0.9f))
+                Text(
+                    text = text,
+                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold),
+                    color = Color.White.copy(alpha = 0.9f)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AbstractPatternBadge(
+    visible: Boolean,
+    modifier: Modifier = Modifier
+) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(tween(250)) + slideInVertically { -20 },
+        exit = fadeOut(tween(200)) + slideOutVertically { -20 },
+        modifier = modifier
+    ) {
+        Surface(
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.88f),
+            shadowElevation = 8.dp,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text("🫟", fontSize = 13.sp)
+                Text(
+                    text = "Abstract Pattern",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 11.5.sp,
+                        letterSpacing = 0.2.sp
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
             }
         }
     }
