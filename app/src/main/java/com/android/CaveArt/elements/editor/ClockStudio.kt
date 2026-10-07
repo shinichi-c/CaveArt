@@ -1,5 +1,9 @@
 package com.android.CaveArt
 
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.Matrix
@@ -51,6 +55,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
 import kotlin.math.max
@@ -72,6 +77,10 @@ class ClockStudioState(viewModel: WallpaperViewModel) {
     val dateFormat: MutableIntState = mutableIntStateOf(viewModel.dateLayout)
     val dateAttached: MutableState<Boolean> = mutableStateOf(viewModel.isDateAttached)
     val clockFont: MutableState<String> = mutableStateOf(viewModel.clockFont)
+    
+    val udfpsX: MutableFloatState = mutableFloatStateOf(-1f)
+    val udfpsY: MutableFloatState = mutableFloatStateOf(-1f)
+    val udfpsRadius: MutableFloatState = mutableFloatStateOf(0f)
 }
 
 @Composable
@@ -92,7 +101,8 @@ fun ClockStudio(
     val config = LocalConfiguration.current
     val isLandscape = config.orientation == Configuration.ORIENTATION_LANDSCAPE
     val isDarkTheme = isSystemInDarkTheme()
-    
+    val scope = rememberCoroutineScope()
+
     val displayGeometry = remember { NativeDisplayMetrics.getGeometry(context) }
     val realW = displayGeometry.widthPx
     val realH = displayGeometry.heightPx
@@ -113,6 +123,55 @@ fun ClockStudio(
     var timeString by remember { mutableStateOf("") }
     var dateText by remember { mutableStateOf("") }
     val availableFonts = remember { viewModel.getAvailableFonts(context) }
+    
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) {
+            val coords = RootUtils.detectUdfpsLocation(context)
+            if (coords != null) {
+                withContext(Dispatchers.Main) {
+                    state.udfpsX.floatValue = coords.first
+                    state.udfpsY.floatValue = coords.second
+                    state.udfpsRadius.floatValue = coords.third
+                }
+            } else {
+                val prefs = context.getSharedPreferences("cave_art_clock_prefs", Context.MODE_PRIVATE)
+                val cx = prefs.getFloat("udfps_x", -1f)
+                val cy = prefs.getFloat("udfps_y", -1f)
+                val cr = prefs.getFloat("udfps_radius", 0f)
+                if (cr > 0f) {
+                    withContext(Dispatchers.Main) {
+                        state.udfpsX.floatValue = cx
+                        state.udfpsY.floatValue = cy
+                        state.udfpsRadius.floatValue = cr
+                    }
+                }
+            }
+        }
+    }
+    
+    DisposableEffect(Unit) {
+        val filter = IntentFilter("com.android.CaveArt.UPDATE_UDFPS_LOCATION")
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(ctx: Context?, intent: Intent?) {
+                val x = intent?.getFloatExtra("udfps_x", -1f) ?: -1f
+                val y = intent?.getFloatExtra("udfps_y", -1f) ?: -1f
+                val r = intent?.getFloatExtra("udfps_radius", 0f) ?: 0f
+                if (r > 0f) {
+                    state.udfpsX.floatValue = x
+                    state.udfpsY.floatValue = y
+                    state.udfpsRadius.floatValue = r
+                }
+            }
+        }
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            context.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)
+        } else {
+            context.registerReceiver(receiver, filter)
+        }
+        onDispose {
+            try { context.unregisterReceiver(receiver) } catch (_: Exception) {}
+        }
+    }
 
     LaunchedEffect(wallpaper) {
         val components = viewModel.getHighQualityComponents(context, wallpaper)
@@ -153,7 +212,6 @@ fun ClockStudio(
         }
     }
 
-    
     LaunchedEffect(
         state.clockX.floatValue,
         state.clockY.floatValue,
@@ -357,12 +415,8 @@ fun ClockStudio(
                                 isDraggingClock = false
                                 isDraggingDate = false
 
-                                if (abs(state.clockX.floatValue) < 15f) {
-                                    state.clockX.floatValue = 0f
-                                }
-                                if (!state.dateAttached.value && abs(state.dateX.floatValue) < 15f) {
-                                    state.dateX.floatValue = 0f
-                                }
+                                if (abs(state.clockX.floatValue) < 15f) state.clockX.floatValue = 0f
+                                if (!state.dateAttached.value && abs(state.dateX.floatValue) < 15f) state.dateX.floatValue = 0f
                             }
                         },
                     shape = RoundedCornerShape(36.dp),
@@ -373,7 +427,6 @@ fun ClockStudio(
 
                         drawIntoCanvas { canvas ->
                             val nativeCanvas = canvas.nativeCanvas
-
                             nativeCanvas.save()
                             nativeCanvas.scale(previewScale, previewScale)
                             
@@ -393,7 +446,6 @@ fun ClockStudio(
                                 datePaint.textSize = 20f * densityVal
                                 val nativeDateX = (realW / 2f) + (state.dateX.floatValue * densityVal)
                                 val nativeDateY = state.dateY.floatValue * densityVal
-                                
                                 val drawBaselineY = nativeDateY - datePaint.fontMetrics.top
                                 nativeCanvas.drawText(dateText, nativeDateX, drawBaselineY, datePaint)
                             }
@@ -445,6 +497,31 @@ fun ClockStudio(
                             }
 
                             nativeCanvas.restore()
+                        }
+                        
+                        val sensorR = state.udfpsRadius.floatValue
+                        if (sensorR > 0f && state.udfpsX.floatValue > 0f) {
+                            val sensorCenterX = state.udfpsX.floatValue * previewScale
+                            val sensorCenterY = state.udfpsY.floatValue * previewScale
+                            val sensorRadiusPx = sensorR * previewScale
+
+                            val scaledLeft = sharedPathBounds.left * previewScale
+                            val scaledRight = sharedPathBounds.right * previewScale
+                            val scaledBottom = sharedPathBounds.bottom * previewScale
+                            val scaledTop = sharedPathBounds.top * previewScale
+
+                            val isOverlapping = (sensorCenterX in (scaledLeft - 10f)..(scaledRight + 10f)) &&
+                                    (sensorCenterY in (scaledTop - 10f)..(scaledBottom + 10f))
+
+                            drawCircle(
+                                color = if (isOverlapping) Color(0xFFFF5252).copy(alpha = 0.9f) else Color.White.copy(alpha = 0.35f),
+                                radius = sensorRadiusPx,
+                                center = Offset(sensorCenterX, sensorCenterY),
+                                style = Stroke(
+                                    width = if (isOverlapping) 2.5.dp.toPx() else 1.5.dp.toPx(),
+                                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 12f), 0f)
+                                )
+                            )
                         }
                         
                         if (isDraggingClock) {
