@@ -9,6 +9,7 @@ import android.database.Cursor
 import android.graphics.*
 import android.net.Uri
 import android.os.Build
+import android.os.Bundle
 import android.util.DisplayMetrics
 import android.util.TypedValue
 import android.view.Gravity
@@ -79,6 +80,25 @@ class CaveArtXposedModule : XposedModule() {
             activeClock?.setClockState(hasNotifications)
             activeDate?.setDateState(hasNotifications)
         }
+
+        fun sendUdfpsCoordinates(ctx: Context, centerX: Float, centerY: Float, radius: Float) {
+            try {
+                val bundle = Bundle().apply {
+                    putFloat("udfps_x", centerX)
+                    putFloat("udfps_y", centerY)
+                    putFloat("udfps_radius", radius)
+                }
+                ctx.contentResolver.call(
+                    Uri.parse("content://com.android.CaveArt.settings"),
+                    "updateUdfps",
+                    null,
+                    bundle
+                )
+                ctx.sendBroadcast(Intent("com.android.CaveArt.UPDATE_UDFPS_LOCATION").apply {
+                    putExtras(bundle)
+                })
+            } catch (_: Exception) {}
+        }
     }
 
     override fun onPackageLoaded(param: XposedModuleInterface.PackageLoadedParam) {
@@ -90,6 +110,40 @@ class CaveArtXposedModule : XposedModule() {
             } catch (_: Exception) {
                 param.javaClass.getMethod("getClassLoader").invoke(param) as ClassLoader
             }
+            
+            try {
+                val authControllerClass = classLoader.loadClass("com.android.systemui.biometrics.AuthController")
+                val targetMethods = authControllerClass.declaredMethods.filter {
+                    it.name in listOf("onAodInterrupt", "setUdfpsLocation", "onUdfpsLocationChanged", "doAuthenticate", "updateSensorLocations")
+                }
+
+                targetMethods.forEach { method ->
+                    hook(method).intercept { chain ->
+                        val result = chain.proceed()
+                        try {
+                            val controller = chain.thisObject
+                            val boundsMethod = controller.javaClass.declaredMethods.firstOrNull { it.name == "getUdfpsBounds" }
+                            val bounds = boundsMethod?.invoke(controller) as? Rect
+
+                            val ctx = (chain.args.firstOrNull() as? Context) ?: activeClock?.context
+                            if (bounds != null && bounds.width() > 0 && ctx != null) {
+                                sendUdfpsCoordinates(ctx, bounds.exactCenterX(), bounds.exactCenterY(), bounds.width() / 2f)
+                            } else if (ctx != null) {
+                                val locMethod = controller.javaClass.declaredMethods.firstOrNull { it.name == "getUdfpsLocation" }
+                                val loc = locMethod?.invoke(controller)
+                                val density = ctx.resources.displayMetrics.density
+                                val defaultR = 42f * density
+                                if (loc is PointF) {
+                                    sendUdfpsCoordinates(ctx, loc.x, loc.y, defaultR)
+                                } else if (loc is Point) {
+                                    sendUdfpsCoordinates(ctx, loc.x.toFloat(), loc.y.toFloat(), defaultR)
+                                }
+                            }
+                        } catch (_: Exception) {}
+                        result
+                    }
+                }
+            } catch (_: Exception) {}
 
             var largeId = 0
             var smallId = 0
@@ -107,11 +161,11 @@ class CaveArtXposedModule : XposedModule() {
 
                 hook(bindDataMethod).intercept { chain ->
                     val result = chain.proceed()
-
                     val rootLayout = chain.args[0] as? ViewGroup
+
                     if (rootLayout != null) {
                         val context = rootLayout.context
-                        
+
                         val wm = context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && wm != null) {
                             val bounds = wm.maximumWindowMetrics.bounds
@@ -130,13 +184,36 @@ class CaveArtXposedModule : XposedModule() {
 
                         SystemUIHider.initIds(context)
                         OverlapPreventionHelper.initIds(context)
+                        
+                        try {
+                            val dependencyClass = classLoader.loadClass("com.android.systemui.Dependency")
+                            val authControllerClass = classLoader.loadClass("com.android.systemui.biometrics.AuthController")
+                            val getMethod = dependencyClass.getMethod("get", Class::class.java)
+                            val authController = getMethod.invoke(null, authControllerClass)
+
+                            if (authController != null) {
+                                val getBoundsMethod = authControllerClass.declaredMethods.firstOrNull { it.name == "getUdfpsBounds" }
+                                val bounds = getBoundsMethod?.invoke(authController) as? Rect
+                                if (bounds != null && bounds.width() > 0) {
+                                    sendUdfpsCoordinates(context, bounds.exactCenterX(), bounds.exactCenterY(), bounds.width() / 2f)
+                                } else {
+                                    val getLocMethod = authControllerClass.declaredMethods.firstOrNull { it.name == "getUdfpsLocation" }
+                                    val loc = getLocMethod?.invoke(authController)
+                                    val density = context.resources.displayMetrics.density
+                                    val defaultR = 44f * density
+                                    if (loc is PointF) {
+                                        sendUdfpsCoordinates(context, loc.x, loc.y, defaultR)
+                                    } else if (loc is Point) {
+                                        sendUdfpsCoordinates(context, loc.x.toFloat(), loc.y.toFloat(), defaultR)
+                                    }
+                                }
+                            }
+                        } catch (_: Exception) {}
 
                         if (rootLayout.findViewById<View>(customClockId) == null) {
-
                             val initialX = getSettingFloat(context, "clock_x", 0f)
                             val initialY = getSettingFloat(context, "clock_y", 110f)
                             val dAttached = getSettingInt(context, "date_attached", 1) == 1
-                            
                             val dateX = if (dAttached) initialX else getSettingFloat(context, "date_x", 0f)
                             val dateY = getSettingFloat(context, "date_y", 75f)
 
@@ -428,19 +505,10 @@ class CaveArtXposedModule : XposedModule() {
 
                             try {
                                 val density = context.resources.displayMetrics.density
-
-                                val dateCurrentY = if (hasNotifications) {
-                                    65f * density
-                                } else {
-                                    dateTopMarginPx.toFloat()
-                                }
+                                val dateCurrentY = if (hasNotifications) 65f * density else dateTopMarginPx.toFloat()
                                 val dateHeight = (if (hasNotifications) 15f else 20f) * density * 1.5f
 
-                                val clockCurrentY = if (hasNotifications) {
-                                    100f * density
-                                } else {
-                                    topMarginPx.toFloat()
-                                }
+                                val clockCurrentY = if (hasNotifications) 100f * density else topMarginPx.toFloat()
                                 val clockHeight = (if (hasNotifications) {
                                     if ((activeClock?.hourSizeDp ?: 100f) > 85f) 85f else (activeClock?.hourSizeDp ?: 100f)
                                 } else {
@@ -471,7 +539,6 @@ class CaveArtXposedModule : XposedModule() {
                         }
 
                         SystemUIHider.hideInConstraintSet(cs, constraintSetClass)
-
                         result
                     }
                 } catch (_: Exception) {}

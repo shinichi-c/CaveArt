@@ -7,25 +7,46 @@ import android.database.Cursor
 import android.database.MatrixCursor
 import android.net.Uri
 import android.os.Build
+import android.os.Bundle
 
 class CaveArtSettingsProvider : ContentProvider() {
     override fun onCreate(): Boolean = true
+
+    override fun call(method: String, arg: String?, extras: Bundle?): Bundle? {
+        val baseContext = context ?: return null
+        val safeContext = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            baseContext.createDeviceProtectedStorageContext()
+        } else baseContext
+        val prefs = safeContext.getSharedPreferences("cave_art_clock_prefs", Context.MODE_PRIVATE)
+
+        if (method == "updateUdfps" && extras != null) {
+            val x = extras.getFloat("udfps_x", -1f)
+            val y = extras.getFloat("udfps_y", -1f)
+            val r = extras.getFloat("udfps_radius", 0f)
+            if (r > 0f) {
+                prefs.edit()
+                    .putFloat("udfps_x", x)
+                    .putFloat("udfps_y", y)
+                    .putFloat("udfps_radius", r)
+                    .apply()
+            }
+            return Bundle().apply { putBoolean("success", true) }
+        }
+        return null
+    }
 
     override fun query(
         uri: Uri, projection: Array<String>?, selection: String?,
         selectionArgs: Array<String>?, sortOrder: String?
     ): Cursor? {
         val baseContext = context ?: return null
-        
         val safeContext = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             baseContext.createDeviceProtectedStorageContext()
-        } else {
-            baseContext
-        }
-        
+        } else baseContext
+
         val prefs = safeContext.getSharedPreferences("cave_art_clock_prefs", Context.MODE_PRIVATE)
-        
         val cursor = MatrixCursor(arrayOf("value"))
+
         when (uri.lastPathSegment) {
             "clock_x" -> cursor.addRow(arrayOf(prefs.getFloat("clock_x", 0f)))
             "clock_y" -> cursor.addRow(arrayOf(prefs.getFloat("clock_y", 110f)))
@@ -45,6 +66,9 @@ class CaveArtSettingsProvider : ContentProvider() {
             "clock_font" -> cursor.addRow(arrayOf(prefs.getString("clock_font", "default")))
             "clock_dual_tone" -> cursor.addRow(arrayOf(if (prefs.getBoolean("clock_dual_tone", true)) 1 else 0))
             "clock_layout" -> cursor.addRow(arrayOf(prefs.getInt("clock_layout", 0)))
+            "udfps_x" -> cursor.addRow(arrayOf(prefs.getFloat("udfps_x", -1f)))
+            "udfps_y" -> cursor.addRow(arrayOf(prefs.getFloat("udfps_y", -1f)))
+            "udfps_radius" -> cursor.addRow(arrayOf(prefs.getFloat("udfps_radius", 0f)))
         }
         return cursor
     }
