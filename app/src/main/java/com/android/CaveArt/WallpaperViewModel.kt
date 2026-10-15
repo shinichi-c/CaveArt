@@ -185,17 +185,27 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         context.sendBroadcast(android.content.Intent("com.android.CaveArt.UPDATE_DATE_POSITION").apply { putExtra("date_x", x); putExtra("date_y", y) })
     }
 
-    fun updateClockStyle(context: Context, hourSize: Float, minuteSize: Float, strokeWidth: Float, roundness: Float) {
+    fun updateClockStyle(
+        context: Context,
+        hourSize: Float,
+        minuteSize: Float,
+        strokeWidth: Float,
+        roundness: Float,
+        dateSize: Float = (hourSize * 0.24f).coerceIn(14f, 34f)
+    ) {
         clockHourSize = hourSize
         clockMinuteSize = minuteSize
         clockStrokeWidth = strokeWidth
         clockRoundness = roundness
+
+        val autoDateSize = dateSize.coerceIn(14f, 34f)
 
         clockPrefs.edit()
             .putFloat("clock_hour_size", hourSize)
             .putFloat("clock_minute_size", minuteSize)
             .putFloat("clock_stroke_width", strokeWidth)
             .putFloat("clock_roundness", roundness)
+            .putFloat("date_size", autoDateSize)
             .apply()
 
         context.sendBroadcast(android.content.Intent("com.android.CaveArt.UPDATE_CLOCK_STYLE").apply {
@@ -203,6 +213,7 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
             putExtra("clock_minute_size", minuteSize)
             putExtra("clock_stroke_width", strokeWidth)
             putExtra("clock_roundness", roundness)
+            putExtra("date_size", autoDateSize)
         })
     }
 
@@ -348,7 +359,6 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
                         tag = "Active"
                     )
                     withContext(Dispatchers.Main) {
-                        
                         allWallpapers = listOf(sysWp) + allWallpapers.filter { it.id != "active_system_lockscreen" }
                     }
                 }

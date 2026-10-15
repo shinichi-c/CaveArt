@@ -29,7 +29,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PhotoLibrary
-import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -57,9 +56,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
 import kotlin.math.max
+import kotlin.math.min
 
 class ClockStudioState(viewModel: WallpaperViewModel) {
     val clockX: MutableFloatState = mutableFloatStateOf(viewModel.lockscreenClockOffsetX)
@@ -78,7 +79,7 @@ class ClockStudioState(viewModel: WallpaperViewModel) {
     val dateFormat: MutableIntState = mutableIntStateOf(viewModel.dateLayout)
     val dateAttached: MutableState<Boolean> = mutableStateOf(viewModel.isDateAttached)
     val clockFont: MutableState<String> = mutableStateOf(viewModel.clockFont)
-    val dateSize: MutableFloatState = mutableFloatStateOf(viewModel.clockMinuteSize * 0.27f)
+    val dateSize: MutableFloatState = mutableFloatStateOf((viewModel.clockHourSize * 0.24f).coerceIn(14f, 34f))
     
     val udfpsX: MutableFloatState = mutableFloatStateOf(-1f)
     val udfpsY: MutableFloatState = mutableFloatStateOf(-1f)
@@ -105,6 +106,7 @@ fun ClockStudio(
     val config = LocalConfiguration.current
     val isLandscape = config.orientation == Configuration.ORIENTATION_LANDSCAPE
     val isDarkTheme = isSystemInDarkTheme()
+    val scope = rememberCoroutineScope()
     
     val displayGeometry = remember { NativeDisplayMetrics.getGeometry(context) }
     val realW = displayGeometry.widthPx
@@ -113,7 +115,7 @@ fun ClockStudio(
     
     val statusBarDp = displayGeometry.statusBarHeightPx / densityVal
     val navBarDp = displayGeometry.navBarHeightPx / densityVal
-    val minSafeYDp = statusBarDp + (displayGeometry.statusBarHeightPx * 0.1f / densityVal)
+    val minSafeYDp = statusBarDp + (displayGeometry.statusBarHeightPx * 0.12f / densityVal)
     val minClockSizeDp = (realW * 0.08f) / densityVal
     val maxClockSizeDp = (realW * 0.55f) / densityVal
     val magneticSnapThresholdDp = (realW * 0.025f) / densityVal
@@ -173,6 +175,123 @@ fun ClockStudio(
                 clipToBounds = false
             }
         } else null
+    }
+    
+    LaunchedEffect(state.hourSize.floatValue) {
+        val calculatedDateSize = (state.hourSize.floatValue * 0.24f).coerceIn(14f, 34f)
+        state.dateSize.floatValue = calculatedDateSize
+    }
+    
+    LaunchedEffect(
+        state.clockX.floatValue,
+        state.clockY.floatValue,
+        state.dateAttached.value,
+        state.hourSize.floatValue,
+        state.clockLayout.intValue,
+        state.dateSize.floatValue,
+        state.stretchEnabled.value,
+        dateText
+    ) {
+        datePaint.textSize = state.dateSize.floatValue * densityVal
+        val sampleDate = if (dateText.isNotEmpty()) dateText else "Wednesday, 14 October"
+        val dateWidthDp = datePaint.measureText(sampleDate) / densityVal
+        val halfScreenDp = realW / densityVal / 2f
+        val halfDateWDp = dateWidthDp / 2f
+        val sideSafeMarginDp = 18f
+        val minSafeX = -halfScreenDp + halfDateWDp + sideSafeMarginDp
+        val maxSafeX = halfScreenDp - halfDateWDp - sideSafeMarginDp
+
+        if (state.dateAttached.value) {
+            state.dateX.floatValue = if (minSafeX <= maxSafeX) {
+                state.clockX.floatValue.coerceIn(minSafeX, maxSafeX)
+            } else 0f
+
+            val fontMetrics = datePaint.fontMetrics
+            val dateLineHeightDp = (fontMetrics.descent - fontMetrics.ascent) / densityVal
+            val dynamicGapDp = (state.strokeWidth.floatValue * 0.4f) + (dateLineHeightDp * 0.35f)
+            val compoundDateOffsetDp = dateLineHeightDp + dynamicGapDp
+
+            val idealAboveYDp = state.clockY.floatValue - compoundDateOffsetDp
+            val touchesTopBorder = idealAboveYDp < minSafeYDp
+
+            if (state.stretchEnabled.value) {
+                state.dateY.floatValue = max(minSafeYDp, idealAboveYDp)
+            } else {
+                
+                if (touchesTopBorder) {
+                    val isVert = state.clockLayout.intValue == 1
+                    val clockEstimatedHDp = if (isVert) {
+                        (state.hourSize.floatValue * 2.15f) + (state.strokeWidth.floatValue * 0.5f)
+                    } else {
+                        (state.hourSize.floatValue * 1.15f) + (state.strokeWidth.floatValue * 0.5f)
+                    }
+                    state.dateY.floatValue = state.clockY.floatValue + clockEstimatedHDp + dynamicGapDp
+                } else {
+                    state.dateY.floatValue = max(minSafeYDp, idealAboveYDp)
+                }
+            }
+        }
+    }
+    
+    val datePhysicsSpringY = remember { Animatable(state.dateY.floatValue) }
+    LaunchedEffect(
+        isDraggingDate,
+        isDraggingClock,
+        state.dateAttached.value,
+        state.clockX.floatValue,
+        state.clockY.floatValue,
+        state.dateX.floatValue,
+        state.hourSize.floatValue,
+        state.clockLayout.intValue
+    ) {
+        if (!state.dateAttached.value && !isDraggingDate && !isDraggingClock) {
+            datePaint.textSize = state.dateSize.floatValue * densityVal
+            val sampleDate = if (dateText.isNotEmpty()) dateText else "Wednesday, 14 October"
+            val dateWDp = datePaint.measureText(sampleDate) / densityVal
+            val dateHDp = (datePaint.fontMetrics.descent - datePaint.fontMetrics.ascent) / densityVal
+
+            val nativeDateCenterX = (realW / densityVal / 2f) + state.dateX.floatValue
+            val dateLeft = nativeDateCenterX - (dateWDp / 2f)
+            val dateRight = nativeDateCenterX + (dateWDp / 2f)
+            val dateTop = state.dateY.floatValue
+            val dateBottom = dateTop + dateHDp
+
+            val clockLeft = sharedPathBounds.left / densityVal
+            val clockRight = sharedPathBounds.right / densityVal
+            val clockTop = sharedPathBounds.top / densityVal
+            val clockBottom = sharedPathBounds.bottom / densityVal
+
+            val marginDp = 16f
+            val xOverlap = max(dateLeft, clockLeft) < min(dateRight, clockRight)
+            val yOverlap = (dateBottom + marginDp > clockTop) && (dateTop < clockBottom + marginDp)
+
+            if (xOverlap && yOverlap && sharedPathBounds.width() > 0 && sharedPathBounds.height() > 0) {
+                val clockCenterY = (clockTop + clockBottom) / 2f
+                val dateCenterY = (dateTop + dateBottom) / 2f
+
+                val maxDateSafeYDp = (realH / densityVal) - navBarDp - (state.dateSize.floatValue * 1.5f)
+
+                val targetY = if (dateCenterY < clockCenterY) {
+                    val candidateAbove = clockTop - dateHDp - marginDp
+                    if (candidateAbove >= minSafeYDp) candidateAbove else clockBottom + marginDp
+                } else {
+                    val candidateBelow = clockBottom + marginDp
+                    if (candidateBelow <= maxDateSafeYDp) candidateBelow else clockTop - dateHDp - marginDp
+                }
+
+                val safeClampedY = targetY.coerceIn(minSafeYDp, maxDateSafeYDp)
+                datePhysicsSpringY.snapTo(state.dateY.floatValue)
+                datePhysicsSpringY.animateTo(
+                    targetValue = safeClampedY,
+                    animationSpec = spring(
+                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                        stiffness = Spring.StiffnessLow
+                    )
+                ) {
+                    state.dateY.floatValue = value
+                }
+            }
+        }
     }
     
     LaunchedEffect(Unit) {
@@ -275,27 +394,6 @@ fun ClockStudio(
                 else -> java.text.SimpleDateFormat("EEE, d MMMM", locale).format(date)
             }
             delay(1000L)
-        }
-    }
-    
-    LaunchedEffect(
-        state.clockX.floatValue,
-        state.clockY.floatValue,
-        state.dateAttached.value,
-        state.hourSize.floatValue,
-        state.clockLayout.intValue,
-        state.dateSize.floatValue
-    ) {
-        if (state.dateAttached.value) {
-            state.dateX.floatValue = state.clockX.floatValue
-
-            datePaint.textSize = state.dateSize.floatValue * densityVal
-            val fontMetrics = datePaint.fontMetrics
-            val dateLineHeightDp = (fontMetrics.descent - fontMetrics.ascent) / densityVal
-            val dynamicGapDp = (state.strokeWidth.floatValue * 0.4f) + (dateLineHeightDp * 0.3f)
-            val dynamicOffsetDp = dateLineHeightDp + dynamicGapDp
-
-            state.dateY.floatValue = max(minSafeYDp, state.clockY.floatValue - dynamicOffsetDp)
         }
     }
 
@@ -444,11 +542,19 @@ fun ClockStudio(
                                         val maxClockSafeYDp = (realH / densityVal) - navBarDp - (state.hourSize.floatValue * 0.75f)
                                         val maxDateSafeYDp = (realH / densityVal) - navBarDp - (state.dateSize.floatValue * 1.5f)
 
+                                        val sampleDate = if (dateText.isNotEmpty()) dateText else "Wednesday, 14 October"
+                                        val dateWidthDp = datePaint.measureText(sampleDate) / densityVal
+                                        val halfScreenDp = realW / densityVal / 2f
+                                        val halfDateWDp = dateWidthDp / 2f
+                                        val sideSafeMarginDp = 18f
+                                        val minSafeX = -halfScreenDp + halfDateWDp + sideSafeMarginDp
+                                        val maxSafeX = halfScreenDp - halfDateWDp - sideSafeMarginDp
+
                                         if (activeDrag == "DATE" && !state.dateAttached.value) {
                                             isDraggingDate = true
                                             rawDateX += deltaNativeDpX
                                             rawDateY += deltaNativeDpY
-                                            state.dateX.floatValue = rawDateX
+                                            state.dateX.floatValue = rawDateX.coerceIn(minSafeX, maxSafeX)
                                             state.dateY.floatValue = rawDateY.coerceIn(minSafeYDp, maxDateSafeYDp)
                                         } else {
                                             isDraggingClock = true
@@ -456,8 +562,19 @@ fun ClockStudio(
                                             state.minSize.floatValue = (state.minSize.floatValue * zoom).coerceIn(minClockSizeDp, maxClockSizeDp)
                                             rawClockX += deltaNativeDpX
                                             rawClockY += deltaNativeDpY
+                                            val fontMetrics = datePaint.fontMetrics
+                                            val dateLineHeightDp = (fontMetrics.descent - fontMetrics.ascent) / densityVal
+                                            val dynamicGapDp = (state.strokeWidth.floatValue * 0.4f) + (dateLineHeightDp * 0.35f)
+                                            val compoundDateOffsetDp = dateLineHeightDp + dynamicGapDp
+
+                                            val effectiveMinClockYDp = if (state.dateAttached.value && state.stretchEnabled.value) {
+                                                minSafeYDp + compoundDateOffsetDp
+                                            } else {
+                                                minSafeYDp
+                                            }
+
                                             state.clockX.floatValue = rawClockX
-                                            state.clockY.floatValue = rawClockY.coerceIn(minSafeYDp, maxClockSafeYDp)
+                                            state.clockY.floatValue = rawClockY.coerceIn(effectiveMinClockYDp, maxClockSafeYDp)
                                         }
                                         event.changes.forEach { if (it.positionChanged()) it.consume() }
                                     }
@@ -478,8 +595,7 @@ fun ClockStudio(
                     shape = RoundedCornerShape(cardCornerRadiusDp.dp),
                     colors = CardDefaults.cardColors(containerColor = Color.Black)
                 ) {
-                    
-                	Canvas(modifier = Modifier.fillMaxSize()) {
+                    Canvas(modifier = Modifier.fillMaxSize()) {
                         val previewScale = size.width / realW
 
                         drawIntoCanvas { canvas ->
@@ -494,7 +610,6 @@ fun ClockStudio(
                                 
                                 val recordingCanvas = hardwareRenderNode.beginRecording(realW.toInt(), realH.toInt())
                                 try {
-                                    
                                     previewOriginal?.let { bmp ->
                                         val zoom = state.liveWallpaperZoom.floatValue
                                         val baseScale = max(realW / bmp.width.toFloat(), realH / bmp.height.toFloat()) * zoom
@@ -595,7 +710,6 @@ fun ClockStudio(
                                 
                                 nativeCanvas.drawRenderNode(hardwareRenderNode)
                             } else {
-                                
                                 nativeCanvas.save()
                                 nativeCanvas.scale(previewScale, previewScale)
                                 previewOriginal?.let { bmp ->
@@ -696,7 +810,8 @@ fun ClockStudio(
                                 viewModel.updateDateAttached(context, state.dateAttached.value)
                                 viewModel.updateClockStyle(
                                     context, state.hourSize.floatValue, state.minSize.floatValue,
-                                    state.strokeWidth.floatValue, state.roundness.floatValue
+                                    state.strokeWidth.floatValue, state.roundness.floatValue,
+                                    state.dateSize.floatValue
                                 )
                                 viewModel.updateLockscreenClockPosition(context, state.clockX.floatValue, state.clockY.floatValue)
                                 viewModel.updateLockscreenDatePosition(context, state.dateX.floatValue, state.dateY.floatValue)
@@ -721,7 +836,8 @@ fun ClockStudio(
                                 viewModel.updateDateAttached(context, state.dateAttached.value)
                                 viewModel.updateClockStyle(
                                     context, state.hourSize.floatValue, state.minSize.floatValue,
-                                    state.strokeWidth.floatValue, state.roundness.floatValue
+                                    state.strokeWidth.floatValue, state.roundness.floatValue,
+                                    state.dateSize.floatValue
                                 )
                                 viewModel.updateLockscreenClockPosition(context, state.clockX.floatValue, state.clockY.floatValue)
                                 viewModel.updateLockscreenDatePosition(context, state.dateX.floatValue, state.dateY.floatValue)
