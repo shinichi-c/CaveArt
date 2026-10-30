@@ -18,7 +18,6 @@ data class UnifiedGeometry(
     val targetTranslateX: Float = 0f,
     val targetTranslateY: Float = 0f
 ) {
-    
     fun setupTransitionMatrices(
         imgW: Int,
         imgH: Int,
@@ -32,7 +31,7 @@ data class UnifiedGeometry(
     ) {
         val c = centerProgress.coerceIn(0f, 1f)
         val t = transitionProgress.coerceIn(0f, 1f)
-        
+
         val naturalScale = baseScale * config.scale
         val naturalTx = (screenW - imgW * naturalScale) / 2f
         val naturalTy = (screenH - imgH * naturalScale) / 2f
@@ -47,28 +46,28 @@ data class UnifiedGeometry(
         val naturalShapeCenterX = mappedNaturalShape.centerX()
         val naturalShapeCenterY = mappedNaturalShape.centerY()
         val naturalShapeRadius = mappedNaturalShape.width() / 2f
-        
+
         val centeredScale = targetImgScale
         val centeredTx = targetTranslateX
         val centeredTy = targetTranslateY
         val centeredShapeCenterX = centeredShapeRect.centerX()
         val centeredShapeCenterY = centeredShapeRect.centerY()
         val centeredShapeRadius = centeredShapeRect.width() / 2f
-        
+
         val startScale = naturalScale + (centeredScale - naturalScale) * c
         val startTx = naturalTx + (centeredTx - naturalTx) * c
         val startTy = naturalTy + (centeredTy - naturalTy) * c
         val startShapeCenterX = naturalShapeCenterX + (centeredShapeCenterX - naturalShapeCenterX) * c
         val startShapeCenterY = naturalShapeCenterY + (centeredShapeCenterY - naturalShapeCenterY) * c
         val startShapeRadius = naturalShapeRadius + (centeredShapeRadius - naturalShapeRadius) * c
-        
+
         val endScale = baseScale
         val endTx = (screenW - imgW * endScale) / 2f
         val endTy = (screenH - imgH * endScale) / 2f
         val endShapeCenterX = screenW / 2f
         val endShapeCenterY = screenH / 2f
         val endShapeRadius = hypot(screenW, screenH)
-        
+
         val currentScale = startScale + (endScale - startScale) * t
         val currentTx = startTx + (endTx - startTx) * t
         val currentTy = startTy + (endTy - startTy) * t
@@ -114,7 +113,7 @@ object ShapeEffectHelper {
     ): UnifiedGeometry {
         val eligibility = SubjectPopAnalyzer.analyzeEligibility(mask)
         val baseScale = max(screenW / imgW, screenH / imgH)
-        
+
         val shapeDiameter = screenW * 0.86f
         val shapeRadius = shapeDiameter / 2f
         val shapeCenterX = screenW / 2f
@@ -130,14 +129,26 @@ object ShapeEffectHelper {
         var targetImgScale = baseScale
         var targetTx = (screenW - imgW * baseScale) / 2f
         var targetTy = (screenH - imgH * baseScale) / 2f
+        
+        val normalizedSb: RectF? = if (eligibility.subjectBounds != null && mask != null && mask.width > 0 && mask.height > 0) {
+            val sx = imgW.toFloat() / mask.width.toFloat()
+            val sy = imgH.toFloat() / mask.height.toFloat()
+            RectF(
+                eligibility.subjectBounds.left * sx,
+                eligibility.subjectBounds.top * sy,
+                eligibility.subjectBounds.right * sx,
+                eligibility.subjectBounds.bottom * sy
+            )
+        } else {
+            eligibility.subjectBounds
+        }
 
-        if (eligibility.isEligible && eligibility.subjectBounds != null) {
-            val sb = eligibility.subjectBounds
-            val sW = sb.width()
-            val sH = sb.height()
-            val sCenterX = sb.centerX()
-            val sTop = sb.top
-            val sBottom = sb.bottom
+        if (eligibility.isEligible && normalizedSb != null) {
+            val sW = normalizedSb.width()
+            val sH = normalizedSb.height()
+            val sCenterX = normalizedSb.centerX()
+            val sTop = normalizedSb.top
+            val sBottom = normalizedSb.bottom
 
             val isBottomCropped = (imgH - sBottom) < (imgH * 0.05f)
 
@@ -190,15 +201,14 @@ object ShapeEffectHelper {
                 adjustedCenterY + shapeRadius
             )
         } else {
-            
             targetImgScale = max(shapeDiameter / imgW.toFloat(), shapeDiameter / imgH.toFloat()) * 1.08f * config.scale
             targetTx = shapeCenterX - (imgW * targetImgScale / 2f)
             targetTy = shapeCenterY - (imgH * targetImgScale / 2f)
         }
-        
-        val naturalFraming = if (eligibility.isEligible && eligibility.subjectBounds != null) {
+
+        val naturalFraming = if (eligibility.isEligible && normalizedSb != null) {
             SubjectPopAnalyzer.calculatePopFraming(
-                subjectBounds = eligibility.subjectBounds,
+                subjectBounds = normalizedSb,
                 imgW = imgW,
                 imgH = imgH,
                 is3DPopEnabled = config.is3DPopEnabled
@@ -241,21 +251,32 @@ object ShapeEffectHelper {
         bitmapPaint: Paint,
         maskXferPaint: Paint
     ) {
-        
         canvas.drawColor(config.backgroundColor)
-        
+
         canvas.save()
         canvas.clipPath(shapePath)
         canvas.drawBitmap(original, bodyMatrix, bitmapPaint)
         canvas.restore()
-        
+
         if (config.is3DPopEnabled && geo.is3DPopEligible && cutout != null) {
             val layerId = canvas.saveLayer(0f, 0f, canvas.width.toFloat(), canvas.height.toFloat(), null)
-            
+
             canvas.save()
             val breakoutCutoffY = screenShapeRect.top + (screenShapeRect.height() * 0.30f)
             canvas.clipRect(0f, 0f, canvas.width.toFloat(), breakoutCutoffY)
-            canvas.drawBitmap(cutout, bodyMatrix, bitmapPaint)
+            
+            val maskMatrix = if (cutout.width != original.width || cutout.height != original.height) {
+                Matrix(bodyMatrix).apply {
+                    preScale(
+                        original.width.toFloat() / cutout.width.toFloat(),
+                        original.height.toFloat() / cutout.height.toFloat()
+                    )
+                }
+            } else {
+                bodyMatrix
+            }
+
+            canvas.drawBitmap(cutout, maskMatrix, bitmapPaint)
             canvas.drawBitmap(original, bodyMatrix, maskXferPaint)
             canvas.restore()
 

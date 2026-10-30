@@ -10,7 +10,6 @@ import android.graphics.PorterDuffXfermode
 import android.graphics.RectF
 import android.net.Uri
 import android.view.HapticFeedbackConstants
-import android.widget.Toast
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
@@ -78,9 +77,9 @@ fun MagicShapeStudio(
     var previewOriginal by remember { mutableStateOf<Bitmap?>(null) }
     var previewCutout by remember { mutableStateOf<Bitmap?>(null) }
     var isAssetsLoading by remember { mutableStateOf(true) }
-    
+
     val centerProgress = remember { Animatable(if (viewModel.isCentered) 1f else 0f) }
-    
+
     var isHoldingPreview by remember { mutableStateOf(false) }
     val simulatedUnlockProgress = remember { Animatable(0f) }
 
@@ -274,7 +273,7 @@ fun MagicShapeStudio(
                                         previewOriginal!!.width, previewOriginal!!.height,
                                         size.width, size.height, previewCutout, config
                                     )
-                                    
+
                                     geo.setupTransitionMatrices(
                                         imgW = previewOriginal!!.width,
                                         imgH = previewOriginal!!.height,
@@ -313,7 +312,19 @@ fun MagicShapeStudio(
                                             nc.save()
                                             val breakoutCutoffY = screenShapeRect.top + (screenShapeRect.height() * 0.30f)
                                             nc.clipRect(0f, 0f, size.width, breakoutCutoffY)
-                                            nc.drawBitmap(previewCutout!!, bodyMatrix, paint)
+                                            
+                                            val maskMatrix = if (previewCutout!!.width != previewOriginal!!.width || previewCutout!!.height != previewOriginal!!.height) {
+                                                Matrix(bodyMatrix).apply {
+                                                    preScale(
+                                                        previewOriginal!!.width.toFloat() / previewCutout!!.width.toFloat(),
+                                                        previewOriginal!!.height.toFloat() / previewCutout!!.height.toFloat()
+                                                    )
+                                                }
+                                            } else {
+                                                bodyMatrix
+                                            }
+
+                                            nc.drawBitmap(previewCutout!!, maskMatrix, paint)
                                             nc.drawBitmap(previewOriginal!!, bodyMatrix, maskXferPaint)
                                             nc.restore()
                                             nc.restoreToCount(layerId)
@@ -331,7 +342,7 @@ fun MagicShapeStudio(
                                 )
                                 M3ExpressiveMorphLoadingIndicator(sizeDp = 52.dp)
                             }
-                            
+
                             PreviewGuidancePill(
                                 visible = !isHoldingPreview,
                                 text = "Hold to preview unlock",
@@ -339,14 +350,14 @@ fun MagicShapeStudio(
                                     .align(Alignment.TopCenter)
                                     .padding(top = 16.dp)
                             )
-                            
+
                             AbstractPatternBadge(
                                 visible = popEligibility.isAbstract && !isAssetsLoading,
                                 modifier = Modifier
                                     .align(Alignment.TopCenter)
                                     .padding(top = 48.dp)
                             )
-                            
+
                             val canShow3DPop = popEligibility.isEligible && !popEligibility.isAbstract
 
                             Surface(
@@ -389,7 +400,7 @@ fun MagicShapeStudio(
                                                 .width(1.dp),
                                             color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
                                         )
-                                        
+
                                         ExpressiveCenterModePill(
                                             icon = Icons.Rounded.Layers,
                                             contentDescription = "Toggle 3D Pop Depth",
@@ -405,7 +416,7 @@ fun MagicShapeStudio(
                             }
                         }
                     }
-                    
+
                     IconButton(
                         onClick = {
                             view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
