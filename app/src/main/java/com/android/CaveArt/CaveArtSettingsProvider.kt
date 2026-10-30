@@ -8,8 +8,12 @@ import android.database.MatrixCursor
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.ParcelFileDescriptor
+import java.io.File
+import java.io.FileNotFoundException
 
 class CaveArtSettingsProvider : ContentProvider() {
+
     override fun onCreate(): Boolean = true
 
     override fun call(method: String, arg: String?, extras: Bundle?): Bundle? {
@@ -32,12 +36,50 @@ class CaveArtSettingsProvider : ContentProvider() {
             }
             return Bundle().apply { putBoolean("success", true) }
         }
+
+        if (method == "updateDepth" && extras != null) {
+            val enabled = extras.getBoolean("clock_depth_enabled", true)
+            val order = extras.getInt("clock_layer_order", 1)
+            val occlusion = extras.getFloat("clock_depth_occlusion", 0.45f)
+            prefs.edit()
+                .putBoolean("clock_depth_enabled", enabled)
+                .putInt("clock_layer_order", order)
+                .putFloat("clock_depth_occlusion", occlusion)
+                .apply()
+            return Bundle().apply { putBoolean("success", true) }
+        }
+
         return null
     }
 
+    override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor? {
+        val baseContext = context ?: throw FileNotFoundException("Context is null")
+        val safeContext = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            baseContext.createDeviceProtectedStorageContext()
+        } else baseContext
+
+        val segment = uri.lastPathSegment
+        if (segment == "depth_mask" || segment == "boot_cutout.png" || segment == "lock_depth_mask.png") {
+            val candidateFiles = listOf(
+                File(safeContext.filesDir, "lock_depth_mask.png"),
+                File(safeContext.noBackupFilesDir, "boot_cutout.png"),
+                File(safeContext.filesDir, "boot_cutout.png")
+            )
+            for (file in candidateFiles) {
+                if (file.exists() && file.length() > 0) {
+                    return ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+                }
+            }
+        }
+        throw FileNotFoundException("Depth mask file not available for URI: $uri")
+    }
+
     override fun query(
-        uri: Uri, projection: Array<String>?, selection: String?,
-        selectionArgs: Array<String>?, sortOrder: String?
+        uri: Uri,
+        projection: Array<String>?,
+        selection: String?,
+        selectionArgs: Array<String>?,
+        sortOrder: String?
     ): Cursor? {
         val baseContext = context ?: return null
         val safeContext = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
@@ -69,6 +111,12 @@ class CaveArtSettingsProvider : ContentProvider() {
             "udfps_x" -> cursor.addRow(arrayOf(prefs.getFloat("udfps_x", -1f)))
             "udfps_y" -> cursor.addRow(arrayOf(prefs.getFloat("udfps_y", -1f)))
             "udfps_radius" -> cursor.addRow(arrayOf(prefs.getFloat("udfps_radius", 0f)))
+            
+            "clock_depth_enabled" -> cursor.addRow(arrayOf(if (prefs.getBoolean("clock_depth_enabled", true)) 1 else 0))
+            "clock_layer_order" -> cursor.addRow(arrayOf(prefs.getInt("clock_layer_order", 1)))
+            "clock_depth_occlusion" -> cursor.addRow(arrayOf(prefs.getFloat("clock_depth_occlusion", 0.45f)))
+            "depth_mask_path" -> cursor.addRow(arrayOf(prefs.getString("depth_mask_path", "")))
+            "layer_structure" -> cursor.addRow(arrayOf(prefs.getFloat("layer_structure", 0f)))
         }
         return cursor
     }

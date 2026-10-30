@@ -23,6 +23,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.FileOutputStream
 import java.util.UUID
 
 private const val WALLPAPER_PREFIX = "wp_"
@@ -122,6 +124,10 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
 
     var isClockStretchEnabled by mutableStateOf(clockPrefs.getBoolean("clock_stretch", false))
     var clockCollisionMap by mutableStateOf(clockPrefs.getString("clock_collision_map", "") ?: "")
+    
+    var isClockDepthEnabled by mutableStateOf(clockPrefs.getBoolean("clock_depth_enabled", true))
+    var clockLayerOrder by mutableIntStateOf(clockPrefs.getInt("clock_layer_order", 1))
+    var clockDepthOcclusion by mutableFloatStateOf(clockPrefs.getFloat("clock_depth_occlusion", 0.45f))
 
     private val wallpaperColorMap = mutableMapOf<String, Int>()
 
@@ -257,6 +263,24 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    fun updateClockDepth(context: Context, enabled: Boolean, order: Int, occlusion: Float) {
+        isClockDepthEnabled = enabled
+        clockLayerOrder = order
+        clockDepthOcclusion = occlusion
+
+        clockPrefs.edit()
+            .putBoolean("clock_depth_enabled", enabled)
+            .putInt("clock_layer_order", order)
+            .putFloat("clock_depth_occlusion", occlusion)
+            .apply()
+
+        context.sendBroadcast(android.content.Intent("com.android.CaveArt.UPDATE_CLOCK_DEPTH").apply {
+            putExtra("clock_depth_enabled", enabled)
+            putExtra("clock_layer_order", order)
+            putExtra("clock_depth_occlusion", occlusion)
+        })
+    }
+
     private val _isMagicShapeEnabled = mutableStateOf(false)
     val isMagicShapeEnabled: Boolean by _isMagicShapeEnabled
 
@@ -338,7 +362,7 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
             }
             val initialList = loadBasicWallpaperList(application.applicationContext)
             allWallpapers = initialList
-            
+
             autoSyncActiveWallpaper(application.applicationContext)
 
             isLoading = false
@@ -426,13 +450,49 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    /**
+     * Resolves the segmentation mask for depth clock and visual layer inspection,
+     * caching and persisting it to device-protected storage for SystemUI.
+     */
     suspend fun getMaskForClock(context: Context, wallpaper: Wallpaper): Bitmap? = withContext(Dispatchers.Default) {
         try {
+            val cached = cutoutCache.get(wallpaper.id)
+            if (cached != null && !cached.isRecycled) {
+                return@withContext cached
+            }
+
             val original = getCachedOriginal(context, wallpaper, 1024) ?: return@withContext null
-            cutoutCache.get(wallpaper.id) ?: generateCutoutInternal(original)?.also { cutoutCache.put(wallpaper.id, it) }
+            val generated = generateCutoutInternal(original)
+            if (generated != null) {
+                cutoutCache.put(wallpaper.id, generated)
+                saveDepthMaskToDisk(context, generated)
+            }
+            generated
         } catch (_: Exception) {
             null
         }
+    }
+
+    /**
+     * Saves the depth cutout mask to device-protected storage so the native Xposed module
+     * in SystemUI can load it with zero permission friction.
+     */
+    fun saveDepthMaskToDisk(context: Context, mask: Bitmap) {
+        try {
+            val safeCtx = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                context.createDeviceProtectedStorageContext()
+            } else context
+
+            val file = File(safeCtx.filesDir, "lock_depth_mask.png")
+            FileOutputStream(file).use { out ->
+                mask.compress(Bitmap.CompressFormat.PNG, 100, out)
+            }
+
+            val backupFile = File(safeCtx.noBackupFilesDir, "boot_cutout.png")
+            FileOutputStream(backupFile).use { out ->
+                mask.compress(Bitmap.CompressFormat.PNG, 100, out)
+            }
+        } catch (_: Exception) {}
     }
 
     suspend fun getOrCreateProcessedBitmap(context: Context, wallpaper: Wallpaper, allowMagic: Boolean = true, maxDim: Int = 1024): Bitmap? {
@@ -479,13 +539,20 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    /**
+     * Loads high-quality wallpaper components and always guarantees a synchronized cutout
+     * for the Native Layer System and Clock Studio preview.
+     */
     suspend fun getHighQualityComponents(context: Context, wallpaper: Wallpaper): Pair<Bitmap?, Bitmap?> = withContext(Dispatchers.IO) {
         val original = try {
             if (wallpaper.uri != null) BitmapHelper.decodeSampledBitmapFromUri(context, wallpaper.uri, 2500)
             else BitmapHelper.decodeSampledBitmapFromResource(context.resources, wallpaper.resourceId, 2500)
         } catch (_: Exception) { null }
-        val needsCutout = isMagicShapeEnabled || (isAnimationEnabled && AnimationFactory.getAnimation(currentAnimationStyle).needsSegmentationMask())
-        val cutout = if (needsCutout && original != null) generateCutoutInternal(original) else null
+
+        val cutout = if (original != null) {
+            getMaskForClock(context, wallpaper)
+        } else null
+
         Pair(original, cutout)
     }
 

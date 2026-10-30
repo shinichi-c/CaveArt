@@ -6,7 +6,8 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.res.Configuration
 import android.graphics.Bitmap
-import android.graphics.Matrix
+import android.graphics.CornerPathEffect
+import android.graphics.DashPathEffect
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
@@ -18,6 +19,7 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculatePan
@@ -63,6 +65,8 @@ import kotlin.math.max
 import kotlin.math.min
 
 class ClockStudioState(viewModel: WallpaperViewModel) {
+    val layerStack: LockscreenLayerStack = LockscreenLayerStack()
+
     val clockX: MutableFloatState = mutableFloatStateOf(viewModel.lockscreenClockOffsetX)
     val clockY: MutableFloatState = mutableFloatStateOf(viewModel.lockscreenClockOffsetY)
     val dateX: MutableFloatState = mutableFloatStateOf(viewModel.lockscreenDateOffsetX)
@@ -80,7 +84,7 @@ class ClockStudioState(viewModel: WallpaperViewModel) {
     val dateAttached: MutableState<Boolean> = mutableStateOf(viewModel.isDateAttached)
     val clockFont: MutableState<String> = mutableStateOf(viewModel.clockFont)
     val dateSize: MutableFloatState = mutableFloatStateOf((viewModel.clockHourSize * 0.24f).coerceIn(14f, 34f))
-    
+
     val udfpsX: MutableFloatState = mutableFloatStateOf(-1f)
     val udfpsY: MutableFloatState = mutableFloatStateOf(-1f)
     val udfpsRadius: MutableFloatState = mutableFloatStateOf(0f)
@@ -107,12 +111,12 @@ fun ClockStudio(
     val isLandscape = config.orientation == Configuration.ORIENTATION_LANDSCAPE
     val isDarkTheme = isSystemInDarkTheme()
     val scope = rememberCoroutineScope()
-    
+
     val displayGeometry = remember { NativeDisplayMetrics.getGeometry(context) }
     val realW = displayGeometry.widthPx
     val realH = displayGeometry.heightPx
     val densityVal = displayGeometry.density
-    
+
     val statusBarDp = displayGeometry.statusBarHeightPx / densityVal
     val navBarDp = displayGeometry.navBarHeightPx / densityVal
     val minSafeYDp = statusBarDp + (displayGeometry.statusBarHeightPx * 0.12f / densityVal)
@@ -126,17 +130,17 @@ fun ClockStudio(
 
     var isDraggingClock by remember { mutableStateOf(false) }
     var isDraggingDate by remember { mutableStateOf(false) }
+
     var showCustomizeSheet by remember { mutableStateOf(false) }
     var showDateCustomizeSheet by remember { mutableStateOf(false) }
+    var showLayersSheet by remember { mutableStateOf(false) }
     var showApplyOptions by remember { mutableStateOf(false) }
-    var extractedColors by remember { mutableStateOf<List<Int>>(emptyList()) }
 
+    var extractedColors by remember { mutableStateOf<List<Int>>(emptyList()) }
     var timeString by remember { mutableStateOf("") }
     var dateText by remember { mutableStateOf("") }
     val availableFonts = remember { viewModel.getAvailableFonts(context) }
-    
-    val wallpaperPaint = remember { Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG) }
-    val wallpaperMatrix = remember { Matrix() }
+
     val vectorPaint = remember {
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.FILL_AND_STROKE
@@ -156,18 +160,18 @@ fun ClockStudio(
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = android.graphics.Color.argb(200, 255, 183, 77)
             strokeWidth = 3f
-            pathEffect = android.graphics.DashPathEffect(floatArrayOf(20f, 20f), 0f)
+            pathEffect = DashPathEffect(floatArrayOf(20f, 20f), 0f)
         }
     }
     val udfpsPaint = remember {
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
-            pathEffect = android.graphics.DashPathEffect(floatArrayOf(15f, 15f), 0f)
+            pathEffect = DashPathEffect(floatArrayOf(15f, 15f), 0f)
         }
     }
     val combinedClockPath = remember { Path() }
     val sharedPathBounds = remember { RectF() }
-    
+
     val hardwareRenderNode = remember {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             RenderNode("LockscreenPreviewHardwareNode").apply {
@@ -176,12 +180,12 @@ fun ClockStudio(
             }
         } else null
     }
-    
+
     LaunchedEffect(state.hourSize.floatValue) {
         val calculatedDateSize = (state.hourSize.floatValue * 0.24f).coerceIn(14f, 34f)
         state.dateSize.floatValue = calculatedDateSize
     }
-    
+
     LaunchedEffect(
         state.clockX.floatValue,
         state.clockY.floatValue,
@@ -217,7 +221,6 @@ fun ClockStudio(
             if (state.stretchEnabled.value) {
                 state.dateY.floatValue = max(minSafeYDp, idealAboveYDp)
             } else {
-                
                 if (touchesTopBorder) {
                     val isVert = state.clockLayout.intValue == 1
                     val clockEstimatedHDp = if (isVert) {
@@ -232,7 +235,7 @@ fun ClockStudio(
             }
         }
     }
-    
+
     val datePhysicsSpringY = remember { Animatable(state.dateY.floatValue) }
     LaunchedEffect(
         isDraggingDate,
@@ -293,7 +296,7 @@ fun ClockStudio(
             }
         }
     }
-    
+
     LaunchedEffect(Unit) {
         state.liveWallpaperZoom.floatValue = displayGeometry.wallpaperMaxScale
 
@@ -314,9 +317,15 @@ fun ClockStudio(
             val uy = prefs.getFloat("udfps_y", -1f)
             val ur = prefs.getFloat("udfps_radius", 0f)
 
+            val depthEnabled = prefs.getBoolean("clock_depth_enabled", true)
+            val layerOrder = prefs.getInt("clock_layer_order", 1)
+            val depthOcclusion = prefs.getFloat("clock_depth_occlusion", 0.45f)
+
             withContext(Dispatchers.Main) {
                 state.liveWallpaperZoom.floatValue = zoom
                 state.notificationShelfTop.floatValue = nssl
+                state.layerStack.setDepthClockActive(depthEnabled && layerOrder == 1)
+                state.layerStack.depthOcclusionLimit = depthOcclusion
                 if (ur > 0f) {
                     state.udfpsX.floatValue = ux
                     state.udfpsY.floatValue = uy
@@ -356,13 +365,13 @@ fun ClockStudio(
             try { context.unregisterReceiver(receiver) } catch (_: Exception) {}
         }
     }
-
+    
     LaunchedEffect(wallpaper) {
         val components = viewModel.getHighQualityComponents(context, wallpaper)
         previewOriginal = components.first
         previewMask = components.second ?: viewModel.getMaskForClock(context, wallpaper)
     }
-    
+
     val currentMask = previewMask
     val currentZoom = state.liveWallpaperZoom.floatValue
     LaunchedEffect(currentMask, state.stretchEnabled.value, currentZoom) {
@@ -448,7 +457,7 @@ fun ClockStudio(
                 CenterAlignedTopAppBar(
                     title = {
                         Text(
-                            "Lock Screen Preview",
+                            "Lock Screen Studio",
                             style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Black)
                         )
                     },
@@ -457,32 +466,142 @@ fun ClockStudio(
                             Icon(Icons.Rounded.ArrowBack, "Back")
                         }
                     },
+                    actions = {
+                        
+                        IconButton(
+                            onClick = {
+                                view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                                state.layerStack.isMaskInspectorActive = !state.layerStack.isMaskInspectorActive
+                                state.layerStack.subjectLayer.isMaskOverlayActive = state.layerStack.isMaskInspectorActive
+                            }
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Visibility,
+                                contentDescription = "Inspect Mask Overlay",
+                                tint = if (state.layerStack.isMaskInspectorActive) Color(0xFFE53935) else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        
+                        IconButton(
+                            onClick = {
+                                view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                                showLayersSheet = true
+                            }
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Layers,
+                                contentDescription = "Layers",
+                                tint = if (state.layerStack.isDepthEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        
+                        IconButton(
+                            onClick = {
+                                view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                                showCustomizeSheet = true
+                            }
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Tune,
+                                contentDescription = "Clock Settings",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    },
                     colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
                 )
             },
             bottomBar = {
                 if (!isLandscape) {
-                    Box(
+                    Surface(
                         modifier = Modifier
                             .fillMaxWidth()
                             .navigationBarsPadding()
-                            .padding(horizontal = 24.dp, vertical = 18.dp),
-                        contentAlignment = Alignment.Center
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.95f),
+                        shadowElevation = 10.dp
                     ) {
-                        Button(
-                            onClick = {
-                                view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
-                                showApplyOptions = true
-                            },
+                        Row(
                             modifier = Modifier
-                                .fillMaxWidth(0.88f)
-                                .height(58.dp)
-                                .shadow(14.dp, CircleShape, ambientColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.28f)),
-                            shape = CircleShape
+                                .fillMaxWidth()
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Icon(Icons.Rounded.CheckCircle, null, modifier = Modifier.size(22.dp))
-                            Spacer(Modifier.width(10.dp))
-                            Text("Set Lock Screen", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Black))
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Surface(
+                                    shape = CircleShape,
+                                    color = if (state.layerStack.isMaskInspectorActive) Color(0xFFE53935).copy(alpha = 0.2f) else MaterialTheme.colorScheme.surfaceContainerHighest,
+                                    modifier = Modifier.clickable {
+                                        view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                                        state.layerStack.isMaskInspectorActive = !state.layerStack.isMaskInspectorActive
+                                        state.layerStack.subjectLayer.isMaskOverlayActive = state.layerStack.isMaskInspectorActive
+                                    }
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.AutoFixHigh,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp),
+                                            tint = if (state.layerStack.isMaskInspectorActive) Color(0xFFE53935) else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Text(
+                                            text = "Mask",
+                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                            color = if (state.layerStack.isMaskInspectorActive) Color(0xFFE53935) else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+
+                                Surface(
+                                    shape = CircleShape,
+                                    color = if (showLayersSheet) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest,
+                                    modifier = Modifier.clickable {
+                                        view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                                        showLayersSheet = true
+                                    }
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.Layers,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp),
+                                            tint = if (showLayersSheet) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Text(
+                                            text = "Layers",
+                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                            color = if (showLayersSheet) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+
+                            Button(
+                                onClick = {
+                                    view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                                    showApplyOptions = true
+                                },
+                                shape = CircleShape,
+                                modifier = Modifier.height(44.dp),
+                                contentPadding = PaddingValues(horizontal = 18.dp)
+                            ) {
+                                Icon(Icons.Rounded.CheckCircle, null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("Apply", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Black))
+                            }
                         }
                     }
                 }
@@ -492,7 +611,7 @@ fun ClockStudio(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(padding)
-                    .padding(horizontal = 24.dp, vertical = 6.dp),
+                    .padding(horizontal = 24.dp, vertical = 4.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Card(
@@ -601,82 +720,86 @@ fun ClockStudio(
                         drawIntoCanvas { canvas ->
                             val nativeCanvas = canvas.nativeCanvas
 
+                            val drawClockAndDateRoutine: (android.graphics.Canvas) -> Unit = { targetCanvas ->
+                                if (dateText.isNotEmpty()) {
+                                    datePaint.color = state.clockColor.intValue
+                                    datePaint.textSize = state.dateSize.floatValue * densityVal
+                                    val nativeDateX = (realW / 2f) + (state.dateX.floatValue * densityVal)
+                                    val nativeDateY = state.dateY.floatValue * densityVal
+                                    val drawBaselineY = nativeDateY - datePaint.fontMetrics.top
+                                    targetCanvas.drawText(dateText, nativeDateX, drawBaselineY, datePaint)
+                                }
+
+                                if (timeString.isNotEmpty()) {
+                                    val hPx = state.hourSize.floatValue * densityVal
+                                    val mPx = state.minSize.floatValue * densityVal
+                                    val isVert = state.clockLayout.intValue == 1
+
+                                    val totalWidth = AdaptiveClockHelper.measureClockWidth(timeString, hPx, mPx, customTypeface, isVert)
+                                    val nativeClockCenterX = (realW / 2f) + (state.clockX.floatValue * densityVal)
+                                    val startX = nativeClockCenterX - (totalWidth / 2f)
+                                    val startY = state.clockY.floatValue * densityVal
+
+                                    val paths = AdaptiveClockHelper.buildPaths(
+                                        timeString = timeString,
+                                        startX = startX,
+                                        startY = startY,
+                                        absoluteClockX = 0f,
+                                        absoluteClockY = 0f,
+                                        hourSizePx = hPx,
+                                        minSizePx = mPx,
+                                        typeface = customTypeface,
+                                        screenW = realW,
+                                        screenH = realH,
+                                        isStretchEnabled = state.stretchEnabled.value,
+                                        isVertical = isVert,
+                                        collisionMap = collisionMapArray,
+                                        density = densityVal,
+                                        strokeWidth = state.strokeWidth.floatValue,
+                                        stretchProgress = 1f
+                                    )
+
+                                    vectorPaint.strokeWidth = state.strokeWidth.floatValue * densityVal
+                                    vectorPaint.pathEffect = CornerPathEffect(state.roundness.floatValue * densityVal)
+
+                                    vectorPaint.color = if (state.dualTone.value) android.graphics.Color.WHITE else state.clockColor.intValue
+                                    targetCanvas.drawPath(paths.hours, vectorPaint)
+                                    targetCanvas.drawPath(paths.colon, vectorPaint)
+
+                                    vectorPaint.color = state.clockColor.intValue
+                                    targetCanvas.drawPath(paths.mins, vectorPaint)
+
+                                    combinedClockPath.rewind()
+                                    combinedClockPath.addPath(paths.hours)
+                                    combinedClockPath.addPath(paths.colon)
+                                    combinedClockPath.addPath(paths.mins)
+                                    combinedClockPath.computeBounds(sharedPathBounds, true)
+                                }
+                            }
+
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && hardwareRenderNode != null) {
                                 hardwareRenderNode.setPosition(0, 0, realW.toInt(), realH.toInt())
                                 hardwareRenderNode.pivotX = 0f
                                 hardwareRenderNode.pivotY = 0f
                                 hardwareRenderNode.scaleX = previewScale
                                 hardwareRenderNode.scaleY = previewScale
-                                
+
                                 val recordingCanvas = hardwareRenderNode.beginRecording(realW.toInt(), realH.toInt())
                                 try {
                                     previewOriginal?.let { bmp ->
-                                        val zoom = state.liveWallpaperZoom.floatValue
-                                        val baseScale = max(realW / bmp.width.toFloat(), realH / bmp.height.toFloat()) * zoom
-                                        val tx = (realW - bmp.width * baseScale) / 2f
-                                        val ty = (realH - bmp.height * baseScale) / 2f
-
-                                        wallpaperMatrix.reset()
-                                        wallpaperMatrix.postScale(baseScale, baseScale)
-                                        wallpaperMatrix.postTranslate(tx, ty)
-                                        recordingCanvas.drawBitmap(bmp, wallpaperMatrix, wallpaperPaint)
-                                    }
-                                    
-                                    if (dateText.isNotEmpty()) {
-                                        datePaint.color = state.clockColor.intValue
-                                        datePaint.textSize = state.dateSize.floatValue * densityVal
-                                        val nativeDateX = (realW / 2f) + (state.dateX.floatValue * densityVal)
-                                        val nativeDateY = state.dateY.floatValue * densityVal
-                                        val drawBaselineY = nativeDateY - datePaint.fontMetrics.top
-                                        recordingCanvas.drawText(dateText, nativeDateX, drawBaselineY, datePaint)
-                                    }
-                                    
-                                    if (timeString.isNotEmpty()) {
-                                        val hPx = state.hourSize.floatValue * densityVal
-                                        val mPx = state.minSize.floatValue * densityVal
-                                        val isVert = state.clockLayout.intValue == 1
-
-                                        val totalWidth = AdaptiveClockHelper.measureClockWidth(timeString, hPx, mPx, customTypeface, isVert)
-                                        val nativeClockCenterX = (realW / 2f) + (state.clockX.floatValue * densityVal)
-                                        val startX = nativeClockCenterX - (totalWidth / 2f)
-                                        val startY = state.clockY.floatValue * densityVal
-
-                                        val paths = AdaptiveClockHelper.buildPaths(
-                                            timeString = timeString,
-                                            startX = startX,
-                                            startY = startY,
-                                            absoluteClockX = 0f,
-                                            absoluteClockY = 0f,
-                                            hourSizePx = hPx,
-                                            minSizePx = mPx,
-                                            typeface = customTypeface,
+                                        
+                                        LayerVisualizerHelper.drawLayerStack(
+                                            canvas = recordingCanvas,
                                             screenW = realW,
                                             screenH = realH,
-                                            isStretchEnabled = state.stretchEnabled.value,
-                                            isVertical = isVert,
-                                            collisionMap = collisionMapArray,
-                                            density = densityVal,
-                                            strokeWidth = state.strokeWidth.floatValue,
-                                            stretchProgress = 1f
+                                            originalBmp = bmp,
+                                            maskBmp = previewMask,
+                                            zoom = state.liveWallpaperZoom.floatValue,
+                                            layerStack = state.layerStack,
+                                            drawClockAndDate = drawClockAndDateRoutine
                                         )
-
-                                        vectorPaint.strokeWidth = state.strokeWidth.floatValue * densityVal
-                                        vectorPaint.pathEffect = android.graphics.CornerPathEffect(state.roundness.floatValue * densityVal)
-
-                                        vectorPaint.color = if (state.dualTone.value) android.graphics.Color.WHITE else state.clockColor.intValue
-                                        recordingCanvas.drawPath(paths.hours, vectorPaint)
-                                        recordingCanvas.drawPath(paths.colon, vectorPaint)
-
-                                        vectorPaint.color = state.clockColor.intValue
-                                        recordingCanvas.drawPath(paths.mins, vectorPaint)
-
-                                        combinedClockPath.rewind()
-                                        combinedClockPath.addPath(paths.hours)
-                                        combinedClockPath.addPath(paths.colon)
-                                        combinedClockPath.addPath(paths.mins)
-                                        combinedClockPath.computeBounds(sharedPathBounds, true)
                                     }
-                                    
+
                                     val nsslTop = state.notificationShelfTop.floatValue
                                     if (nsslTop > 0f && isDraggingClock && sharedPathBounds.bottom > nsslTop) {
                                         recordingCanvas.drawLine(
@@ -685,7 +808,7 @@ fun ClockStudio(
                                             notificationPaint
                                         )
                                     }
-                                    
+
                                     val sensorR = state.udfpsRadius.floatValue
                                     if (sensorR > 0f && state.udfpsX.floatValue > 0f) {
                                         val cx = state.udfpsX.floatValue
@@ -707,25 +830,27 @@ fun ClockStudio(
                                 } finally {
                                     hardwareRenderNode.endRecording()
                                 }
-                                
+
                                 nativeCanvas.drawRenderNode(hardwareRenderNode)
                             } else {
                                 nativeCanvas.save()
                                 nativeCanvas.scale(previewScale, previewScale)
                                 previewOriginal?.let { bmp ->
-                                    val zoom = state.liveWallpaperZoom.floatValue
-                                    val baseScale = max(realW / bmp.width.toFloat(), realH / bmp.height.toFloat()) * zoom
-                                    val tx = (realW - bmp.width * baseScale) / 2f
-                                    val ty = (realH - bmp.height * baseScale) / 2f
-                                    wallpaperMatrix.reset()
-                                    wallpaperMatrix.postScale(baseScale, baseScale)
-                                    wallpaperMatrix.postTranslate(tx, ty)
-                                    nativeCanvas.drawBitmap(bmp, wallpaperMatrix, wallpaperPaint)
+                                    LayerVisualizerHelper.drawLayerStack(
+                                        canvas = nativeCanvas,
+                                        screenW = realW,
+                                        screenH = realH,
+                                        originalBmp = bmp,
+                                        maskBmp = previewMask,
+                                        zoom = state.liveWallpaperZoom.floatValue,
+                                        layerStack = state.layerStack,
+                                        drawClockAndDate = drawClockAndDateRoutine
+                                    )
                                 }
                                 nativeCanvas.restore()
                             }
                         }
-                        
+
                         if (isDraggingClock) {
                             val scale = size.width / realW
                             val padXPx = (state.strokeWidth.floatValue * densityVal + 8f * densityVal) * scale
@@ -752,6 +877,22 @@ fun ClockStudio(
                 }
             }
 
+            if (showLayersSheet) {
+                EditorLayersPanel(
+                    layerStack = state.layerStack,
+                    previewOriginal = previewOriginal,
+                    previewMask = previewMask,
+                    onReExtractSubject = {
+                        scope.launch {
+                            val components = viewModel.getHighQualityComponents(context, wallpaper)
+                            previewOriginal = components.first
+                            previewMask = components.second
+                        }
+                    },
+                    onDismiss = { showLayersSheet = false }
+                )
+            }
+
             if (showDateCustomizeSheet) {
                 EditorDatePanel(
                     viewModel = viewModel,
@@ -760,6 +901,7 @@ fun ClockStudio(
                     onDismiss = { showDateCustomizeSheet = false }
                 )
             }
+
             if (showCustomizeSheet) {
                 EditorClockPanel(
                     viewModel = viewModel,
@@ -799,23 +941,10 @@ fun ClockStudio(
                             DestinationButton(
                                 Icons.Default.Lock,
                                 "Clock Face Only",
-                                "Update lock screen clock layout & style",
+                                "Update lock screen clock layout, depth & style",
                                 false
                             ) {
-                                viewModel.updateClockLayout(context, state.clockLayout.intValue)
-                                viewModel.updateDualTone(context, state.dualTone.value)
-                                viewModel.updateClockFont(context, state.clockFont.value)
-                                viewModel.updateClockColor(context, state.clockColor.intValue)
-                                viewModel.updateDateLayout(context, state.dateFormat.intValue)
-                                viewModel.updateDateAttached(context, state.dateAttached.value)
-                                viewModel.updateClockStyle(
-                                    context, state.hourSize.floatValue, state.minSize.floatValue,
-                                    state.strokeWidth.floatValue, state.roundness.floatValue,
-                                    state.dateSize.floatValue
-                                )
-                                viewModel.updateLockscreenClockPosition(context, state.clockX.floatValue, state.clockY.floatValue)
-                                viewModel.updateLockscreenDatePosition(context, state.dateX.floatValue, state.dateY.floatValue)
-                                viewModel.toggleClockStretch(context, state.stretchEnabled.value, previewMask, realW, realH)
+                                saveAndBroadcastClockSettings(context, state, viewModel, previewMask, realW, realH)
                                 onApplyRequested(WallpaperDestinations.FLAG_LOCK_SCREEN)
                                 showApplyOptions = false
                             }
@@ -825,23 +954,10 @@ fun ClockStudio(
                             DestinationButton(
                                 Icons.Default.PhotoLibrary,
                                 "Clock + Wallpaper",
-                                "Apply clock style and set static background",
+                                "Apply depth clock style and set static background",
                                 false
                             ) {
-                                viewModel.updateClockLayout(context, state.clockLayout.intValue)
-                                viewModel.updateDualTone(context, state.dualTone.value)
-                                viewModel.updateClockFont(context, state.clockFont.value)
-                                viewModel.updateClockColor(context, state.clockColor.intValue)
-                                viewModel.updateDateLayout(context, state.dateFormat.intValue)
-                                viewModel.updateDateAttached(context, state.dateAttached.value)
-                                viewModel.updateClockStyle(
-                                    context, state.hourSize.floatValue, state.minSize.floatValue,
-                                    state.strokeWidth.floatValue, state.roundness.floatValue,
-                                    state.dateSize.floatValue
-                                )
-                                viewModel.updateLockscreenClockPosition(context, state.clockX.floatValue, state.clockY.floatValue)
-                                viewModel.updateLockscreenDatePosition(context, state.dateX.floatValue, state.dateY.floatValue)
-                                viewModel.toggleClockStretch(context, state.stretchEnabled.value, previewMask, realW, realH)
+                                saveAndBroadcastClockSettings(context, state, viewModel, previewMask, realW, realH)
                                 onApplyRequested(WallpaperDestinations.FLAG_BOTH)
                                 showApplyOptions = false
                             }
@@ -852,4 +968,45 @@ fun ClockStudio(
             }
         }
     }
+}
+
+private fun saveAndBroadcastClockSettings(
+    context: Context,
+    state: ClockStudioState,
+    viewModel: WallpaperViewModel,
+    previewMask: Bitmap?,
+    realW: Float,
+    realH: Float
+) {
+    viewModel.updateClockLayout(context, state.clockLayout.intValue)
+    viewModel.updateDualTone(context, state.dualTone.value)
+    viewModel.updateClockFont(context, state.clockFont.value)
+    viewModel.updateClockColor(context, state.clockColor.intValue)
+    viewModel.updateDateLayout(context, state.dateFormat.intValue)
+    viewModel.updateDateAttached(context, state.dateAttached.value)
+    viewModel.updateClockStyle(
+        context, state.hourSize.floatValue, state.minSize.floatValue,
+        state.strokeWidth.floatValue, state.roundness.floatValue,
+        state.dateSize.floatValue
+    )
+    viewModel.updateLockscreenClockPosition(context, state.clockX.floatValue, state.clockY.floatValue)
+    viewModel.updateLockscreenDatePosition(context, state.dateX.floatValue, state.dateY.floatValue)
+    viewModel.toggleClockStretch(context, state.stretchEnabled.value, previewMask, realW, realH)
+
+    val isDepth = state.layerStack.isDepthEnabled
+    val order = state.layerStack.clockLayer.zIndex
+    val occlusion = state.layerStack.depthOcclusionLimit
+
+    val prefs = context.getSharedPreferences("cave_art_clock_prefs", Context.MODE_PRIVATE)
+    prefs.edit()
+        .putBoolean("clock_depth_enabled", isDepth)
+        .putInt("clock_layer_order", order)
+        .putFloat("clock_depth_occlusion", occlusion)
+        .apply()
+
+    context.sendBroadcast(Intent("com.android.CaveArt.UPDATE_CLOCK_DEPTH").apply {
+        putExtra("clock_depth_enabled", isDepth)
+        putExtra("clock_layer_order", order)
+        putExtra("clock_depth_occlusion", occlusion)
+    })
 }
