@@ -6,7 +6,11 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
 import android.graphics.Paint
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffXfermode
 import android.graphics.RectF
 import android.os.Build
 import android.util.DisplayMetrics
@@ -31,7 +35,6 @@ suspend fun setLiveWallpaper(
     wallpaper: Wallpaper,
     viewModel: WallpaperViewModel
 ) = withContext(Dispatchers.IO) {
-    
     val deviceProtectedContext = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
         context.createDeviceProtectedStorageContext()
     } else {
@@ -133,7 +136,10 @@ suspend fun setDeviceWallpaper(
     val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     val metrics = DisplayMetrics()
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-        windowManager.currentWindowMetrics.bounds.let { metrics.widthPixels = it.width(); metrics.heightPixels = it.height() }
+        windowManager.currentWindowMetrics.bounds.let {
+            metrics.widthPixels = it.width()
+            metrics.heightPixels = it.height()
+        }
     } else {
         windowManager.defaultDisplay.getMetrics(metrics)
     }
@@ -142,23 +148,46 @@ suspend fun setDeviceWallpaper(
     val rawBitmap = viewModel.getOrCreateProcessedBitmap(context, wallpaper, maxDim = maxDimension) ?: return@withContext
 
     try {
-        if (isFixedAlignmentEnabled) {
-            val finalBitmap = Bitmap.createBitmap(metrics.widthPixels, metrics.heightPixels, Bitmap.Config.ARGB_8888)
-            val canvas = Canvas(finalBitmap)
-            if (viewModel.isMagicShapeEnabled) canvas.drawColor(viewModel.currentBackgroundColor)
-            
-            val scale = max(metrics.widthPixels.toFloat() / rawBitmap.width, metrics.heightPixels.toFloat() / rawBitmap.height)
-            val w = rawBitmap.width * scale
-            val h = rawBitmap.height * scale
-            val left = (metrics.widthPixels - w) / 2f
-            val top = (metrics.heightPixels - h) / 2f
-            canvas.drawBitmap(rawBitmap, null, RectF(left, top, left+w, top+h), null)
-            
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) wallpaperManager.setBitmap(finalBitmap, null, false, destination)
-            else wallpaperManager.setBitmap(finalBitmap)
+        val finalBitmap = Bitmap.createBitmap(metrics.widthPixels, metrics.heightPixels, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(finalBitmap)
+        
+        val scale = max(metrics.widthPixels.toFloat() / rawBitmap.width, metrics.heightPixels.toFloat() / rawBitmap.height)
+        val w = rawBitmap.width * scale
+        val h = rawBitmap.height * scale
+        val left = (metrics.widthPixels - w) / 2f
+        val top = (metrics.heightPixels - h) / 2f
+
+        val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+        
+        if (viewModel.layerBackgroundStructure != 0f) {
+            val sat = (1f + (viewModel.layerBackgroundStructure * 0.5f)).coerceIn(0f, 2f)
+            bgPaint.colorFilter = ColorMatrixColorFilter(ColorMatrix().apply {
+                setSaturation(sat)
+            })
+        }
+        bgPaint.alpha = (viewModel.layerBackgroundOpacity * 255).toInt().coerceIn(0, 255)
+
+        if (viewModel.isMagicShapeEnabled) {
+            canvas.drawColor(viewModel.currentBackgroundColor)
+        }
+
+        canvas.drawBitmap(rawBitmap, null, RectF(left, top, left + w, top + h), bgPaint)
+        
+        if (viewModel.layerSubjectOpacity < 1.0f) {
+            val mask = viewModel.getMaskForClock(context, wallpaper)
+            if (mask != null && !mask.isRecycled) {
+                val subPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    alpha = ((1f - viewModel.layerSubjectOpacity) * 255).toInt().coerceIn(0, 255)
+                    xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_OUT)
+                }
+                canvas.drawBitmap(mask, null, RectF(left, top, left + w, top + h), subPaint)
+            }
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            wallpaperManager.setBitmap(finalBitmap, null, !isFixedAlignmentEnabled, destination)
         } else {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) wallpaperManager.setBitmap(rawBitmap, null, true, destination)
-            else wallpaperManager.setBitmap(rawBitmap)
+            wallpaperManager.setBitmap(finalBitmap)
         }
     } catch (e: Exception) { 
         e.printStackTrace() 

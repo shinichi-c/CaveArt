@@ -65,7 +65,13 @@ import kotlin.math.max
 import kotlin.math.min
 
 class ClockStudioState(viewModel: WallpaperViewModel) {
-    val layerStack: LockscreenLayerStack = LockscreenLayerStack()
+    val layerStack: LockscreenLayerStack = LockscreenLayerStack().apply {
+        setDepthClockActive(viewModel.isClockDepthEnabled && viewModel.clockLayerOrder == 1)
+        depthOcclusionLimit = viewModel.clockDepthOcclusion
+        backgroundLayer.structure = viewModel.layerBackgroundStructure
+        subjectLayer.opacity = viewModel.layerSubjectOpacity
+        backgroundLayer.opacity = viewModel.layerBackgroundOpacity
+    }
 
     val clockX: MutableFloatState = mutableFloatStateOf(viewModel.lockscreenClockOffsetX)
     val clockY: MutableFloatState = mutableFloatStateOf(viewModel.lockscreenClockOffsetY)
@@ -320,12 +326,19 @@ fun ClockStudio(
             val depthEnabled = prefs.getBoolean("clock_depth_enabled", true)
             val layerOrder = prefs.getInt("clock_layer_order", 1)
             val depthOcclusion = prefs.getFloat("clock_depth_occlusion", 0.45f)
+            val layerStructure = prefs.getFloat("layer_structure", 0f)
+            val subOpacity = prefs.getFloat("layer_subject_opacity", 1.0f)
+            val bgOpacity = prefs.getFloat("layer_bg_opacity", 1.0f)
 
             withContext(Dispatchers.Main) {
                 state.liveWallpaperZoom.floatValue = zoom
                 state.notificationShelfTop.floatValue = nssl
                 state.layerStack.setDepthClockActive(depthEnabled && layerOrder == 1)
                 state.layerStack.depthOcclusionLimit = depthOcclusion
+                state.layerStack.backgroundLayer.structure = layerStructure
+                state.layerStack.subjectLayer.opacity = subOpacity
+                state.layerStack.backgroundLayer.opacity = bgOpacity
+
                 if (ur > 0f) {
                     state.udfpsX.floatValue = ux
                     state.udfpsY.floatValue = uy
@@ -467,7 +480,6 @@ fun ClockStudio(
                         }
                     },
                     actions = {
-                        
                         IconButton(
                             onClick = {
                                 view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
@@ -759,6 +771,26 @@ fun ClockStudio(
                                         stretchProgress = 1f
                                     )
 
+                                    combinedClockPath.rewind()
+                                    combinedClockPath.addPath(paths.hours)
+                                    combinedClockPath.addPath(paths.colon)
+                                    combinedClockPath.addPath(paths.mins)
+                                    combinedClockPath.computeBounds(sharedPathBounds, true)
+                                    
+                                    if (state.layerStack.isDepthEnabled && previewMask != null) {
+                                        val ratio = AdaptiveClockHelper.calculateOcclusionRatio(
+                                            clockPath = combinedClockPath,
+                                            mask = previewMask,
+                                            screenW = realW,
+                                            screenH = realH,
+                                            clockAbsoluteX = 0f,
+                                            clockAbsoluteY = 0f,
+                                            zoomFactor = state.liveWallpaperZoom.floatValue
+                                        )
+                                        val isOccludedTooMuch = ratio > state.layerStack.depthOcclusionLimit
+                                        state.layerStack.clockLayer.zIndex = if (isOccludedTooMuch) 3 else 1
+                                    }
+
                                     vectorPaint.strokeWidth = state.strokeWidth.floatValue * densityVal
                                     vectorPaint.pathEffect = CornerPathEffect(state.roundness.floatValue * densityVal)
 
@@ -768,12 +800,6 @@ fun ClockStudio(
 
                                     vectorPaint.color = state.clockColor.intValue
                                     targetCanvas.drawPath(paths.mins, vectorPaint)
-
-                                    combinedClockPath.rewind()
-                                    combinedClockPath.addPath(paths.hours)
-                                    combinedClockPath.addPath(paths.colon)
-                                    combinedClockPath.addPath(paths.mins)
-                                    combinedClockPath.computeBounds(sharedPathBounds, true)
                                 }
                             }
 
@@ -787,7 +813,6 @@ fun ClockStudio(
                                 val recordingCanvas = hardwareRenderNode.beginRecording(realW.toInt(), realH.toInt())
                                 try {
                                     previewOriginal?.let { bmp ->
-                                        
                                         LayerVisualizerHelper.drawLayerStack(
                                             canvas = recordingCanvas,
                                             screenW = realW,
@@ -993,20 +1018,5 @@ private fun saveAndBroadcastClockSettings(
     viewModel.updateLockscreenDatePosition(context, state.dateX.floatValue, state.dateY.floatValue)
     viewModel.toggleClockStretch(context, state.stretchEnabled.value, previewMask, realW, realH)
 
-    val isDepth = state.layerStack.isDepthEnabled
-    val order = state.layerStack.clockLayer.zIndex
-    val occlusion = state.layerStack.depthOcclusionLimit
-
-    val prefs = context.getSharedPreferences("cave_art_clock_prefs", Context.MODE_PRIVATE)
-    prefs.edit()
-        .putBoolean("clock_depth_enabled", isDepth)
-        .putInt("clock_layer_order", order)
-        .putFloat("clock_depth_occlusion", occlusion)
-        .apply()
-
-    context.sendBroadcast(Intent("com.android.CaveArt.UPDATE_CLOCK_DEPTH").apply {
-        putExtra("clock_depth_enabled", isDepth)
-        putExtra("clock_layer_order", order)
-        putExtra("clock_depth_occlusion", occlusion)
-    })
+    viewModel.saveLayerStackSettings(context, state.layerStack)
 }

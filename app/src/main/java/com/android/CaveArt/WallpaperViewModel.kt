@@ -3,7 +3,6 @@ package com.android.CaveArt
 import android.app.Application
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.graphics.Color as AndroidColor
 import android.net.Uri
 import android.os.Build
@@ -128,6 +127,10 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     var isClockDepthEnabled by mutableStateOf(clockPrefs.getBoolean("clock_depth_enabled", true))
     var clockLayerOrder by mutableIntStateOf(clockPrefs.getInt("clock_layer_order", 1))
     var clockDepthOcclusion by mutableFloatStateOf(clockPrefs.getFloat("clock_depth_occlusion", 0.45f))
+
+    var layerBackgroundStructure by mutableFloatStateOf(clockPrefs.getFloat("layer_structure", 0f))
+    var layerSubjectOpacity by mutableFloatStateOf(clockPrefs.getFloat("layer_subject_opacity", 1.0f))
+    var layerBackgroundOpacity by mutableFloatStateOf(clockPrefs.getFloat("layer_bg_opacity", 1.0f))
 
     private val wallpaperColorMap = mutableMapOf<String, Int>()
 
@@ -263,21 +266,37 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    fun updateClockDepth(context: Context, enabled: Boolean, order: Int, occlusion: Float) {
-        isClockDepthEnabled = enabled
+    fun saveLayerStackSettings(context: Context, stack: LockscreenLayerStack) {
+        val isDepth = stack.isDepthEnabled
+        val order = stack.clockLayer.zIndex
+        val occlusion = stack.depthOcclusionLimit
+        val structure = stack.backgroundLayer.structure
+        val subjectOpacity = stack.subjectLayer.opacity
+        val bgOpacity = stack.backgroundLayer.opacity
+
+        isClockDepthEnabled = isDepth
         clockLayerOrder = order
         clockDepthOcclusion = occlusion
+        layerBackgroundStructure = structure
+        layerSubjectOpacity = subjectOpacity
+        layerBackgroundOpacity = bgOpacity
 
         clockPrefs.edit()
-            .putBoolean("clock_depth_enabled", enabled)
+            .putBoolean("clock_depth_enabled", isDepth)
             .putInt("clock_layer_order", order)
             .putFloat("clock_depth_occlusion", occlusion)
+            .putFloat("layer_structure", structure)
+            .putFloat("layer_subject_opacity", subjectOpacity)
+            .putFloat("layer_bg_opacity", bgOpacity)
             .apply()
 
-        context.sendBroadcast(android.content.Intent("com.android.CaveArt.UPDATE_CLOCK_DEPTH").apply {
-            putExtra("clock_depth_enabled", enabled)
+        context.sendBroadcast(android.content.Intent("com.android.CaveArt.UPDATE_LAYER_STACK").apply {
+            putExtra("clock_depth_enabled", isDepth)
             putExtra("clock_layer_order", order)
             putExtra("clock_depth_occlusion", occlusion)
+            putExtra("layer_structure", structure)
+            putExtra("layer_subject_opacity", subjectOpacity)
+            putExtra("layer_bg_opacity", bgOpacity)
         })
     }
 
@@ -450,10 +469,6 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    /**
-     * Resolves the segmentation mask for depth clock and visual layer inspection,
-     * caching and persisting it to device-protected storage for SystemUI.
-     */
     suspend fun getMaskForClock(context: Context, wallpaper: Wallpaper): Bitmap? = withContext(Dispatchers.Default) {
         try {
             val cached = cutoutCache.get(wallpaper.id)
@@ -473,10 +488,6 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    /**
-     * Saves the depth cutout mask to device-protected storage so the native Xposed module
-     * in SystemUI can load it with zero permission friction.
-     */
     fun saveDepthMaskToDisk(context: Context, mask: Bitmap) {
         try {
             val safeCtx = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
@@ -539,10 +550,6 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    /**
-     * Loads high-quality wallpaper components and always guarantees a synchronized cutout
-     * for the Native Layer System and Clock Studio preview.
-     */
     suspend fun getHighQualityComponents(context: Context, wallpaper: Wallpaper): Pair<Bitmap?, Bitmap?> = withContext(Dispatchers.IO) {
         val original = try {
             if (wallpaper.uri != null) BitmapHelper.decodeSampledBitmapFromUri(context, wallpaper.uri, 2500)

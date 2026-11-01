@@ -6,7 +6,6 @@ import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -18,7 +17,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalView
@@ -37,7 +35,7 @@ fun EditorLayersPanel(
 ) {
     val view = LocalView.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    var showStructureSlider by remember { mutableStateOf(false) }
+    var activeTuningLayer by remember { mutableStateOf<LayerType?>(null) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -62,7 +60,6 @@ fun EditorLayersPanel(
                 .padding(horizontal = 20.dp, vertical = 6.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -76,7 +73,7 @@ fun EditorLayersPanel(
                     ),
                     color = MaterialTheme.colorScheme.onSurface
                 )
-                
+
                 Surface(
                     shape = CircleShape,
                     color = if (layerStack.isDepthEnabled) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest,
@@ -104,9 +101,8 @@ fun EditorLayersPanel(
                     }
                 }
             }
-            
+
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                
                 LayerCard(
                     title = "Subject",
                     isSelected = layerStack.activeLayerId == layerStack.subjectLayer.id,
@@ -124,10 +120,10 @@ fun EditorLayersPanel(
                     onTuneClick = {
                         view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
                         layerStack.selectLayer(layerStack.subjectLayer.id)
-                        showStructureSlider = !showStructureSlider
+                        activeTuningLayer = if (activeTuningLayer == LayerType.SUBJECT) null else LayerType.SUBJECT
                     }
                 )
-                
+
                 LayerCard(
                     title = "Clock Face",
                     isSelected = layerStack.activeLayerId == layerStack.clockLayer.id,
@@ -147,7 +143,7 @@ fun EditorLayersPanel(
                         layerStack.setDepthClockActive(!layerStack.isDepthEnabled)
                     }
                 )
-                
+
                 LayerCard(
                     title = "Background",
                     isSelected = layerStack.activeLayerId == layerStack.backgroundLayer.id,
@@ -165,10 +161,10 @@ fun EditorLayersPanel(
                     onTuneClick = {
                         view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
                         layerStack.selectLayer(layerStack.backgroundLayer.id)
-                        showStructureSlider = !showStructureSlider
+                        activeTuningLayer = if (activeTuningLayer == LayerType.BACKGROUND) null else LayerType.BACKGROUND
                     }
                 )
-                
+
                 LayerCard(
                     title = "Photo",
                     isSelected = layerStack.activeLayerId == layerStack.basePhotoLayer.id,
@@ -184,41 +180,88 @@ fun EditorLayersPanel(
                     onTuneClick = null
                 )
             }
-            
-            AnimatedVisibility(visible = showStructureSlider) {
+
+            AnimatedVisibility(visible = activeTuningLayer != null) {
                 Surface(
                     shape = RoundedCornerShape(18.dp),
                     color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.7f),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                "Structure",
-                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        if (activeTuningLayer == LayerType.BACKGROUND) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    "Background Structure / Saturation",
+                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
+                                )
+                                Text(
+                                    String.format("%.0f%%", layerStack.backgroundLayer.structure * 100),
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Black),
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                            Slider(
+                                value = layerStack.backgroundLayer.structure,
+                                onValueChange = { layerStack.backgroundLayer.structure = it },
+                                valueRange = -1f..1f
                             )
-                            Text(
-                                String.format("%.0f", layerStack.backgroundLayer.structure * 100),
-                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Black),
-                                color = MaterialTheme.colorScheme.primary
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    "Background Opacity",
+                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
+                                )
+                                Text(
+                                    String.format("%.0f%%", layerStack.backgroundLayer.opacity * 100),
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Black),
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                            Slider(
+                                value = layerStack.backgroundLayer.opacity,
+                                onValueChange = { layerStack.backgroundLayer.opacity = it },
+                                valueRange = 0.1f..1f
+                            )
+                        } else if (activeTuningLayer == LayerType.SUBJECT) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    "Subject Opacity",
+                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
+                                )
+                                Text(
+                                    String.format("%.0f%%", layerStack.subjectLayer.opacity * 100),
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Black),
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                            Slider(
+                                value = layerStack.subjectLayer.opacity,
+                                onValueChange = { layerStack.subjectLayer.opacity = it },
+                                valueRange = 0.2f..1f
                             )
                         }
-                        Slider(
-                            value = layerStack.backgroundLayer.structure,
-                            onValueChange = { layerStack.backgroundLayer.structure = it },
-                            valueRange = -1f..1f
-                        )
                     }
                 }
             }
-            
+
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text = "CREATE",
+                    text = "ACTIONS",
                     style = MaterialTheme.typography.labelSmall.copy(
                         fontWeight = FontWeight.Black,
                         letterSpacing = 1.2.sp
@@ -243,7 +286,7 @@ fun EditorLayersPanel(
                     ) {
                         Icon(Icons.Rounded.PersonSearch, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text("+ SUBJECT", fontSize = 12.sp, fontWeight = FontWeight.Black)
+                        Text("RE-EXTRACT", fontSize = 12.sp, fontWeight = FontWeight.Black)
                     }
 
                     OutlinedButton(
@@ -259,7 +302,7 @@ fun EditorLayersPanel(
                     ) {
                         Icon(Icons.Rounded.Wallpaper, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text("+ BACKGROUND", fontSize = 12.sp, fontWeight = FontWeight.Black)
+                        Text("VIBRANCE", fontSize = 12.sp, fontWeight = FontWeight.Black)
                     }
                 }
             }
@@ -304,7 +347,6 @@ private fun LayerCard(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                
                 Box(
                     modifier = Modifier
                         .size(40.dp)
