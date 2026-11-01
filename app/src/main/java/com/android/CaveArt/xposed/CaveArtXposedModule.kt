@@ -498,21 +498,13 @@ class CaveArtXposedModule : XposedModule() {
                                             myCustomClock.invalidate()
                                             myCustomDate.checkAndResolveOverlap(animated = true)
                                         }
-                                        "com.android.CaveArt.UPDATE_CLOCK_DEPTH" -> {
+                                        "com.android.CaveArt.UPDATE_CLOCK_DEPTH", "com.android.CaveArt.UPDATE_LAYER_STACK" -> {
                                             val enabled = intent.getBooleanExtra("clock_depth_enabled", true)
                                             val order = intent.getIntExtra("clock_layer_order", 1)
                                             val occlusion = intent.getFloatExtra("clock_depth_occlusion", 0.45f)
                                             myCustomClock.isDepthEnabled = enabled
                                             myCustomClock.layerOrder = order
                                             myCustomClock.depthOcclusionLimit = occlusion
-                                            myCustomClock.reloadDepthMask()
-                                            myCustomClock.invalidate()
-                                        }
-                                        "com.android.CaveArt.UPDATE_LAYER_STACK" -> {
-                                            val enabled = intent.getBooleanExtra("clock_depth_enabled", true)
-                                            val order = intent.getIntExtra("clock_layer_order", 1)
-                                            myCustomClock.isDepthEnabled = enabled
-                                            myCustomClock.layerOrder = order
                                             myCustomClock.reloadDepthMask()
                                             myCustomClock.invalidate()
                                         }
@@ -1084,9 +1076,34 @@ class VectorTextClock(context: Context) : TextClock(context) {
             strokeWidth = strokeW,
             stretchProgress = 1f - notificationProgress
         )
+
+        val combinedClockPath = Path().apply {
+            addPath(paths.hours)
+            addPath(paths.colon)
+            addPath(paths.mins)
+        }
+
+        val dynamicZoom = getSettingFloat(context, "telemetry_zoom", 1.10f)
+
+        var isOcclusionAcceptable = true
+        if (depthMaskBitmap != null && !depthMaskBitmap!!.isRecycled) {
+            val occlusionRatio = AdaptiveClockHelper.calculateOcclusionRatio(
+                clockPath = combinedClockPath,
+                mask = depthMaskBitmap,
+                screenW = CaveArtXposedModule.screenW,
+                screenH = CaveArtXposedModule.screenH,
+                clockAbsoluteX = trueAbsoluteX,
+                clockAbsoluteY = trueAbsoluteY,
+                zoomFactor = dynamicZoom
+            )
+            if (occlusionRatio > depthOcclusionLimit) {
+                isOcclusionAcceptable = false
+            }
+        }
         
         val shouldApplyDepth = isDepthEnabled &&
                 layerOrder == 1 &&
+                isOcclusionAcceptable &&
                 notificationProgress < 0.2f &&
                 depthMaskBitmap != null &&
                 !depthMaskBitmap!!.isRecycled
@@ -1104,9 +1121,8 @@ class VectorTextClock(context: Context) : TextClock(context) {
             val mask = depthMaskBitmap!!
             val sW = CaveArtXposedModule.screenW
             val sH = CaveArtXposedModule.screenH
-            val zoom = 1.10f
 
-            val baseScale = max(sW / mask.width.toFloat(), sH / mask.height.toFloat()) * zoom
+            val baseScale = max(sW / mask.width.toFloat(), sH / mask.height.toFloat()) * dynamicZoom
             val tx = (sW - mask.width * baseScale) / 2f
             val ty = (sH - mask.height * baseScale) / 2f
 

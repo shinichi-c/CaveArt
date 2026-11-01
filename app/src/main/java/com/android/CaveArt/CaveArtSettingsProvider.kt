@@ -41,10 +41,17 @@ class CaveArtSettingsProvider : ContentProvider() {
             val enabled = extras.getBoolean("clock_depth_enabled", true)
             val order = extras.getInt("clock_layer_order", 1)
             val occlusion = extras.getFloat("clock_depth_occlusion", 0.45f)
+            val structure = extras.getFloat("layer_structure", 0f)
+            val subOpacity = extras.getFloat("layer_subject_opacity", 1.0f)
+            val bgOpacity = extras.getFloat("layer_bg_opacity", 1.0f)
+
             prefs.edit()
                 .putBoolean("clock_depth_enabled", enabled)
                 .putInt("clock_layer_order", order)
                 .putFloat("clock_depth_occlusion", occlusion)
+                .putFloat("layer_structure", structure)
+                .putFloat("layer_subject_opacity", subOpacity)
+                .putFloat("layer_bg_opacity", bgOpacity)
                 .apply()
             return Bundle().apply { putBoolean("success", true) }
         }
@@ -117,6 +124,9 @@ class CaveArtSettingsProvider : ContentProvider() {
             "clock_depth_occlusion" -> cursor.addRow(arrayOf(prefs.getFloat("clock_depth_occlusion", 0.45f)))
             "depth_mask_path" -> cursor.addRow(arrayOf(prefs.getString("depth_mask_path", "")))
             "layer_structure" -> cursor.addRow(arrayOf(prefs.getFloat("layer_structure", 0f)))
+            "layer_subject_opacity" -> cursor.addRow(arrayOf(prefs.getFloat("layer_subject_opacity", 1.0f)))
+            "layer_bg_opacity" -> cursor.addRow(arrayOf(prefs.getFloat("layer_bg_opacity", 1.0f)))
+            "telemetry_zoom" -> cursor.addRow(arrayOf(prefs.getFloat("telemetry_zoom", 1.10f)))
         }
         return cursor
     }

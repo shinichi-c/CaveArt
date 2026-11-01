@@ -5,6 +5,7 @@ import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
+import android.graphics.Region
 import android.graphics.Typeface
 import kotlin.math.max
 
@@ -345,6 +346,69 @@ object AdaptiveClockHelper {
         appendPath(mStr[1].toString(), minSizePx, m1X, m1Y, 1f, m1SY, paths.mins)
 
         return paths
+    }
+
+    /**
+     * Calculates what ratio (0.0f..1.0f) of the clock characters is covered by the subject mask.
+     * Prevents clock unreadability when positioned deeply behind a foreground subject.
+     */
+    fun calculateOcclusionRatio(
+        clockPath: Path,
+        mask: Bitmap?,
+        screenW: Float,
+        screenH: Float,
+        clockAbsoluteX: Float,
+        clockAbsoluteY: Float,
+        zoomFactor: Float = 1.10f
+    ): Float {
+        if (mask == null || mask.isRecycled || clockPath.isEmpty) return 0f
+
+        val bounds = RectF()
+        clockPath.computeBounds(bounds, true)
+        if (bounds.width() <= 0 || bounds.height() <= 0) return 0f
+
+        val mw = mask.width.toFloat()
+        val mh = mask.height.toFloat()
+        val fillScale = max(screenW / mw, screenH / mh) * zoomFactor
+        val tx = (screenW - mw * fillScale) / 2f
+        val ty = (screenH - mh * fillScale) / 2f
+
+        val sampleStepsX = 24
+        val sampleStepsY = 24
+        var clockPixelCount = 0
+        var occludedPixelCount = 0
+
+        val testRegion = Region()
+        val clipRegion = Region(bounds.left.toInt(), bounds.top.toInt(), bounds.right.toInt(), bounds.bottom.toInt())
+        testRegion.setPath(clockPath, clipRegion)
+
+        val stepX = bounds.width() / sampleStepsX
+        val stepY = bounds.height() / sampleStepsY
+
+        for (ix in 0 until sampleStepsX) {
+            val px = bounds.left + ix * stepX
+            for (iy in 0 until sampleStepsY) {
+                val py = bounds.top + iy * stepY
+                if (testRegion.contains(px.toInt(), py.toInt())) {
+                    clockPixelCount++
+
+                    val absScreenX = px + clockAbsoluteX
+                    val absScreenY = py + clockAbsoluteY
+                    val maskX = ((absScreenX - tx) / fillScale).toInt()
+                    val maskY = ((absScreenY - ty) / fillScale).toInt()
+
+                    if (maskX in 0 until mask.width && maskY in 0 until mask.height) {
+                        val pixel = mask.getPixel(maskX, maskY)
+                        val alpha = (pixel ushr 24) and 0xFF
+                        if (alpha > 45) {
+                            occludedPixelCount++
+                        }
+                    }
+                }
+            }
+        }
+
+        return if (clockPixelCount > 0) occludedPixelCount.toFloat() / clockPixelCount.toFloat() else 0f
     }
 
     @JvmOverloads
