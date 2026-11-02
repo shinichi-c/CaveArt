@@ -56,6 +56,8 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.android.CaveArt.layer.LayerCompositor
+import com.android.CaveArt.layer.LockscreenLayerStack
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -378,7 +380,7 @@ fun ClockStudio(
             try { context.unregisterReceiver(receiver) } catch (_: Exception) {}
         }
     }
-    
+
     LaunchedEffect(wallpaper) {
         val components = viewModel.getHighQualityComponents(context, wallpaper)
         previewOriginal = components.first
@@ -493,7 +495,7 @@ fun ClockStudio(
                                 tint = if (state.layerStack.isMaskInspectorActive) Color(0xFFE53935) else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                        
+
                         IconButton(
                             onClick = {
                                 view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
@@ -506,7 +508,7 @@ fun ClockStudio(
                                 tint = if (state.layerStack.isDepthEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                        
+
                         IconButton(
                             onClick = {
                                 view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
@@ -776,7 +778,7 @@ fun ClockStudio(
                                     combinedClockPath.addPath(paths.colon)
                                     combinedClockPath.addPath(paths.mins)
                                     combinedClockPath.computeBounds(sharedPathBounds, true)
-                                    
+
                                     if (state.layerStack.isDepthEnabled && previewMask != null) {
                                         val ratio = AdaptiveClockHelper.calculateOcclusionRatio(
                                             clockPath = combinedClockPath,
@@ -813,14 +815,14 @@ fun ClockStudio(
                                 val recordingCanvas = hardwareRenderNode.beginRecording(realW.toInt(), realH.toInt())
                                 try {
                                     previewOriginal?.let { bmp ->
-                                        LayerVisualizerHelper.drawLayerStack(
+                                        LayerCompositor.composite(
                                             canvas = recordingCanvas,
                                             screenW = realW,
                                             screenH = realH,
                                             originalBmp = bmp,
                                             maskBmp = previewMask,
                                             zoom = state.liveWallpaperZoom.floatValue,
-                                            layerStack = state.layerStack,
+                                            stack = state.layerStack,
                                             drawClockAndDate = drawClockAndDateRoutine
                                         )
                                     }
@@ -861,14 +863,14 @@ fun ClockStudio(
                                 nativeCanvas.save()
                                 nativeCanvas.scale(previewScale, previewScale)
                                 previewOriginal?.let { bmp ->
-                                    LayerVisualizerHelper.drawLayerStack(
+                                    LayerCompositor.composite(
                                         canvas = nativeCanvas,
                                         screenW = realW,
                                         screenH = realH,
                                         originalBmp = bmp,
                                         maskBmp = previewMask,
                                         zoom = state.liveWallpaperZoom.floatValue,
-                                        layerStack = state.layerStack,
+                                        stack = state.layerStack,
                                         drawClockAndDate = drawClockAndDateRoutine
                                     )
                                 }
