@@ -443,7 +443,12 @@ class CaveArtXposedModule : XposedModule() {
                                                 if (constraintLayoutClass.isInstance(rootLayout)) {
                                                     val set = constraintSetClass.getDeclaredConstructor().newInstance()
                                                     constraintSetClass.getMethod("clone", constraintLayoutClass).invoke(set, rootLayout)
-                                                    constraintSetClass.getMethod("setMargin", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType, Int::class.javaPrimitiveType).invoke(set, customClockId, 3, topMarginPx)
+                                                    
+                                                    val density = context.resources.displayMetrics.density
+                                                    val strokePadding = (myCustomClock.strokeW * density) + (10f * density)
+                                                    val visualClockTopMarginPx = (topMarginPx - strokePadding).toInt().coerceAtLeast(0)
+
+                                                    constraintSetClass.getMethod("setMargin", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType, Int::class.javaPrimitiveType).invoke(set, customClockId, 3, visualClockTopMarginPx)
                                                     if (myCustomDate.isAttachedToClock) {
                                                         constraintSetClass.getMethod("setMargin", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType, Int::class.javaPrimitiveType).invoke(set, customDateId, 3, dateTopMarginPx)
                                                     }
@@ -578,7 +583,11 @@ class CaveArtXposedModule : XposedModule() {
                                 dateTopMarginPx
                             }
 
-                            connect.invoke(cs, customClockId, 3, 0, 3, effectiveClockTopMarginPx)
+                            val strokeW = activeClock?.strokeW ?: 8f
+                            val strokePadding = (strokeW * density) + (10f * density)
+                            val visualClockTopMarginPx = (effectiveClockTopMarginPx - strokePadding).toInt().coerceAtLeast(0)
+
+                            connect.invoke(cs, customClockId, 3, 0, 3, visualClockTopMarginPx)
                             connect.invoke(cs, customClockId, 6, 0, 6, 0)
                             connect.invoke(cs, customClockId, 7, 0, 7, 0)
                             setVisibility.invoke(cs, customClockId, 0)
@@ -1014,7 +1023,8 @@ class VectorTextClock(context: Context) : TextClock(context) {
 
         val verticalMultiplier = if (isVertical) 2.2f else 1.2f
         val maxExtraPadding = if (stretchEnabled) (maxTextSize * 1.6f) else 0f
-        val staticMeasuredH = (maxTextSize * verticalMultiplier + maxExtraPadding).toInt()
+        val strokePadding = (strokeW * density) + (10f * density)
+        val staticMeasuredH = (maxTextSize * verticalMultiplier + maxExtraPadding + strokePadding * 2).toInt()
 
         setMeasuredDimension(MeasureSpec.getSize(widthMeasureSpec), staticMeasuredH)
     }
@@ -1050,9 +1060,10 @@ class VectorTextClock(context: Context) : TextClock(context) {
         val layoutProgress = preferredLayoutProgress * (1f - notificationProgress)
 
         val totalWidth = AdaptiveClockHelper.measureClockWidth(timeString, hPx, mPx, customTypeface, layoutProgress)
-
+        
+        val strokePadding = (strokeW * resources.displayMetrics.density) + (10f * resources.displayMetrics.density)
         val startX = (width - totalWidth) / 2f
-        val startY = 0f
+        val startY = strokePadding
 
         getLocationOnScreen(screenPos)
         val trueAbsoluteX = screenPos[0].toFloat()

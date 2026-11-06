@@ -42,6 +42,11 @@ class BackgroundRenderLayer(
             canvas.translate(transform.translationX, transform.translationY)
         }
         canvas.drawBitmap(original, context.projection.origMatrix, paint)
+        
+        if (context.focusedLayerType == LayerType.SUBJECT) {
+            canvas.drawColor(Color.argb(85, 0, 0, 0))
+        }
+
         canvas.restore()
     }
 
@@ -55,7 +60,6 @@ class SubjectRenderLayer(
 ) : BaseRenderLayer(id, LayerType.SUBJECT, name, initialZIndex = initialZIndex) {
 
     var isMaskOverlayActive by mutableStateOf(false)
-    val rubylithColor: Int = 0x8CE53935.toInt()
 
     override fun render(context: LayerRenderContext) {
         val original = context.originalBitmap ?: return
@@ -72,20 +76,20 @@ class SubjectRenderLayer(
 
         val maskPaint = context.paintCache.bitmapPaint
         maskPaint.alpha = (opacity * 255).toInt().coerceIn(0, 255)
-        
+
         canvas.drawBitmap(mask, context.projection.maskMatrix, maskPaint)
-        
+
         val xferPaint = context.paintCache.xferPaint
         xferPaint.xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_IN)
         canvas.drawBitmap(original, context.projection.origMatrix, xferPaint)
         xferPaint.xfermode = null
         
-        if (isMaskOverlayActive) {
-            val overlayPaint = context.paintCache.overlayPaint
-            overlayPaint.xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_IN)
-            overlayPaint.color = rubylithColor
-            canvas.drawRect(0f, 0f, context.screenW, context.screenH, overlayPaint)
-            overlayPaint.xfermode = null
+        if (context.focusedLayerType == LayerType.BACKGROUND) {
+            val dimPaint = context.paintCache.overlayPaint
+            dimPaint.xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_ATOP)
+            dimPaint.color = Color.argb(90, 0, 0, 0)
+            canvas.drawRect(0f, 0f, context.screenW, context.screenH, dimPaint)
+            dimPaint.xfermode = null
         }
 
         canvas.restore()

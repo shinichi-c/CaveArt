@@ -26,6 +26,7 @@ data class LayerRenderContext(
     val maskBitmap: Bitmap?,
     val projection: UnifiedProjection,
     val timeNanos: Long = 0L,
+    val focusedLayerType: LayerType? = null,
     val paintCache: LayerPaintCache = LayerPaintCache()
 )
 

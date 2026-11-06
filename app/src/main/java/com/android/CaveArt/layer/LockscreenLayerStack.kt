@@ -17,7 +17,7 @@ class LockscreenLayerStack {
     var isDepthEnabled by mutableStateOf(true)
     var isMaskInspectorActive by mutableStateOf(false)
     var depthOcclusionLimit by mutableFloatStateOf(0.45f)
-    
+
     fun addLayer(layer: RenderLayer) {
         if (customLayers.none { it.id == layer.id }) {
             customLayers.add(layer)
@@ -47,12 +47,8 @@ class LockscreenLayerStack {
 
     fun selectLayer(layerId: String) {
         activeLayerId = layerId
-        if (layerId == subjectLayer.id) {
-            subjectLayer.isMaskOverlayActive = true
-            isMaskInspectorActive = true
-        } else {
-            subjectLayer.isMaskOverlayActive = false
-            isMaskInspectorActive = false
-        }
+        val isSubject = (layerId == subjectLayer.id)
+        subjectLayer.isMaskOverlayActive = isSubject
+        isMaskInspectorActive = isSubject
     }
 }
