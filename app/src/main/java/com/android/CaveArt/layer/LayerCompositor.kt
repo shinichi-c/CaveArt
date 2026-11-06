@@ -2,11 +2,7 @@ package com.android.CaveArt.layer
 
 import android.graphics.Bitmap
 import android.graphics.Canvas
-import android.graphics.Color
-import android.graphics.ColorMatrix
-import android.graphics.ColorMatrixColorFilter
 import android.graphics.Matrix
-import android.graphics.Paint
 import android.graphics.RectF
 import kotlin.math.max
 
@@ -17,11 +13,6 @@ data class UnifiedProjection(
 )
 
 object LayerCompositor {
-
-    private val scrimPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
-        colorFilter = ColorMatrixColorFilter(ColorMatrix().apply { setSaturation(0.20f) })
-        alpha = 130
-    }
 
     fun computeProjection(
         screenW: Float,
@@ -59,9 +50,6 @@ object LayerCompositor {
         return UnifiedProjection(destRect, origMatrix, maskMatrix)
     }
 
-    /**
-     * Composites all visible layers sorted by ascending zIndex.
-     */
     fun composite(
         canvas: Canvas,
         screenW: Float,
@@ -70,6 +58,7 @@ object LayerCompositor {
         maskBmp: Bitmap?,
         zoom: Float,
         stack: LockscreenLayerStack,
+        focusedLayerType: LayerType? = null,
         drawClockAndDate: ((Canvas) -> Unit)? = null
     ) {
         if (originalBmp == null || originalBmp.isRecycled) return
@@ -82,20 +71,15 @@ object LayerCompositor {
             originalBitmap = originalBmp,
             maskBitmap = maskBmp,
             projection = projection,
-            timeNanos = System.nanoTime()
+            timeNanos = System.nanoTime(),
+            focusedLayerType = focusedLayerType
         )
 
         stack.clockLayer.drawRoutine = drawClockAndDate
-        
-        if (stack.isMaskInspectorActive && stack.backgroundLayer.isVisible) {
-            canvas.drawBitmap(originalBmp, projection.origMatrix, scrimPaint)
-            canvas.drawColor(Color.argb(90, 0, 0, 0))
-        }
 
         val orderedLayers = stack.getOrderedLayers()
         for (layer in orderedLayers) {
             if (!layer.isVisible) continue
-            if (stack.isMaskInspectorActive && layer.type == LayerType.BACKGROUND) continue
             layer.render(context)
         }
     }
