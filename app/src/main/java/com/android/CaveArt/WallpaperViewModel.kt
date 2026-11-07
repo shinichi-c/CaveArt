@@ -128,9 +128,9 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     var clockLayerOrder by mutableIntStateOf(clockPrefs.getInt("clock_layer_order", 1))
     var clockDepthOcclusion by mutableFloatStateOf(clockPrefs.getFloat("clock_depth_occlusion", 0.45f))
 
-    var layerBackgroundStructure by mutableFloatStateOf(clockPrefs.getFloat("layer_structure", 0f))
-    var layerSubjectOpacity by mutableFloatStateOf(clockPrefs.getFloat("layer_subject_opacity", 1.0f))
-    var layerBackgroundOpacity by mutableFloatStateOf(clockPrefs.getFloat("layer_bg_opacity", 1.0f))
+    var layerBackgroundStructure by mutableFloatStateOf(0f)
+    var layerSubjectOpacity by mutableFloatStateOf(1.0f)
+    var layerBackgroundOpacity by mutableFloatStateOf(1.0f)
 
     private val wallpaperColorMap = mutableMapOf<String, Int>()
 

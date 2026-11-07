@@ -34,7 +34,9 @@ class BackgroundRenderLayer(
         } else {
             paint.colorFilter = null
         }
-        paint.alpha = (opacity * 255).toInt().coerceIn(0, 255)
+        
+        val effectiveAlpha = (opacity.coerceIn(0f, 1f) * 255).toInt().coerceIn(0, 255)
+        paint.alpha = effectiveAlpha
 
         val canvas = context.canvas
         canvas.save()
@@ -42,11 +44,6 @@ class BackgroundRenderLayer(
             canvas.translate(transform.translationX, transform.translationY)
         }
         canvas.drawBitmap(original, context.projection.origMatrix, paint)
-        
-        if (context.focusedLayerType == LayerType.SUBJECT) {
-            canvas.drawColor(Color.argb(85, 0, 0, 0))
-        }
-
         canvas.restore()
     }
 
@@ -75,7 +72,7 @@ class SubjectRenderLayer(
         }
 
         val maskPaint = context.paintCache.bitmapPaint
-        maskPaint.alpha = (opacity * 255).toInt().coerceIn(0, 255)
+        maskPaint.alpha = (opacity.coerceIn(0f, 1f) * 255).toInt().coerceIn(0, 255)
 
         canvas.drawBitmap(mask, context.projection.maskMatrix, maskPaint)
 
@@ -83,14 +80,6 @@ class SubjectRenderLayer(
         xferPaint.xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_IN)
         canvas.drawBitmap(original, context.projection.origMatrix, xferPaint)
         xferPaint.xfermode = null
-        
-        if (context.focusedLayerType == LayerType.BACKGROUND) {
-            val dimPaint = context.paintCache.overlayPaint
-            dimPaint.xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_ATOP)
-            dimPaint.color = Color.argb(90, 0, 0, 0)
-            canvas.drawRect(0f, 0f, context.screenW, context.screenH, dimPaint)
-            dimPaint.xfermode = null
-        }
 
         canvas.restore()
         canvas.restoreToCount(layerId)

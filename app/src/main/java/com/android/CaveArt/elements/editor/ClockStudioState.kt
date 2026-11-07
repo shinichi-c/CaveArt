@@ -36,8 +36,10 @@ class ClockStudioState(viewModel: WallpaperViewModel) {
         setDepthClockActive(viewModel.isClockDepthEnabled && viewModel.clockLayerOrder == 1)
         depthOcclusionLimit = viewModel.clockDepthOcclusion
         backgroundLayer.structure = viewModel.layerBackgroundStructure
-        subjectLayer.opacity = viewModel.layerSubjectOpacity
-        backgroundLayer.opacity = viewModel.layerBackgroundOpacity
+        subjectLayer.opacity = viewModel.layerSubjectOpacity.coerceAtLeast(1.0f)
+        backgroundLayer.opacity = viewModel.layerBackgroundOpacity.coerceAtLeast(1.0f)
+        backgroundLayer.isVisible = true
+        subjectLayer.isVisible = true
     }
 
     val clockX: MutableFloatState = mutableFloatStateOf(viewModel.lockscreenClockOffsetX)

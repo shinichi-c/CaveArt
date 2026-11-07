@@ -13,7 +13,7 @@ class LockscreenLayerStack {
 
     private val customLayers = mutableListOf<RenderLayer>()
 
-    var activeLayerId by mutableStateOf<String?>("layer_subject")
+    var activeLayerId by mutableStateOf<String?>("layer_clock")
     var isDepthEnabled by mutableStateOf(true)
     var isMaskInspectorActive by mutableStateOf(false)
     var depthOcclusionLimit by mutableFloatStateOf(0.45f)
