@@ -64,6 +64,7 @@ fun ClockStudio(
     val state = rememberClockStudioState(viewModel)
     var previewOriginal by remember { mutableStateOf<Bitmap?>(null) }
     var previewMask by remember { mutableStateOf<Bitmap?>(null) }
+    var isMlLoading by remember(wallpaper.id) { mutableStateOf(true) }
 
     var showDateCustomizeSheet by remember { mutableStateOf(false) }
     var showLayersSheet by remember { mutableStateOf(false) }
@@ -252,11 +253,13 @@ fun ClockStudio(
         }
         onDispose { try { context.unregisterReceiver(receiver) } catch (_: Exception) {} }
     }
-
-    LaunchedEffect(wallpaper) {
+    
+    LaunchedEffect(wallpaper.id) {
+        isMlLoading = true
         val components = viewModel.getHighQualityComponents(context, wallpaper)
         previewOriginal = components.first
         previewMask = components.second ?: viewModel.getMaskForClock(context, wallpaper)
+        isMlLoading = false
     }
 
     val currentMask = previewMask
@@ -383,6 +386,7 @@ fun ClockStudio(
                             .navigationBarsPadding()
                             .padding(top = 8.dp, bottom = 12.dp)
                     ) {
+                        
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -575,6 +579,9 @@ fun ClockStudio(
             ) {
                 ClockStudioPreviewCard(
                     state = state,
+                    wallpaper = wallpaper,
+                    viewModel = viewModel,
+                    isMlLoading = isMlLoading,
                     displayGeometry = displayGeometry,
                     previewOriginal = previewOriginal,
                     previewMask = previewMask,
@@ -662,6 +669,5 @@ fun ClockStudio(
                 }
             }
         }
-        
     }
 }
