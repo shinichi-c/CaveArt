@@ -165,31 +165,38 @@ suspend fun setDeviceWallpaper(
             canvas.drawColor(viewModel.currentBackgroundColor)
         }
         
-        val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
-        if (viewModel.layerBackgroundStructure != 0f) {
-            val sat = (1f + (viewModel.layerBackgroundStructure * 0.5f)).coerceIn(0f, 2f)
-            bgPaint.colorFilter = ColorMatrixColorFilter(ColorMatrix().apply {
-                setSaturation(sat)
-            })
-        }
-        bgPaint.alpha = (viewModel.layerBackgroundOpacity * 255).toInt().coerceIn(0, 255)
-        canvas.drawBitmap(rawBitmap, null, destRect, bgPaint)
-        
-        val mask = viewModel.getMaskForClock(context, wallpaper)
-        if (mask != null && !mask.isRecycled) {
-            val layerId = canvas.saveLayer(0f, 0f, metrics.widthPixels.toFloat(), metrics.heightPixels.toFloat(), null)
+        val hasCustomEffects = viewModel.layerBackgroundStructure != 0f || viewModel.layerBackgroundOpacity < 0.99f || viewModel.layerSubjectOpacity < 0.99f
 
-            val maskPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
-                alpha = (viewModel.layerSubjectOpacity * 255).toInt().coerceIn(0, 255)
+        if (!hasCustomEffects) {
+            val basePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+            canvas.drawBitmap(rawBitmap, null, destRect, basePaint)
+        } else {
+            val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+            if (viewModel.layerBackgroundStructure != 0f) {
+                val sat = (1f + (viewModel.layerBackgroundStructure * 0.5f)).coerceIn(0f, 2f)
+                bgPaint.colorFilter = ColorMatrixColorFilter(ColorMatrix().apply {
+                    setSaturation(sat)
+                })
             }
-            canvas.drawBitmap(mask, null, destRect, maskPaint)
+            bgPaint.alpha = (viewModel.layerBackgroundOpacity * 255).toInt().coerceIn(0, 255)
+            canvas.drawBitmap(rawBitmap, null, destRect, bgPaint)
+            
+            val mask = viewModel.getMaskForClock(context, wallpaper)
+            if (mask != null && !mask.isRecycled) {
+                val layerId = canvas.saveLayer(0f, 0f, metrics.widthPixels.toFloat(), metrics.heightPixels.toFloat(), null)
 
-            val xferPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
-                xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_IN)
+                val maskPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
+                    alpha = (viewModel.layerSubjectOpacity * 255).toInt().coerceIn(0, 255)
+                }
+                canvas.drawBitmap(mask, null, destRect, maskPaint)
+
+                val xferPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
+                    xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_IN)
+                }
+                canvas.drawBitmap(rawBitmap, null, destRect, xferPaint)
+
+                canvas.restoreToCount(layerId)
             }
-            canvas.drawBitmap(rawBitmap, null, destRect, xferPaint)
-
-            canvas.restoreToCount(layerId)
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
