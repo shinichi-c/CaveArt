@@ -124,24 +124,41 @@ fun ClockStudioPreviewCard(
             }
         } else null
     }
-    
+
     LaunchedEffect(
         state.clockX.floatValue, state.clockY.floatValue, state.dateAttached.value,
         state.hourSize.floatValue, state.clockLayout.intValue, state.dateSize.floatValue,
-        state.stretchEnabled.value, dateText
+        state.stretchEnabled.value, dateText, timeString, customTypeface, state.strokeWidth.floatValue
     ) {
+        val sideSafeMarginDp = 18f
+        val halfScreenDp = realW / densityVal / 2f
+        val hPx = state.hourSize.floatValue * densityVal
+        val mPx = state.minSize.floatValue * densityVal
+        val isVert = state.clockLayout.intValue == 1
+        val sampleTime = if (timeString.isNotEmpty()) timeString else "00:00"
+        val totalClockWidthPx = AdaptiveClockHelper.measureClockWidth(sampleTime, hPx, mPx, customTypeface, isVert)
+        val strokePaddingPx = (state.strokeWidth.floatValue * densityVal) + (4f * densityVal)
+        val clockWidthDp = (totalClockWidthPx + strokePaddingPx) / densityVal
+        val halfClockWDp = clockWidthDp / 2f
+        val minSafeClockX = -halfScreenDp + halfClockWDp + sideSafeMarginDp
+        val maxSafeClockX = halfScreenDp - halfClockWDp - sideSafeMarginDp
+
+        if (minSafeClockX <= maxSafeClockX) {
+            state.clockX.floatValue = state.clockX.floatValue.coerceIn(minSafeClockX, maxSafeClockX)
+        } else {
+            state.clockX.floatValue = 0f
+        }
+        
         datePaint.textSize = state.dateSize.floatValue * densityVal
         val sampleDate = if (dateText.isNotEmpty()) dateText else "Wednesday, 14 October"
         val dateWidthDp = datePaint.measureText(sampleDate) / densityVal
-        val halfScreenDp = realW / densityVal / 2f
         val halfDateWDp = dateWidthDp / 2f
-        val sideSafeMarginDp = 18f
-        val minSafeX = -halfScreenDp + halfDateWDp + sideSafeMarginDp
-        val maxSafeX = halfScreenDp - halfDateWDp - sideSafeMarginDp
+        val minSafeDateX = -halfScreenDp + halfDateWDp + sideSafeMarginDp
+        val maxSafeDateX = halfScreenDp - halfDateWDp - sideSafeMarginDp
 
         if (state.dateAttached.value) {
-            state.dateX.floatValue = if (minSafeX <= maxSafeX) {
-                state.clockX.floatValue.coerceIn(minSafeX, maxSafeX)
+            state.dateX.floatValue = if (minSafeDateX <= maxSafeDateX) {
+                state.clockX.floatValue.coerceIn(minSafeDateX, maxSafeDateX)
             } else 0f
 
             val fontMetrics = datePaint.fontMetrics
@@ -155,7 +172,6 @@ fun ClockStudioPreviewCard(
                 state.dateY.floatValue = max(minSafeYDp, idealAboveYDp)
             } else {
                 if (touchesTopBorder) {
-                    val isVert = state.clockLayout.intValue == 1
                     val clockEstimatedHDp = if (isVert) {
                         (state.hourSize.floatValue * 2.15f) + (state.strokeWidth.floatValue * 0.5f)
                     } else {
@@ -168,7 +184,7 @@ fun ClockStudioPreviewCard(
             }
         }
     }
-    
+
     val datePhysicsSpringY = remember { Animatable(state.dateY.floatValue) }
     LaunchedEffect(
         isDraggingDate, isDraggingClock, state.dateAttached.value,
@@ -222,7 +238,7 @@ fun ClockStudioPreviewCard(
             }
         }
     }
-    
+
     val gestureModifier = if (!isMlLoading) {
         Modifier.pointerInput(realW, realH) {
             var rawClockX = state.clockX.floatValue
@@ -262,20 +278,36 @@ fun ClockStudioPreviewCard(
                         val maxClockSafeYDp = (realH / densityVal) - navBarDp - (state.hourSize.floatValue * 0.75f)
                         val maxDateSafeYDp = (realH / densityVal) - navBarDp - (state.dateSize.floatValue * 1.5f)
 
+                        val sideSafeMarginDp = 18f
+                        val halfScreenDp = realW / densityVal / 2f
+
                         val sampleDate = if (dateText.isNotEmpty()) dateText else "Wednesday, 14 October"
                         val dateWidthDp = datePaint.measureText(sampleDate) / densityVal
-                        val halfScreenDp = realW / densityVal / 2f
                         val halfDateWDp = dateWidthDp / 2f
-                        val sideSafeMarginDp = 18f
-                        val minSafeX = -halfScreenDp + halfDateWDp + sideSafeMarginDp
-                        val maxSafeX = halfScreenDp - halfDateWDp - sideSafeMarginDp
+                        val minSafeDateX = -halfScreenDp + halfDateWDp + sideSafeMarginDp
+                        val maxSafeDateX = halfScreenDp - halfDateWDp - sideSafeMarginDp
+                        
+                        val hPx = state.hourSize.floatValue * densityVal
+                        val mPx = state.minSize.floatValue * densityVal
+                        val isVert = state.clockLayout.intValue == 1
+                        val sampleTime = if (timeString.isNotEmpty()) timeString else "00:00"
+                        val rawClockWidthPx = AdaptiveClockHelper.measureClockWidth(sampleTime, hPx, mPx, customTypeface, isVert)
+                        val strokePaddingPx = (state.strokeWidth.floatValue * densityVal) + (4f * densityVal)
+                        val clockWidthDp = (rawClockWidthPx + strokePaddingPx) / densityVal
+                        val halfClockWDp = clockWidthDp / 2f
+                        val minSafeClockX = -halfScreenDp + halfClockWDp + sideSafeMarginDp
+                        val maxSafeClockX = halfScreenDp - halfClockWDp - sideSafeMarginDp
 
                         if (activeDrag == "DATE" && !state.dateAttached.value) {
                             isDraggingDate = true
                             rawDateX += deltaNativeDpX
                             rawDateY += deltaNativeDpY
-                            state.dateX.floatValue = rawDateX.coerceIn(minSafeX, maxSafeX)
+                            state.dateX.floatValue = if (minSafeDateX <= maxSafeDateX) {
+                                rawDateX.coerceIn(minSafeDateX, maxSafeDateX)
+                            } else 0f
                             state.dateY.floatValue = rawDateY.coerceIn(minSafeYDp, maxDateSafeYDp)
+                            rawDateX = state.dateX.floatValue
+                            rawDateY = state.dateY.floatValue
                         } else {
                             isDraggingClock = true
                             state.hourSize.floatValue = (state.hourSize.floatValue * zoom).coerceIn(minClockSizeDp, maxClockSizeDp)
@@ -293,8 +325,12 @@ fun ClockStudioPreviewCard(
                                 minSafeYDp
                             }
 
-                            state.clockX.floatValue = rawClockX
+                            state.clockX.floatValue = if (minSafeClockX <= maxSafeClockX) {
+                                rawClockX.coerceIn(minSafeClockX, maxSafeClockX)
+                            } else 0f
                             state.clockY.floatValue = rawClockY.coerceIn(effectiveMinClockYDp, maxClockSafeYDp)
+                            rawClockX = state.clockX.floatValue
+                            rawClockY = state.clockY.floatValue
                         }
                         event.changes.forEach { if (it.positionChanged()) it.consume() }
                     }
@@ -308,8 +344,14 @@ fun ClockStudioPreviewCard(
                 isDraggingClock = false
                 isDraggingDate = false
 
-                if (abs(state.clockX.floatValue) < magneticSnapThresholdDp) state.clockX.floatValue = 0f
-                if (!state.dateAttached.value && abs(state.dateX.floatValue) < magneticSnapThresholdDp) state.dateX.floatValue = 0f
+                if (abs(state.clockX.floatValue) < magneticSnapThresholdDp) {
+                    state.clockX.floatValue = 0f
+                    rawClockX = 0f
+                }
+                if (!state.dateAttached.value && abs(state.dateX.floatValue) < magneticSnapThresholdDp) {
+                    state.dateX.floatValue = 0f
+                    rawDateX = 0f
+                }
             }
         }
     } else Modifier
@@ -333,7 +375,6 @@ fun ClockStudioPreviewCard(
             label = "previewLoadingTransition"
         ) { loading ->
             if (loading) {
-                
                 Box(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
@@ -352,7 +393,6 @@ fun ClockStudioPreviewCard(
                     )
                 }
             } else {
-            	
                 Box(modifier = Modifier.fillMaxSize()) {
                     Canvas(modifier = Modifier.fillMaxSize()) {
                         val previewScale = size.width / realW
@@ -524,7 +564,7 @@ fun ClockStudioPreviewCard(
                             )
                         }
                     }
-                    
+
                     if (currentLayerActions.size > 1) {
                         VerticalLayerActionSwitcher(
                             actions = currentLayerActions,
