@@ -363,6 +363,7 @@ class CaveArtXposedModule : XposedModule() {
                                             myCustomClock.minuteSizeDp = intent.getFloatExtra("clock_minute_size", 75f)
                                             myCustomClock.strokeW = intent.getFloatExtra("clock_stroke_width", 8f)
                                             myCustomClock.curveRound = intent.getFloatExtra("clock_roundness", 30f)
+                                            myCustomClock.updateInterpolatedPositions()
                                             myCustomClock.requestLayout()
                                             myCustomClock.invalidate()
 
@@ -490,6 +491,7 @@ class CaveArtXposedModule : XposedModule() {
                                         "com.android.CaveArt.UPDATE_CLOCK_FONT" -> {
                                             myCustomClock.clockFont = intent.getStringExtra("clock_font") ?: "default"
                                             myCustomClock.reloadTypeface()
+                                            myCustomClock.updateInterpolatedPositions()
                                             myCustomClock.requestLayout()
                                             myCustomClock.invalidate()
                                         }
@@ -499,6 +501,7 @@ class CaveArtXposedModule : XposedModule() {
                                         }
                                         "com.android.CaveArt.UPDATE_CLOCK_LAYOUT" -> {
                                             myCustomClock.isVertical = intent.getIntExtra("clock_layout", 0) == 1
+                                            myCustomClock.updateInterpolatedPositions()
                                             myCustomClock.requestLayout()
                                             myCustomClock.invalidate()
                                             myCustomDate.checkAndResolveOverlap(animated = true)
@@ -1014,7 +1017,34 @@ class VectorTextClock(context: Context) : TextClock(context) {
 
         val targetTranslationY = targetYPx - userY
         translationY = targetTranslationY * notificationProgress
-        translationX = userTranslationX + (0f - userTranslationX) * notificationProgress
+        
+        val targetHourSizeDp = if (hourSizeDp > 85f) 85f else hourSizeDp
+        val targetMinSizeDp = if (minuteSizeDp > 72f) 72f else minuteSizeDp
+        val currentHourSizeDp = hourSizeDp + (targetHourSizeDp - hourSizeDp) * notificationProgress
+        val currentMinSizeDp = minuteSizeDp + (targetMinSizeDp - minuteSizeDp) * notificationProgress
+
+        val hPx = currentHourSizeDp * density
+        val mPx = currentMinSizeDp * density
+        val preferredLayoutProgress = if (isVertical) 1f else 0f
+        val layoutProgress = preferredLayoutProgress * (1f - notificationProgress)
+
+        val is24Hour = android.text.format.DateFormat.is24HourFormat(context)
+        val pattern = if (is24Hour) "HH:mm" else "hh:mm"
+        val sampleTime = java.text.SimpleDateFormat(pattern, java.util.Locale.getDefault()).format(java.util.Date()).ifEmpty { "00:00" }
+
+        val totalWidth = AdaptiveClockHelper.measureClockWidth(sampleTime, hPx, mPx, customTypeface, layoutProgress)
+        val strokePadding = (strokeW * density) + (4f * density)
+        val halfWidth = (totalWidth + strokePadding) / 2f
+        val screenW = CaveArtXposedModule.screenW
+        val sideSafeMargin = 18f * density
+        val minAllowedTransX = -(screenW / 2f) + halfWidth + sideSafeMargin
+        val maxAllowedTransX = (screenW / 2f) - halfWidth - sideSafeMargin
+
+        val safeUserTranslationX = if (minAllowedTransX <= maxAllowedTransX) {
+            userTranslationX.coerceIn(minAllowedTransX, maxAllowedTransX)
+        } else 0f
+
+        translationX = safeUserTranslationX + (0f - safeUserTranslationX) * notificationProgress
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
