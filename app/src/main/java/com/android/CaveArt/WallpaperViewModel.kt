@@ -17,6 +17,7 @@ import androidx.lifecycle.viewModelScope
 import com.android.CaveArt.animations.AnimationFactory
 import com.android.CaveArt.animations.AnimationStyle
 import com.android.CaveArt.animations.AnimSetting
+import com.android.CaveArt.layer.LockscreenLayerStack
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
@@ -42,6 +43,7 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     private val segmentationHelper = SegmentationHelper(application)
     private val refineHelper = ForegroundEstimationHelper(application)
     private val mattingHelper = DeepMattingHelper(application)
+    private val depthHelper = SpatialDepthHelper(application)
 
     private val safeContext = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
         application.createDeviceProtectedStorageContext()
@@ -123,10 +125,13 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
 
     var isClockStretchEnabled by mutableStateOf(clockPrefs.getBoolean("clock_stretch", false))
     var clockCollisionMap by mutableStateOf(clockPrefs.getString("clock_collision_map", "") ?: "")
-    
+
     var isClockDepthEnabled by mutableStateOf(clockPrefs.getBoolean("clock_depth_enabled", true))
     var clockLayerOrder by mutableIntStateOf(clockPrefs.getInt("clock_layer_order", 1))
     var clockDepthOcclusion by mutableFloatStateOf(clockPrefs.getFloat("clock_depth_occlusion", 0.45f))
+    
+    var isClockGravityEnabled by mutableStateOf(clockPrefs.getBoolean("clock_gravity", false))
+    var clockGravityIntensity by mutableFloatStateOf(clockPrefs.getFloat("clock_gravity_intensity", 1.0f))
 
     var layerBackgroundStructure by mutableFloatStateOf(0f)
     var layerSubjectOpacity by mutableFloatStateOf(1.0f)
@@ -237,6 +242,20 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         clockPrefs.edit().putBoolean("clock_stretch", enabled).apply()
         context.sendBroadcast(android.content.Intent("com.android.CaveArt.UPDATE_CLOCK_STRETCH").apply { putExtra("clock_stretch", enabled) })
         if (enabled && mask != null) generateCollisionMap(context, mask, screenW, screenH)
+    }
+
+    fun updateClockGravity(context: Context, enabled: Boolean, intensity: Float) {
+        isClockGravityEnabled = enabled
+        clockGravityIntensity = intensity
+        clockPrefs.edit()
+            .putBoolean("clock_gravity", enabled)
+            .putFloat("clock_gravity_intensity", intensity)
+            .apply()
+
+        context.sendBroadcast(android.content.Intent("com.android.CaveArt.UPDATE_CLOCK_GRAVITY").apply {
+            putExtra("clock_gravity", enabled)
+            putExtra("clock_gravity_intensity", intensity)
+        })
     }
 
     fun generateCollisionMap(context: Context, mask: Bitmap, screenW: Float, screenH: Float) {
@@ -425,6 +444,11 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     private val originalCache = object : LruCache<String, Bitmap>(maxMemory / 32) {
         override fun sizeOf(key: String, bitmap: Bitmap) = bitmap.byteCount / 1024
     }
+    
+    private val depthCache = object : LruCache<String, DepthResult>(maxMemory / 32) {
+        override fun sizeOf(key: String, value: DepthResult) =
+            (value.rawDepthMap.byteCount + value.heatMapBitmap.byteCount) / 1024
+    }
 
     private suspend fun getCachedOriginal(context: Context, wallpaper: Wallpaper, maxDim: Int = 1024): Bitmap? = withContext(Dispatchers.IO) {
         val cacheKey = "orig_${wallpaper.id}_$maxDim"
@@ -488,6 +512,22 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    suspend fun getOrGenerateDepth(context: Context, wallpaper: Wallpaper): DepthResult? = withContext(Dispatchers.Default) {
+        try {
+            depthCache.get(wallpaper.id)?.let { return@withContext it }
+
+            val original = getCachedOriginal(context, wallpaper, 1024) ?: return@withContext null
+            val result = depthHelper.runInference(original)
+            if (result != null) {
+                depthCache.put(wallpaper.id, result)
+                saveRawDepthToDisk(context, result.rawDepthMap)
+            }
+            result
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     fun saveDepthMaskToDisk(context: Context, mask: Bitmap) {
         try {
             val safeCtx = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
@@ -503,6 +543,20 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
             FileOutputStream(backupFile).use { out ->
                 mask.compress(Bitmap.CompressFormat.PNG, 100, out)
             }
+        } catch (_: Exception) {}
+    }
+
+    fun saveRawDepthToDisk(context: Context, depthMap: Bitmap) {
+        try {
+            val safeCtx = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                context.createDeviceProtectedStorageContext()
+            } else context
+
+            val file = File(safeCtx.filesDir, "lock_raw_depth.png")
+            FileOutputStream(file).use { out ->
+                depthMap.compress(Bitmap.CompressFormat.PNG, 100, out)
+            }
+            file.setReadable(true, false)
         } catch (_: Exception) {}
     }
 
@@ -632,5 +686,6 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         segmentationHelper.close()
         refineHelper.close()
         mattingHelper.close()
+        depthHelper.close()
     }
 }

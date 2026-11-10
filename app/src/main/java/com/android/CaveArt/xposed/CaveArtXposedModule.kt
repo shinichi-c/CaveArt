@@ -21,6 +21,7 @@ import android.view.animation.PathInterpolator
 import android.widget.TextClock
 import android.widget.TextView
 import com.android.CaveArt.AdaptiveClockHelper
+import com.android.CaveArt.PerspectiveFitHelper
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
 import java.io.File
@@ -267,10 +268,13 @@ class CaveArtXposedModule : XposedModule() {
                             val cFont = getSettingString(context, "clock_font", "default")
                             val isDualTone = getSettingInt(context, "clock_dual_tone", 1) == 1
                             val isVert = getSettingInt(context, "clock_layout", 0)
-                            
+
                             val isDepth = getSettingInt(context, "clock_depth_enabled", 1) == 1
                             val lOrder = getSettingInt(context, "clock_layer_order", 1)
                             val dOcclusion = getSettingFloat(context, "clock_depth_occlusion", 0.45f)
+                            
+                            val isGravity = getSettingInt(context, "clock_gravity", 0) == 1
+                            val gravIntensity = getSettingFloat(context, "clock_gravity_intensity", 1.0f)
 
                             topMarginPx = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, initialY, context.resources.displayMetrics).toInt()
                             dateTopMarginPx = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, dateY, context.resources.displayMetrics).toInt()
@@ -291,6 +295,8 @@ class CaveArtXposedModule : XposedModule() {
                                 isDepthEnabled = isDepth
                                 layerOrder = lOrder
                                 depthOcclusionLimit = dOcclusion
+                                gravityEnabled = isGravity
+                                gravityIntensity = gravIntensity
                                 penPaint.color = cColor
                                 userTranslationX = initialXPx
                                 translationX = initialXPx
@@ -345,6 +351,7 @@ class CaveArtXposedModule : XposedModule() {
                                 addAction("com.android.CaveArt.UPDATE_CLOCK_LAYOUT")
                                 addAction("com.android.CaveArt.UPDATE_CLOCK_DEPTH")
                                 addAction("com.android.CaveArt.UPDATE_LAYER_STACK")
+                                addAction("com.android.CaveArt.UPDATE_CLOCK_GRAVITY")
                                 addAction(Intent.ACTION_USER_PRESENT)
                                 addAction(Intent.ACTION_SCREEN_ON)
                                 addAction(Intent.ACTION_TIME_TICK)
@@ -444,7 +451,7 @@ class CaveArtXposedModule : XposedModule() {
                                                 if (constraintLayoutClass.isInstance(rootLayout)) {
                                                     val set = constraintSetClass.getDeclaredConstructor().newInstance()
                                                     constraintSetClass.getMethod("clone", constraintLayoutClass).invoke(set, rootLayout)
-                                                    
+
                                                     val density = context.resources.displayMetrics.density
                                                     val strokePadding = (myCustomClock.strokeW * density) + (10f * density)
                                                     val visualClockTopMarginPx = (topMarginPx - strokePadding).toInt().coerceAtLeast(0)
@@ -513,6 +520,12 @@ class CaveArtXposedModule : XposedModule() {
                                             myCustomClock.isDepthEnabled = enabled
                                             myCustomClock.layerOrder = order
                                             myCustomClock.depthOcclusionLimit = occlusion
+                                            myCustomClock.reloadDepthMask()
+                                            myCustomClock.invalidate()
+                                        }
+                                        "com.android.CaveArt.UPDATE_CLOCK_GRAVITY" -> {
+                                            myCustomClock.gravityEnabled = intent.getBooleanExtra("clock_gravity", false)
+                                            myCustomClock.gravityIntensity = intent.getFloatExtra("clock_gravity_intensity", 1.0f)
                                             myCustomClock.reloadDepthMask()
                                             myCustomClock.invalidate()
                                         }
@@ -874,11 +887,16 @@ class VectorTextClock(context: Context) : TextClock(context) {
     var clockColor = Color.WHITE
     var clockFont = "default"
     var dualToneEnabled = true
-    
+
     var isDepthEnabled = true
     var layerOrder = 1
     var depthOcclusionLimit = 0.45f
     private var depthMaskBitmap: Bitmap? = null
+    
+    var gravityEnabled = false
+    var gravityIntensity = 1.0f
+    private var rawDepthBitmap: Bitmap? = null
+
     private val erasePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_OUT)
     }
@@ -921,10 +939,41 @@ class VectorTextClock(context: Context) : TextClock(context) {
     }
 
     fun reloadDepthMask() {
-        if (!isDepthEnabled) {
-            depthMaskBitmap = null
-            return
+        val oldMask = depthMaskBitmap
+        depthMaskBitmap = null
+        oldMask?.takeIf { !it.isRecycled }?.recycle()
+
+        val oldRaw = rawDepthBitmap
+        rawDepthBitmap = null
+        oldRaw?.takeIf { !it.isRecycled }?.recycle()
+        
+        if (gravityEnabled) {
+            try {
+                val depthUri = Uri.parse("content://com.android.CaveArt.settings/raw_depth")
+                context.contentResolver.openInputStream(depthUri)?.use { stream ->
+                    rawDepthBitmap = BitmapFactory.decodeStream(stream)
+                }
+            } catch (_: Exception) {}
+            
+            if (rawDepthBitmap == null) {
+                val candidateDepthPaths = listOf(
+                    "/data/user_de/0/com.android.CaveArt/files/lock_raw_depth.png",
+                    "/data/user_de/0/com.android.CaveArt/no_backup/lock_raw_depth.png",
+                    "/data/data/com.android.CaveArt/files/lock_raw_depth.png"
+                )
+                for (path in candidateDepthPaths) {
+                    val file = File(path)
+                    if (file.exists() && file.length() > 0) {
+                        try {
+                            rawDepthBitmap = BitmapFactory.decodeFile(file.absolutePath)
+                            if (rawDepthBitmap != null) break
+                        } catch (_: Exception) {}
+                    }
+                }
+            }
         }
+        
+        if (!isDepthEnabled) return
 
         try {
             val uri = Uri.parse("content://com.android.CaveArt.settings/depth_mask")
@@ -970,6 +1019,9 @@ class VectorTextClock(context: Context) : TextClock(context) {
         isDepthEnabled = getSettingInt(context, "clock_depth_enabled", 1) == 1
         layerOrder = getSettingInt(context, "clock_layer_order", 1)
         depthOcclusionLimit = getSettingFloat(context, "clock_depth_occlusion", 0.45f)
+        
+        gravityEnabled = getSettingInt(context, "clock_gravity", 0) == 1
+        gravityIntensity = getSettingFloat(context, "clock_gravity_intensity", 1.0f)
 
         reloadTypeface()
         reloadDepthMask()
@@ -1017,7 +1069,7 @@ class VectorTextClock(context: Context) : TextClock(context) {
 
         val targetTranslationY = targetYPx - userY
         translationY = targetTranslationY * notificationProgress
-        
+
         val targetHourSizeDp = if (hourSizeDp > 85f) 85f else hourSizeDp
         val targetMinSizeDp = if (minuteSizeDp > 72f) 72f else minuteSizeDp
         val currentHourSizeDp = hourSizeDp + (targetHourSizeDp - hourSizeDp) * notificationProgress
@@ -1090,7 +1142,7 @@ class VectorTextClock(context: Context) : TextClock(context) {
         val layoutProgress = preferredLayoutProgress * (1f - notificationProgress)
 
         val totalWidth = AdaptiveClockHelper.measureClockWidth(timeString, hPx, mPx, customTypeface, layoutProgress)
-        
+
         val strokePadding = (strokeW * resources.displayMetrics.density) + (10f * resources.displayMetrics.density)
         val startX = (width - totalWidth) / 2f
         val startY = strokePadding
@@ -1117,6 +1169,36 @@ class VectorTextClock(context: Context) : TextClock(context) {
             strokeWidth = strokeW,
             stretchProgress = 1f - notificationProgress
         )
+        
+        if (gravityEnabled && rawDepthBitmap != null && !rawDepthBitmap!!.isRecycled) {
+            val rawBounds = RectF()
+            val tempPath = Path().apply {
+                addPath(paths.hours)
+                addPath(paths.colon)
+                addPath(paths.mins)
+                computeBounds(rawBounds, true)
+            }
+            
+            val screenBounds = RectF(
+                rawBounds.left + trueAbsoluteX,
+                rawBounds.top + trueAbsoluteY,
+                rawBounds.right + trueAbsoluteX,
+                rawBounds.bottom + trueAbsoluteY
+            )
+
+            val perspective = PerspectiveFitHelper.calculateAutoPerspective(
+                rawDepthMap = rawDepthBitmap,
+                clockRect = rawBounds,
+                sampleRectOnScreen = screenBounds,
+                screenW = CaveArtXposedModule.screenW,
+                screenH = CaveArtXposedModule.screenH,
+                intensity = gravityIntensity
+            )
+
+            paths.hours.transform(perspective.transformMatrix)
+            paths.colon.transform(perspective.transformMatrix)
+            paths.mins.transform(perspective.transformMatrix)
+        }
 
         val combinedClockPath = Path().apply {
             addPath(paths.hours)
@@ -1141,7 +1223,7 @@ class VectorTextClock(context: Context) : TextClock(context) {
                 isOcclusionAcceptable = false
             }
         }
-        
+
         val shouldApplyDepth = isDepthEnabled &&
                 layerOrder == 1 &&
                 isOcclusionAcceptable &&
@@ -1151,14 +1233,14 @@ class VectorTextClock(context: Context) : TextClock(context) {
 
         if (shouldApplyDepth) {
             val layerId = canvas.saveLayer(0f, 0f, width.toFloat(), height.toFloat(), null)
-            
+
             penPaint.color = if (dualToneEnabled) Color.WHITE else clockColor
             canvas.drawPath(paths.hours, penPaint)
             canvas.drawPath(paths.colon, penPaint)
 
             penPaint.color = clockColor
             canvas.drawPath(paths.mins, penPaint)
-            
+
             val mask = depthMaskBitmap!!
             val sW = CaveArtXposedModule.screenW
             val sH = CaveArtXposedModule.screenH

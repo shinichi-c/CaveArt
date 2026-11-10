@@ -66,6 +66,7 @@ class CaveArtSettingsProvider : ContentProvider() {
         } else baseContext
 
         val segment = uri.lastPathSegment
+        
         if (segment == "depth_mask" || segment == "boot_cutout.png" || segment == "lock_depth_mask.png") {
             val candidateFiles = listOf(
                 File(safeContext.filesDir, "lock_depth_mask.png"),
@@ -78,7 +79,20 @@ class CaveArtSettingsProvider : ContentProvider() {
                 }
             }
         }
-        throw FileNotFoundException("Depth mask file not available for URI: $uri")
+        
+        if (segment == "raw_depth" || segment == "lock_raw_depth.png") {
+            val candidateFiles = listOf(
+                File(safeContext.filesDir, "lock_raw_depth.png"),
+                File(safeContext.noBackupFilesDir, "lock_raw_depth.png")
+            )
+            for (file in candidateFiles) {
+                if (file.exists() && file.length() > 0) {
+                    return ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+                }
+            }
+        }
+
+        throw FileNotFoundException("File not available for URI: $uri")
     }
 
     override fun query(
@@ -118,7 +132,7 @@ class CaveArtSettingsProvider : ContentProvider() {
             "udfps_x" -> cursor.addRow(arrayOf(prefs.getFloat("udfps_x", -1f)))
             "udfps_y" -> cursor.addRow(arrayOf(prefs.getFloat("udfps_y", -1f)))
             "udfps_radius" -> cursor.addRow(arrayOf(prefs.getFloat("udfps_radius", 0f)))
-            
+
             "clock_depth_enabled" -> cursor.addRow(arrayOf(if (prefs.getBoolean("clock_depth_enabled", true)) 1 else 0))
             "clock_layer_order" -> cursor.addRow(arrayOf(prefs.getInt("clock_layer_order", 1)))
             "clock_depth_occlusion" -> cursor.addRow(arrayOf(prefs.getFloat("clock_depth_occlusion", 0.45f)))
@@ -127,6 +141,9 @@ class CaveArtSettingsProvider : ContentProvider() {
             "layer_subject_opacity" -> cursor.addRow(arrayOf(prefs.getFloat("layer_subject_opacity", 1.0f)))
             "layer_bg_opacity" -> cursor.addRow(arrayOf(prefs.getFloat("layer_bg_opacity", 1.0f)))
             "telemetry_zoom" -> cursor.addRow(arrayOf(prefs.getFloat("telemetry_zoom", 1.10f)))
+            
+            "clock_gravity" -> cursor.addRow(arrayOf(if (prefs.getBoolean("clock_gravity", false)) 1 else 0))
+            "clock_gravity_intensity" -> cursor.addRow(arrayOf(prefs.getFloat("clock_gravity_intensity", 1.0f)))
         }
         return cursor
     }

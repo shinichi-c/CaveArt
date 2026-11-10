@@ -10,7 +10,8 @@ enum class ActiveLayerTab(val label: String) {
     ALL("All"),
     BACKGROUND("Background"),
     CLOCK("Clock"),
-    SUBJECT("Subject")
+    SUBJECT("Subject"),
+    DEPTH("Depth Vision")
 }
 
 enum class ContextualToolType {
@@ -59,6 +60,9 @@ class ClockStudioState(viewModel: WallpaperViewModel) {
     val dateAttached: MutableState<Boolean> = mutableStateOf(viewModel.isDateAttached)
     val clockFont: MutableState<String> = mutableStateOf(viewModel.clockFont)
     val dateSize: MutableFloatState = mutableFloatStateOf((viewModel.clockHourSize * 0.24f).coerceIn(14f, 34f))
+    val gravityEnabled: MutableState<Boolean> = mutableStateOf(viewModel.isClockGravityEnabled)
+    val gravityIntensity: MutableFloatState = mutableFloatStateOf(viewModel.clockGravityIntensity)
+    val gravityMode: MutableState<GravityMode> = mutableStateOf(GravityMode.SURFACE_PLANE)
 
     val udfpsX: MutableFloatState = mutableFloatStateOf(-1f)
     val udfpsY: MutableFloatState = mutableFloatStateOf(-1f)
@@ -93,6 +97,13 @@ fun saveAndBroadcastClockSettings(
     viewModel.updateLockscreenClockPosition(context, state.clockX.floatValue, state.clockY.floatValue)
     viewModel.updateLockscreenDatePosition(context, state.dateX.floatValue, state.dateY.floatValue)
     viewModel.toggleClockStretch(context, state.stretchEnabled.value, previewMask, realW, realH)
+    
+    val activeRawDepth = state.layerStack.depthVisionLayer.rawDepthMap
+    if (activeRawDepth != null && !activeRawDepth.isRecycled) {
+        viewModel.saveRawDepthToDisk(context, activeRawDepth)
+    }
+    
+    viewModel.updateClockGravity(context, state.gravityEnabled.value, state.gravityIntensity.floatValue)
 
     viewModel.saveLayerStackSettings(context, state.layerStack)
 }
