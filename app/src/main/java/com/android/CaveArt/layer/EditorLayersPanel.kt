@@ -16,7 +16,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
@@ -68,7 +67,7 @@ fun EditorLayersPanel(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "Layers",
+                    text = "Spatial Layers",
                     style = MaterialTheme.typography.titleMedium.copy(
                         fontWeight = FontWeight.Black,
                         fontSize = 18.sp
@@ -77,7 +76,7 @@ fun EditorLayersPanel(
                 )
             }
 
-            val layersReversed = remember(layerStack, layerStack.clockLayer.zIndex, layerStack.subjectLayer.zIndex) {
+            val layersReversed = remember(layerStack, layerStack.clockLayer.zIndex, layerStack.subjectLayer.zIndex, layerStack.depthVisionLayer.isVisible) {
                 layerStack.getOrderedLayers()
                     .filter { it.type != LayerType.BASE_PHOTO }
                     .reversed()
@@ -87,16 +86,20 @@ fun EditorLayersPanel(
                 layersReversed.forEach { layer ->
                     val isSelected = (layer.type == LayerType.CLOCK && activeLayerTab == ActiveLayerTab.CLOCK) ||
                             (layer.type == LayerType.BACKGROUND && activeLayerTab == ActiveLayerTab.BACKGROUND) ||
-                            (layer.type == LayerType.SUBJECT && activeLayerTab == ActiveLayerTab.SUBJECT)
+                            (layer.type == LayerType.SUBJECT && activeLayerTab == ActiveLayerTab.SUBJECT) ||
+                            (layer.id == layerStack.depthVisionLayer.id && activeLayerTab == ActiveLayerTab.DEPTH)
 
-                    val badgeText = when (layer.type) {
-                        LayerType.SUBJECT -> if (layerStack.isDepthEnabled) "Foreground" else null
-                        LayerType.CLOCK -> if (layerStack.isDepthEnabled) "Behind Subject" else "In Front"
+                    val badgeText = when (layer.id) {
+                        layerStack.subjectLayer.id -> if (layerStack.isDepthEnabled) "Foreground" else null
+                        layerStack.clockLayer.id -> if (layerStack.isDepthEnabled) "Behind Subject" else "In Front"
+                        layerStack.depthVisionLayer.id -> "518x518 DA3 Geometry"
                         else -> null
                     }
-                    val thumbnail = when (layer.type) {
-                        LayerType.SUBJECT -> previewMask ?: previewOriginal
-                        LayerType.BACKGROUND -> previewOriginal
+
+                    val thumbnail = when (layer.id) {
+                        layerStack.subjectLayer.id -> previewMask ?: previewOriginal
+                        layerStack.backgroundLayer.id -> previewOriginal
+                        layerStack.depthVisionLayer.id -> layerStack.depthVisionLayer.depthHeatMap
                         else -> null
                     }
 
@@ -105,17 +108,19 @@ fun EditorLayersPanel(
                         isSelected = isSelected,
                         badgeText = badgeText,
                         thumbnail = thumbnail,
-                        isMaskLayer = layer.type == LayerType.SUBJECT,
-                        isClockLayer = layer.type == LayerType.CLOCK,
+                        isMaskLayer = layer.id == layerStack.subjectLayer.id,
+                        isClockLayer = layer.id == layerStack.clockLayer.id,
+                        isDepthLayer = layer.id == layerStack.depthVisionLayer.id,
                         isVisible = layer.isVisible,
                         onVisibilityToggle = { layer.isVisible = !layer.isVisible },
                         onSelect = {
                             view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
                             layerStack.selectLayer(layer.id)
-                            when (layer.type) {
-                                LayerType.SUBJECT -> onSelectLayerTab(ActiveLayerTab.SUBJECT)
-                                LayerType.CLOCK -> onSelectLayerTab(ActiveLayerTab.CLOCK)
-                                LayerType.BACKGROUND -> onSelectLayerTab(ActiveLayerTab.BACKGROUND)
+                            when (layer.id) {
+                                layerStack.subjectLayer.id -> onSelectLayerTab(ActiveLayerTab.SUBJECT)
+                                layerStack.clockLayer.id -> onSelectLayerTab(ActiveLayerTab.CLOCK)
+                                layerStack.backgroundLayer.id -> onSelectLayerTab(ActiveLayerTab.BACKGROUND)
+                                layerStack.depthVisionLayer.id -> onSelectLayerTab(ActiveLayerTab.DEPTH)
                                 else -> {}
                             }
                             onDismiss()
@@ -135,6 +140,7 @@ private fun LayerCard(
     thumbnail: Bitmap?,
     isMaskLayer: Boolean = false,
     isClockLayer: Boolean = false,
+    isDepthLayer: Boolean = false,
     isVisible: Boolean,
     onVisibilityToggle: () -> Unit,
     onSelect: () -> Unit
@@ -165,7 +171,13 @@ private fun LayerCard(
                     modifier = Modifier
                         .size(40.dp)
                         .clip(RoundedCornerShape(8.dp))
-                        .background(if (isMaskLayer) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceContainerHighest),
+                        .background(
+                            when {
+                                isDepthLayer -> MaterialTheme.colorScheme.tertiary.copy(alpha = 0.2f)
+                                isMaskLayer -> MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                                else -> MaterialTheme.colorScheme.surfaceContainerHighest
+                            }
+                        ),
                     contentAlignment = Alignment.Center
                 ) {
                     if (thumbnail != null && !thumbnail.isRecycled) {
@@ -179,6 +191,13 @@ private fun LayerCard(
                             imageVector = Icons.Rounded.Schedule,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    } else if (isDepthLayer) {
+                        Icon(
+                            imageVector = Icons.Rounded.ViewInAr,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.tertiary,
                             modifier = Modifier.size(22.dp)
                         )
                     } else {
@@ -204,7 +223,7 @@ private fun LayerCard(
                         Text(
                             text = badgeText,
                             style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
-                            color = MaterialTheme.colorScheme.primary
+                            color = if (isDepthLayer) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary
                         )
                     }
                 }

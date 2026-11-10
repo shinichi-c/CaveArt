@@ -313,6 +313,8 @@ fun CompactClockOptionsStrip(
     onToggleDepth: () -> Unit,
     isAdaptive: Boolean,
     onToggleAdaptive: () -> Unit,
+    isGravity: Boolean,
+    onToggleGravity: () -> Unit,
     onAutoFit: () -> Unit
 ) {
     val view = LocalView.current
@@ -338,6 +340,29 @@ fun CompactClockOptionsStrip(
                 },
                 label = { Text(if (isVertical) "Vertical" else "Horizontal", fontSize = 12.sp, fontWeight = FontWeight.Bold) },
                 shape = CircleShape
+            )
+        }
+
+        item {
+            FilterChip(
+                selected = isGravity,
+                onClick = {
+                    view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                    onToggleGravity()
+                },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Rounded.Explore,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                },
+                label = { Text("Gravity 3D", fontSize = 12.sp, fontWeight = FontWeight.Bold) },
+                shape = CircleShape,
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                    selectedLabelColor = MaterialTheme.colorScheme.onTertiaryContainer
+                )
             )
         }
 

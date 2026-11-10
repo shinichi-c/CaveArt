@@ -151,6 +151,16 @@ fun ClockStudio(
                     formatDisplay = { String.format("%.1f", it) }
                 ),
                 LayerAction(
+                    id = "clock_gravity_intensity",
+                    label = "Gravity Slant",
+                    icon = Icons.Rounded.Explore,
+                    toolType = ContextualToolType.SLIDER,
+                    getVal = { state.gravityIntensity.floatValue },
+                    setVal = { state.gravityIntensity.floatValue = it },
+                    range = 0.2f..2.5f,
+                    formatDisplay = { String.format("%.1fx", it) }
+                ),
+                LayerAction(
                     id = "clock_font",
                     label = "Typography",
                     icon = Icons.Rounded.Title,
@@ -178,6 +188,31 @@ fun ClockStudio(
                     getVal = { state.layerStack.subjectLayer.opacity },
                     setVal = { state.layerStack.subjectLayer.opacity = it },
                     range = 0.10f..1.0f,
+                    formatDisplay = { "${(it * 100).toInt()}%" }
+                )
+            )
+            ActiveLayerTab.DEPTH -> listOf(
+                LayerAction(
+                    id = "depth_opacity",
+                    label = "Heatmap Opacity",
+                    icon = Icons.Rounded.Visibility,
+                    toolType = ContextualToolType.SLIDER,
+                    getVal = { state.layerStack.depthVisionLayer.opacity },
+                    setVal = {
+                        state.layerStack.depthVisionLayer.opacity = it
+                        state.layerStack.depthVisionLayer.isVisible = it > 0.05f
+                    },
+                    range = 0.0f..1.0f,
+                    formatDisplay = { "${(it * 100).toInt()}%" }
+                ),
+                LayerAction(
+                    id = "depth_occlusion",
+                    label = "Occlusion Threshold",
+                    icon = Icons.Rounded.Layers,
+                    toolType = ContextualToolType.SLIDER,
+                    getVal = { state.layerStack.depthOcclusionLimit },
+                    setVal = { state.layerStack.depthOcclusionLimit = it },
+                    range = 0.10f..0.85f,
                     formatDisplay = { "${(it * 100).toInt()}%" }
                 )
             )
@@ -253,12 +288,21 @@ fun ClockStudio(
         }
         onDispose { try { context.unregisterReceiver(receiver) } catch (_: Exception) {} }
     }
-    
+
     LaunchedEffect(wallpaper.id) {
         isMlLoading = true
         val components = viewModel.getHighQualityComponents(context, wallpaper)
         previewOriginal = components.first
         previewMask = components.second ?: viewModel.getMaskForClock(context, wallpaper)
+        
+        scope.launch(Dispatchers.IO) {
+            val depthResult = viewModel.getOrGenerateDepth(context, wallpaper)
+            withContext(Dispatchers.Main) {
+                state.layerStack.depthVisionLayer.depthHeatMap = depthResult?.heatMapBitmap
+                state.layerStack.depthVisionLayer.rawDepthMap = depthResult?.rawDepthMap
+            }
+        }
+
         isMlLoading = false
     }
 
@@ -365,6 +409,24 @@ fun ClockStudio(
                         IconButton(
                             onClick = {
                                 view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                                val willBeVisible = !state.layerStack.depthVisionLayer.isVisible
+                                state.layerStack.depthVisionLayer.isVisible = willBeVisible
+                                if (willBeVisible) {
+                                    state.layerStack.depthVisionLayer.opacity = 1.0f
+                                    activeLayerTab = ActiveLayerTab.DEPTH
+                                }
+                            }
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.ViewInAr,
+                                contentDescription = "Toggle 3D Depth Vision",
+                                tint = if (state.layerStack.depthVisionLayer.isVisible) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        IconButton(
+                            onClick = {
+                                view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
                                 state.layerStack.isMaskInspectorActive = !state.layerStack.isMaskInspectorActive
                             }
                         ) {
@@ -386,7 +448,6 @@ fun ClockStudio(
                             .navigationBarsPadding()
                             .padding(top = 8.dp, bottom = 12.dp)
                     ) {
-                        
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -445,6 +506,10 @@ fun ClockStudio(
                                             },
                                             isAdaptive = state.stretchEnabled.value,
                                             onToggleAdaptive = { state.stretchEnabled.value = !state.stretchEnabled.value },
+                                            isGravity = state.gravityEnabled.value,
+                                            onToggleGravity = {
+                                                state.gravityEnabled.value = !state.gravityEnabled.value
+                                            },
                                             onAutoFit = {
                                                 val mask = previewMask
                                                 if (mask != null) scope.launch(Dispatchers.Default) {
@@ -469,7 +534,7 @@ fun ClockStudio(
                         }
 
                         Spacer(Modifier.height(10.dp))
-                        
+
                         Surface(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -502,7 +567,7 @@ fun ClockStudio(
                                             }
                                     ) {
                                         Row(
-                                            modifier = Modifier.padding(horizontal = 16.dp),
+                                            modifier = Modifier.padding(horizontal = 18.dp),
                                             verticalAlignment = Alignment.CenterVertically,
                                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                                         ) {
@@ -532,7 +597,7 @@ fun ClockStudio(
                                             }
                                     ) {
                                         Row(
-                                            modifier = Modifier.padding(horizontal = 16.dp),
+                                            modifier = Modifier.padding(horizontal = 18.dp),
                                             verticalAlignment = Alignment.CenterVertically,
                                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                                         ) {

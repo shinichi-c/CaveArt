@@ -148,7 +148,7 @@ fun ClockStudioPreviewCard(
         } else {
             state.clockX.floatValue = 0f
         }
-        
+
         datePaint.textSize = state.dateSize.floatValue * densityVal
         val sampleDate = if (dateText.isNotEmpty()) dateText else "Wednesday, 14 October"
         val dateWidthDp = datePaint.measureText(sampleDate) / densityVal
@@ -225,15 +225,17 @@ fun ClockStudioPreviewCard(
                 }
 
                 val safeClampedY = targetY.coerceIn(minSafeYDp, maxDateSafeYDp)
-                datePhysicsSpringY.snapTo(state.dateY.floatValue)
-                datePhysicsSpringY.animateTo(
-                    targetValue = safeClampedY,
-                    animationSpec = spring(
-                        dampingRatio = Spring.DampingRatioMediumBouncy,
-                        stiffness = Spring.StiffnessLow
-                    )
-                ) {
-                    state.dateY.floatValue = value
+                if (abs(datePhysicsSpringY.targetValue - safeClampedY) > 1.5f) {
+                    datePhysicsSpringY.snapTo(state.dateY.floatValue)
+                    datePhysicsSpringY.animateTo(
+                        targetValue = safeClampedY,
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioMediumBouncy,
+                            stiffness = Spring.StiffnessLow
+                        )
+                    ) {
+                        state.dateY.floatValue = value
+                    }
                 }
             }
         }
@@ -286,7 +288,7 @@ fun ClockStudioPreviewCard(
                         val halfDateWDp = dateWidthDp / 2f
                         val minSafeDateX = -halfScreenDp + halfDateWDp + sideSafeMarginDp
                         val maxSafeDateX = halfScreenDp - halfDateWDp - sideSafeMarginDp
-                        
+
                         val hPx = state.hourSize.floatValue * densityVal
                         val mPx = state.minSize.floatValue * densityVal
                         val isVert = state.clockLayout.intValue == 1
@@ -437,6 +439,31 @@ fun ClockStudioPreviewCard(
                                         strokeWidth = state.strokeWidth.floatValue,
                                         stretchProgress = 1f
                                     )
+                                    
+                                    if (state.gravityEnabled.value) {
+                                        val rawDepth = state.layerStack.depthVisionLayer.rawDepthMap
+                                        val rawBounds = RectF()
+                                        val tempPath = Path().apply {
+                                            addPath(paths.hours)
+                                            addPath(paths.colon)
+                                            addPath(paths.mins)
+                                            computeBounds(rawBounds, true)
+                                        }
+
+                                        val perspective = PerspectiveFitHelper.calculateAutoPerspective(
+                                            rawDepthMap = rawDepth,
+                                            clockRect = rawBounds,
+                                            sampleRectOnScreen = rawBounds,
+                                            screenW = realW,
+                                            screenH = realH,
+                                            intensity = state.gravityIntensity.floatValue,
+                                            mode = state.gravityMode.value
+                                        )
+
+                                        paths.hours.transform(perspective.transformMatrix)
+                                        paths.colon.transform(perspective.transformMatrix)
+                                        paths.mins.transform(perspective.transformMatrix)
+                                    }
 
                                     combinedClockPath.rewind()
                                     combinedClockPath.addPath(paths.hours)
