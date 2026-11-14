@@ -7,6 +7,7 @@ import android.os.Build
 import android.view.HapticFeedbackConstants
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.BorderStroke
@@ -17,6 +18,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -30,7 +32,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -62,7 +63,7 @@ fun clockIconToImageVector(icon: ClockIcon): ImageVector = when (icon) {
     ClockIcon.FONT -> Icons.Rounded.Title
     ClockIcon.COLOR -> Icons.Rounded.Palette
     ClockIcon.LAYOUT -> Icons.Rounded.DashboardCustomize
-    ClockIcon.OPTIONS -> Icons.Rounded.DashboardCustomize
+    ClockIcon.OPTIONS -> Icons.Rounded.Tune
     ClockIcon.DEPTH -> Icons.Rounded.Layers
     ClockIcon.DATE -> Icons.Rounded.Schedule
     ClockIcon.DIAL -> Icons.Rounded.Schedule
@@ -80,11 +81,9 @@ fun VerticalLayerActionSwitcher(
     val view = LocalView.current
     var dragAccumulator by remember { mutableFloatStateOf(0f) }
 
-    Surface(
+    Column(
         modifier = modifier
-            .wrapContentWidth()
-            .shadow(12.dp, CircleShape)
-            .clip(CircleShape)
+            .wrapContentSize()
             .pointerInput(actions.size, selectedIndex) {
                 detectVerticalDragGestures(
                     onDragStart = { dragAccumulator = 0f },
@@ -104,122 +103,65 @@ fun VerticalLayerActionSwitcher(
                     }
                 )
             },
-        shape = CircleShape,
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.88f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Column(
-            modifier = Modifier.padding(vertical = 6.dp, horizontal = 5.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            actions.forEachIndexed { index, action ->
-                val isSelected = index == selectedIndex
-                val scale by animateFloatAsState(
-                    targetValue = if (isSelected) 1.05f else 0.88f,
-                    animationSpec = spring(stiffness = 500f, dampingRatio = 0.75f),
-                    label = "actionScale"
-                )
+        actions.forEachIndexed { index, action ->
+            val isSelected = index == selectedIndex
+            val scale by animateFloatAsState(
+                targetValue = if (isSelected) 1.14f else 0.94f,
+                animationSpec = spring(stiffness = 500f, dampingRatio = 0.72f),
+                label = "actionIconScale"
+            )
+            val iconTint by animateColorAsState(
+                targetValue = if (isSelected) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.58f),
+                label = "actionIconTint"
+            )
+            val dotProgress by animateFloatAsState(
+                targetValue = if (isSelected) 1f else 0f,
+                animationSpec = spring(stiffness = 520f, dampingRatio = 0.7f),
+                label = "actionDotScale"
+            )
 
-                Box(
+            Column(
+                modifier = Modifier
+                    .size(width = 36.dp, height = 38.dp)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) {
+                        if (!isSelected) {
+                            view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                            onActionSelected(index)
+                        }
+                    },
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Icon(
+                    imageVector = action.icon,
+                    contentDescription = action.label,
+                    tint = iconTint,
                     modifier = Modifier
-                        .size(36.dp)
+                        .size(21.dp)
                         .graphicsLayer {
                             scaleX = scale
                             scaleY = scale
                         }
-                        .clip(CircleShape)
-                        .background(
-                            if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.9f)
-                            else Color.Transparent
-                        )
-                        .clickable {
-                            if (!isSelected) {
-                                view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                                onActionSelected(index)
-                            }
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = action.icon,
-                        contentDescription = action.label,
-                        tint = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(19.dp)
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun CompactStylePickerStrip(
-    styles: List<ClockStyle>,
-    selectedStyleId: String,
-    currentConfig: ClockKitConfig,
-    onStyleSelected: (ClockStyle) -> Unit
-) {
-    val context = LocalContext.current
-    val view = LocalView.current
-    val typeface = remember(currentConfig.font) {
-        ClockTypefaceResolver.resolve(context, currentConfig.font)
-    }
-
-    LazyRow(
-        modifier = Modifier.fillMaxSize(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        items(styles, key = { it.id }) { style ->
-            val isSelected = style.id == selectedStyleId
-            Surface(
-                modifier = Modifier
-                    .height(44.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .clickable {
-                        view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                        onStyleSelected(style)
-                    },
-                shape = RoundedCornerShape(14.dp),
-                color = if (isSelected) MaterialTheme.colorScheme.primaryContainer
-                        else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f),
-                border = if (isSelected) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(32.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(Color.Black.copy(alpha = 0.85f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Canvas(modifier = Modifier.fillMaxSize()) {
-                            drawIntoCanvas { c ->
-                                style.renderThumbnail(
-                                    context = context,
-                                    canvas = c.nativeCanvas,
-                                    bounds = RectF(0f, 0f, size.width, size.height),
-                                    config = currentConfig,
-                                    typeface = typeface
-                                )
-                            }
+                )
+                Spacer(Modifier.height(3.dp))
+                Box(
+                    modifier = Modifier
+                        .size(4.5.dp)
+                        .graphicsLayer {
+                            scaleX = dotProgress
+                            scaleY = dotProgress
+                            alpha = dotProgress
                         }
-                    }
-                    Text(
-                        text = style.name,
-                        style = MaterialTheme.typography.labelMedium.copy(
-                            fontWeight = if (isSelected) FontWeight.Black else FontWeight.Bold,
-                            fontSize = 13.sp
-                        ),
-                        color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer
-                                else MaterialTheme.colorScheme.onSurface
-                    )
-                }
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primary)
+                )
             }
         }
     }
