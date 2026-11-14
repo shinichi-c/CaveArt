@@ -15,6 +15,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
@@ -75,15 +76,23 @@ fun ClockStudio(
     var activeLayerTab by remember { mutableStateOf(ActiveLayerTab.CLOCK) }
     var activeActionIndex by remember { mutableIntStateOf(0) }
 
+    val styles = ClockKitEngine.styles
     val activeStyle = remember(state.clockKitConfig.styleId) {
         ClockKitEngine.getStyle(state.clockKitConfig.styleId)
     }
 
-    var focusedCarouselIndex by remember(activeStyle.id) {
-        mutableIntStateOf(ClockKitEngine.styles.indexOfFirst { it.id == activeStyle.id }.coerceAtLeast(0))
-    }
-    var focusedCarouselStyle by remember(activeStyle.id) {
-        mutableStateOf(activeStyle)
+    val stylePagerState = rememberPagerState(
+        initialPage = styles.indexOfFirst { it.id == activeStyle.id }.coerceAtLeast(0),
+        pageCount = { styles.size }
+    )
+
+    LaunchedEffect(isStyleBrowseMode) {
+        if (isStyleBrowseMode) {
+            val targetIdx = styles.indexOfFirst { it.id == state.clockKitConfig.styleId }.coerceAtLeast(0)
+            if (stylePagerState.currentPage != targetIdx) {
+                stylePagerState.scrollToPage(targetIdx)
+            }
+        }
     }
 
     BackHandler(enabled = isStyleBrowseMode) {
@@ -437,12 +446,26 @@ fun ClockStudio(
         Scaffold(
             containerColor = Color.Transparent,
             topBar = {
+                val topBarTitle = if (isStyleBrowseMode) {
+                    styles.getOrNull(stylePagerState.currentPage)?.name ?: activeStyle.name
+                } else {
+                    "Lock Screen"
+                }
+
                 CenterAlignedTopAppBar(
                     title = {
-                        Text(
-                            text = if (isStyleBrowseMode) "Choose Style" else "Lock Screen",
-                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Black)
-                        )
+                        AnimatedContent(
+                            targetState = topBarTitle,
+                            transitionSpec = {
+                                fadeIn(tween(180)) togetherWith fadeOut(tween(140))
+                            },
+                            label = "topBarStyleTitle"
+                        ) { title ->
+                            Text(
+                                text = title,
+                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Black)
+                            )
+                        }
                     },
                     navigationIcon = {
                         IconButton(onClick = {
@@ -503,7 +526,7 @@ fun ClockStudio(
                                 .padding(horizontal = 18.dp),
                             contentAlignment = Alignment.Center
                         ) {
-                            val slotKey: Any = if (isStyleBrowseMode) "STYLE_BROWSE" else activeAction.toolType
+                            val slotKey: Any = if (isStyleBrowseMode) "STYLE_FAST_SCROLL" else activeAction.toolType
                             AnimatedContent(
                                 targetState = slotKey,
                                 transitionSpec = {
@@ -512,11 +535,20 @@ fun ClockStudio(
                                 },
                                 label = "dynamicToolSlot"
                             ) { key ->
-                                if (key == "STYLE_BROWSE") {
-                                    MinimalStyleBrowseFooter(
-                                        style = focusedCarouselStyle,
-                                        currentIndex = focusedCarouselIndex,
-                                        totalCount = ClockKitEngine.styles.size
+                                if (key == "STYLE_FAST_SCROLL") {
+                                    FastScrollIndicator(
+                                        pagerState = stylePagerState,
+                                        onDragStartHaptics = {
+                                            if (viewModel.isHapticsEnabled) {
+                                                view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                                            }
+                                        },
+                                        onPageChangeHaptics = {
+                                            if (viewModel.isHapticsEnabled) {
+                                                view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                                            }
+                                        },
+                                        viewModel = viewModel
                                     )
                                 } else {
                                     when (key as ContextualToolType) {
@@ -791,6 +823,7 @@ fun ClockStudio(
                     ) { browsingStyles ->
                         if (browsingStyles) {
                             ClockStyleCarousel(
+                                pagerState = stylePagerState,
                                 currentConfig = state.clockKitConfig,
                                 displayGeometry = displayGeometry,
                                 previewOriginal = previewOriginal,
@@ -809,10 +842,6 @@ fun ClockStudio(
                                     state.updateConfig { it.copy(styleId = chosen.id) }
                                     activeLayerTab = ActiveLayerTab.CLOCK
                                     isStyleBrowseMode = false
-                                },
-                                onFocusedPageChanged = { idx, style ->
-                                    focusedCarouselIndex = idx
-                                    focusedCarouselStyle = style
                                 }
                             )
                         } else {
