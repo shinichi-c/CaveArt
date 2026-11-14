@@ -62,9 +62,6 @@ fun ClockStudioPreviewCard(
     customTypeface: Typeface,
     collisionMapArray: FloatArray?,
     focusedLayerType: LayerType?,
-    currentLayerActions: List<LayerAction>,
-    activeActionIndex: Int,
-    onActionSelected: (Int) -> Unit,
     sharedElementModifier: Modifier = Modifier,
     onDateClick: () -> Unit,
     onClockClick: () -> Unit
@@ -607,17 +604,6 @@ fun ClockStudioPreviewCard(
                                 )
                             )
                         }
-                    }
-
-                    if (currentLayerActions.size > 1) {
-                        VerticalLayerActionSwitcher(
-                            actions = currentLayerActions,
-                            selectedIndex = activeActionIndex,
-                            onActionSelected = onActionSelected,
-                            modifier = Modifier
-                                .align(Alignment.CenterStart)
-                                .padding(start = 12.dp)
-                        )
                     }
                 }
             }

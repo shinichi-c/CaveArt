@@ -752,74 +752,110 @@ fun ClockStudio(
                 }
             }
         ) { padding ->
-            Box(
+            BoxWithConstraints(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(padding)
-                    .padding(
-                        top = 4.dp,
-                        bottom = 14.dp,
-                        start = if (isStyleBrowseMode) 0.dp else 20.dp,
-                        end = if (isStyleBrowseMode) 0.dp else 20.dp
-                    ),
+                    .padding(top = 4.dp, bottom = 14.dp),
                 contentAlignment = Alignment.Center
             ) {
-                AnimatedContent(
-                    targetState = isStyleBrowseMode && !isMlLoading,
-                    transitionSpec = {
-                        (fadeIn(tween(220)) + scaleIn(initialScale = 0.94f, animationSpec = tween(240))) togetherWith
-                        (fadeOut(tween(160)) + scaleOut(targetScale = 0.94f, animationSpec = tween(180)))
-                    },
-                    label = "previewCarouselSwitch"
-                ) { browsingStyles ->
-                    if (browsingStyles) {
-                        ClockStyleCarousel(
-                            currentConfig = state.clockKitConfig,
-                            displayGeometry = displayGeometry,
-                            previewOriginal = previewOriginal,
-                            previewMask = previewMask,
-                            rawDepthMap = state.layerStack.depthVisionLayer.rawDepthMap,
-                            liveWallpaperZoom = state.liveWallpaperZoom.floatValue,
-                            dateSizeDp = state.dateSize.floatValue,
-                            timeString = timeString,
-                            dateText = dateText,
-                            customTypeface = customTypeface,
-                            collisionMapArray = collisionMapArray,
-                            onStyleChanged = { settled ->
-                                state.updateConfig { it.copy(styleId = settled.id) }
-                            },
-                            onConfirmAndExit = { chosen ->
-                                state.updateConfig { it.copy(styleId = chosen.id) }
-                                activeLayerTab = ActiveLayerTab.CLOCK
-                                isStyleBrowseMode = false
-                            },
-                            onFocusedPageChanged = { idx, style ->
-                                focusedCarouselIndex = idx
-                                focusedCarouselStyle = style
+                val showLeftTools = !isStyleBrowseMode && !isMlLoading && currentLayerActions.size > 1
+                val naturalCardW = maxHeight * displayGeometry.aspectRatio
+                val leftFreeSpace = (maxWidth - naturalCardW) / 2f
+                val hasRoomCentered = leftFreeSpace >= 46.dp
+
+                val previewPadStart = when {
+                    isStyleBrowseMode -> 0.dp
+                    showLeftTools && !hasRoomCentered -> 48.dp
+                    else -> 20.dp
+                }
+                val previewPadEnd = when {
+                    isStyleBrowseMode -> 0.dp
+                    showLeftTools && !hasRoomCentered -> 12.dp
+                    else -> 20.dp
+                }
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(start = previewPadStart, end = previewPadEnd),
+                    contentAlignment = Alignment.Center
+                ) {
+                    AnimatedContent(
+                        targetState = isStyleBrowseMode && !isMlLoading,
+                        transitionSpec = {
+                            (fadeIn(tween(220)) + scaleIn(initialScale = 0.94f, animationSpec = tween(240))) togetherWith
+                            (fadeOut(tween(160)) + scaleOut(targetScale = 0.94f, animationSpec = tween(180)))
+                        },
+                        label = "previewCarouselSwitch"
+                    ) { browsingStyles ->
+                        if (browsingStyles) {
+                            ClockStyleCarousel(
+                                currentConfig = state.clockKitConfig,
+                                displayGeometry = displayGeometry,
+                                previewOriginal = previewOriginal,
+                                previewMask = previewMask,
+                                rawDepthMap = state.layerStack.depthVisionLayer.rawDepthMap,
+                                liveWallpaperZoom = state.liveWallpaperZoom.floatValue,
+                                dateSizeDp = state.dateSize.floatValue,
+                                timeString = timeString,
+                                dateText = dateText,
+                                customTypeface = customTypeface,
+                                collisionMapArray = collisionMapArray,
+                                onStyleChanged = { settled ->
+                                    state.updateConfig { it.copy(styleId = settled.id) }
+                                },
+                                onConfirmAndExit = { chosen ->
+                                    state.updateConfig { it.copy(styleId = chosen.id) }
+                                    activeLayerTab = ActiveLayerTab.CLOCK
+                                    isStyleBrowseMode = false
+                                },
+                                onFocusedPageChanged = { idx, style ->
+                                    focusedCarouselIndex = idx
+                                    focusedCarouselStyle = style
+                                }
+                            )
+                        } else {
+                            ClockStudioPreviewCard(
+                                state = state,
+                                wallpaper = wallpaper,
+                                viewModel = viewModel,
+                                isMlLoading = isMlLoading,
+                                displayGeometry = displayGeometry,
+                                previewOriginal = previewOriginal,
+                                previewMask = previewMask,
+                                timeString = timeString,
+                                dateText = dateText,
+                                customTypeface = customTypeface,
+                                collisionMapArray = collisionMapArray,
+                                focusedLayerType = focusedLayerType,
+                                sharedElementModifier = sharedElementModifier,
+                                onDateClick = { showDateCustomizeSheet = true },
+                                onClockClick = { activeLayerTab = ActiveLayerTab.CLOCK }
+                            )
+                        }
+                    }
+                }
+
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = showLeftTools,
+                    enter = fadeIn(tween(220)) + slideInHorizontally(initialOffsetX = { -it / 2 }),
+                    exit = fadeOut(tween(150)) + slideOutHorizontally(targetOffsetX = { -it / 2 }),
+                    modifier = Modifier
+                        .align(Alignment.CenterStart)
+                        .padding(
+                            start = if (hasRoomCentered) {
+                                ((leftFreeSpace - 36.dp) / 2f).coerceAtLeast(8.dp)
+                            } else {
+                                6.dp
                             }
                         )
-                    } else {
-                        ClockStudioPreviewCard(
-                            state = state,
-                            wallpaper = wallpaper,
-                            viewModel = viewModel,
-                            isMlLoading = isMlLoading,
-                            displayGeometry = displayGeometry,
-                            previewOriginal = previewOriginal,
-                            previewMask = previewMask,
-                            timeString = timeString,
-                            dateText = dateText,
-                            customTypeface = customTypeface,
-                            collisionMapArray = collisionMapArray,
-                            focusedLayerType = focusedLayerType,
-                            currentLayerActions = currentLayerActions,
-                            activeActionIndex = safeActionIndex,
-                            onActionSelected = { activeActionIndex = it },
-                            sharedElementModifier = sharedElementModifier,
-                            onDateClick = { showDateCustomizeSheet = true },
-                            onClockClick = { activeLayerTab = ActiveLayerTab.CLOCK }
-                        )
-                    }
+                ) {
+                    VerticalLayerActionSwitcher(
+                        actions = currentLayerActions,
+                        selectedIndex = safeActionIndex,
+                        onActionSelected = { activeActionIndex = it }
+                    )
                 }
             }
 
