@@ -1,6 +1,7 @@
 package com.android.CaveArt
 
 import android.content.Intent
+import android.graphics.RectF
 import android.graphics.Typeface
 import android.os.Build
 import android.view.HapticFeedbackConstants
@@ -35,8 +36,10 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -45,7 +48,27 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.android.CaveArt.clockkit.*
 import kotlin.math.abs
+
+fun clockIconToImageVector(icon: ClockIcon): ImageVector = when (icon) {
+    ClockIcon.STYLE -> Icons.Rounded.AutoAwesome
+    ClockIcon.SIZE -> Icons.Rounded.ZoomIn
+    ClockIcon.THICKNESS -> Icons.Rounded.LineWeight
+    ClockIcon.ROUNDNESS -> Icons.Rounded.RoundedCorner
+    ClockIcon.SPACING -> Icons.Rounded.SwapHoriz
+    ClockIcon.OPACITY -> Icons.Rounded.Opacity
+    ClockIcon.GRAVITY -> Icons.Rounded.Explore
+    ClockIcon.FONT -> Icons.Rounded.Title
+    ClockIcon.COLOR -> Icons.Rounded.Palette
+    ClockIcon.LAYOUT -> Icons.Rounded.DashboardCustomize
+    ClockIcon.OPTIONS -> Icons.Rounded.DashboardCustomize
+    ClockIcon.DEPTH -> Icons.Rounded.Layers
+    ClockIcon.DATE -> Icons.Rounded.Schedule
+    ClockIcon.DIAL -> Icons.Rounded.Schedule
+    ClockIcon.EFFECTS -> Icons.Rounded.AutoFixHigh
+    ClockIcon.TUNE -> Icons.Rounded.Tune
+}
 
 @Composable
 fun VerticalLayerActionSwitcher(
@@ -127,6 +150,239 @@ fun VerticalLayerActionSwitcher(
                 }
             }
         }
+    }
+}
+
+@Composable
+fun CompactStylePickerStrip(
+    styles: List<ClockStyle>,
+    selectedStyleId: String,
+    currentConfig: ClockKitConfig,
+    onStyleSelected: (ClockStyle) -> Unit
+) {
+    val context = LocalContext.current
+    val view = LocalView.current
+    val typeface = remember(currentConfig.font) {
+        ClockTypefaceResolver.resolve(context, currentConfig.font)
+    }
+
+    LazyRow(
+        modifier = Modifier.fillMaxSize(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        items(styles, key = { it.id }) { style ->
+            val isSelected = style.id == selectedStyleId
+            Surface(
+                modifier = Modifier
+                    .height(44.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .clickable {
+                        view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                        onStyleSelected(style)
+                    },
+                shape = RoundedCornerShape(14.dp),
+                color = if (isSelected) MaterialTheme.colorScheme.primaryContainer
+                        else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f),
+                border = if (isSelected) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color.Black.copy(alpha = 0.85f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Canvas(modifier = Modifier.fillMaxSize()) {
+                            drawIntoCanvas { c ->
+                                style.renderThumbnail(
+                                    context = context,
+                                    canvas = c.nativeCanvas,
+                                    bounds = RectF(0f, 0f, size.width, size.height),
+                                    config = currentConfig,
+                                    typeface = typeface
+                                )
+                            }
+                        }
+                    }
+                    Text(
+                        text = style.name,
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            fontWeight = if (isSelected) FontWeight.Black else FontWeight.Bold,
+                            fontSize = 13.sp
+                        ),
+                        color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer
+                                else MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun CompactChoiceStrip(
+    options: List<ClockControl.ChoiceOption>,
+    selectedKey: String,
+    onSelected: (String) -> Unit
+) {
+    val view = LocalView.current
+    LazyRow(
+        modifier = Modifier.fillMaxSize(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        items(options, key = { it.key }) { opt ->
+            FilterChip(
+                selected = opt.key == selectedKey,
+                onClick = {
+                    view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                    onSelected(opt.key)
+                },
+                leadingIcon = opt.icon?.let { ic ->
+                    {
+                        Icon(
+                            imageVector = clockIconToImageVector(ic),
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                },
+                label = { Text(opt.label, fontSize = 12.sp, fontWeight = FontWeight.Bold) },
+                shape = CircleShape
+            )
+        }
+    }
+}
+
+@Composable
+fun CompactQuickChipsStrip(
+    items: List<QuickChipItem>,
+    styleId: String,
+    config: ClockKitConfig,
+    onConfigChange: (ClockKitConfig) -> Unit,
+    onCustomAction: (String) -> Unit
+) {
+    val view = LocalView.current
+    LazyRow(
+        modifier = Modifier.fillMaxSize(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        items(items.size) { idx ->
+            when (val chip = items[idx]) {
+                is QuickChipItem.ToggleChip -> {
+                    val isChecked = when (chip.globalBinding) {
+                        "depth" -> config.isDepthEnabled
+                        "gravity" -> config.isGravityEnabled
+                        else -> config.getBool(styleId, chip.paramId, chip.defaultValue)
+                    }
+                    FilterChip(
+                        selected = isChecked,
+                        onClick = {
+                            view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                            val next = !isChecked
+                            val updated = when (chip.globalBinding) {
+                                "depth" -> config.copy(isDepthEnabled = next)
+                                "gravity" -> config.copy(isGravityEnabled = next)
+                                else -> config.withBool(styleId, chip.paramId, next)
+                            }
+                            onConfigChange(updated)
+                        },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = when (chip.globalBinding) {
+                                    "depth" -> Icons.Rounded.Layers
+                                    "gravity" -> Icons.Rounded.Explore
+                                    else -> clockIconToImageVector(chip.icon)
+                                },
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        },
+                        label = { Text(chip.label, fontSize = 12.sp, fontWeight = FontWeight.Bold) },
+                        shape = CircleShape
+                    )
+                }
+                is QuickChipItem.CycleChip -> {
+                    val currentKey = config.getString(styleId, chip.paramId, chip.defaultKey)
+                    val curIdx = chip.options.indexOfFirst { it.key == currentKey }.coerceAtLeast(0)
+                    val currentOpt = chip.options[curIdx]
+                    FilterChip(
+                        selected = curIdx > 0,
+                        onClick = {
+                            view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                            val nextOpt = chip.options[(curIdx + 1) % chip.options.size]
+                            onConfigChange(config.withString(styleId, chip.paramId, nextOpt.key))
+                        },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = if (currentOpt.key == "vertical") Icons.Rounded.SwapVert else Icons.Rounded.SwapHoriz,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        },
+                        label = { Text(currentOpt.label, fontSize = 12.sp, fontWeight = FontWeight.Bold) },
+                        shape = CircleShape
+                    )
+                }
+                is QuickChipItem.ActionChip -> {
+                    FilterChip(
+                        selected = false,
+                        onClick = {
+                            view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                            onCustomAction(chip.actionId)
+                        },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Rounded.AutoFixHigh,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        },
+                        label = { Text(chip.label, fontSize = 12.sp, fontWeight = FontWeight.Bold) },
+                        shape = CircleShape
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun CompactSingleToggleBar(
+    label: String,
+    icon: ImageVector,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    val view = LocalView.current
+    Row(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 6.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+            Text(label, style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold))
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = {
+                view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                onCheckedChange(it)
+            }
+        )
     }
 }
 
