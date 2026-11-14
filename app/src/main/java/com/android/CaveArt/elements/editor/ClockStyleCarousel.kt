@@ -4,36 +4,26 @@ import android.graphics.Bitmap
 import android.graphics.Paint
 import android.graphics.Typeface
 import android.view.HapticFeedbackConstants
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.spring
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.lerp
 import com.android.CaveArt.clockkit.*
 import com.android.CaveArt.layer.LayerCompositor
@@ -44,6 +34,7 @@ import kotlin.math.max
 
 @Composable
 fun ClockStyleCarousel(
+    pagerState: PagerState,
     currentConfig: ClockKitConfig,
     displayGeometry: NativeDisplayGeometry,
     previewOriginal: Bitmap?,
@@ -57,7 +48,6 @@ fun ClockStyleCarousel(
     collisionMapArray: FloatArray?,
     onStyleChanged: (ClockStyle) -> Unit,
     onConfirmAndExit: (ClockStyle) -> Unit,
-    onFocusedPageChanged: (Int, ClockStyle) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -65,22 +55,13 @@ fun ClockStyleCarousel(
     val scope = rememberCoroutineScope()
 
     val styles = ClockKitEngine.styles
-    val initialPage = remember(currentConfig.styleId) {
-        styles.indexOfFirst { it.id == currentConfig.styleId }.coerceAtLeast(0)
-    }
-    val pagerState = rememberPagerState(initialPage = initialPage, pageCount = { styles.size })
 
     LaunchedEffect(pagerState.settledPage) {
         val settled = styles[pagerState.settledPage]
-        onFocusedPageChanged(pagerState.settledPage, settled)
         if (settled.id != currentConfig.styleId) {
             view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
             onStyleChanged(settled)
         }
-    }
-
-    LaunchedEffect(pagerState.currentPage) {
-        onFocusedPageChanged(pagerState.currentPage, styles[pagerState.currentPage])
     }
 
     val realW = displayGeometry.widthPx
@@ -119,8 +100,9 @@ fun ClockStyleCarousel(
             val pageOffset = ((pagerState.currentPage - pageIndex) + pagerState.currentPageOffsetFraction)
                 .absoluteValue.coerceIn(0f, 1f)
             val scale = lerp(0.88f, 1f, 1f - pageOffset)
-            val alpha = lerp(0.42f, 1f, 1f - pageOffset)
+            val alpha = lerp(0.45f, 1f, 1f - pageOffset)
             val isCentered = pageIndex == pagerState.currentPage
+            val cardShape = RoundedCornerShape(cardCornerRadiusDp.dp)
 
             val cardConfig = remember(currentConfig, style.id) {
                 currentConfig.copy(styleId = style.id)
@@ -152,13 +134,14 @@ fun ClockStyleCarousel(
                         scaleX = scale
                         scaleY = scale
                         this.alpha = alpha
+                        this.shape = cardShape
+                        this.clip = true
                     }
-                    .shadow(
-                        elevation = if (isCentered) 24.dp else 6.dp,
-                        shape = RoundedCornerShape(cardCornerRadiusDp.dp)
-                    )
-                    .clip(RoundedCornerShape(cardCornerRadiusDp.dp))
-                    .clickable {
+                    .clip(cardShape)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) {
                         view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
                         if (isCentered) {
                             onConfirmAndExit(style)
@@ -166,8 +149,13 @@ fun ClockStyleCarousel(
                             scope.launch { pagerState.animateScrollToPage(pageIndex) }
                         }
                     },
-                shape = RoundedCornerShape(cardCornerRadiusDp.dp),
-                border = if (isCentered) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)) else null,
+                shape = cardShape,
+                elevation = CardDefaults.cardElevation(
+                    defaultElevation = 0.dp,
+                    pressedElevation = 0.dp,
+                    focusedElevation = 0.dp,
+                    hoveredElevation = 0.dp
+                ),
                 colors = CardDefaults.cardColors(containerColor = Color.Black)
             ) {
                 Canvas(modifier = Modifier.fillMaxSize()) {
@@ -274,57 +262,6 @@ fun ClockStyleCarousel(
                         nc.restore()
                     }
                 }
-            }
-        }
-    }
-}
-
-@Composable
-fun MinimalStyleBrowseFooter(
-    style: ClockStyle,
-    currentIndex: Int,
-    totalCount: Int,
-    modifier: Modifier = Modifier
-) {
-    Column(
-        modifier = modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text(
-            text = style.name,
-            style = MaterialTheme.typography.titleSmall.copy(
-                fontWeight = FontWeight.Black,
-                letterSpacing = 0.2.sp
-            ),
-            color = MaterialTheme.colorScheme.onSurface
-        )
-
-        Spacer(Modifier.height(6.dp))
-
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            repeat(totalCount) { idx ->
-                val isSelected = idx == currentIndex
-                val dotW by animateDpAsState(
-                    targetValue = if (isSelected) 18.dp else 6.dp,
-                    animationSpec = spring(stiffness = 500f, dampingRatio = 0.75f),
-                    label = "dotWidth"
-                )
-                val dotColor by animateColorAsState(
-                    targetValue = if (isSelected) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
-                    label = "dotColor"
-                )
-                Box(
-                    modifier = Modifier
-                        .height(5.dp)
-                        .width(dotW)
-                        .clip(CircleShape)
-                        .background(dotColor)
-                )
             }
         }
     }
