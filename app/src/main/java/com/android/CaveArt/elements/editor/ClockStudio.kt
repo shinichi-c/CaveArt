@@ -6,9 +6,9 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.res.Configuration
 import android.graphics.Bitmap
-import android.graphics.Typeface
 import android.os.Build
 import android.view.HapticFeedbackConstants
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -34,6 +34,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.android.CaveArt.clockkit.*
 import com.android.CaveArt.layer.LayerType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -67,20 +68,51 @@ fun ClockStudio(
     var isMlLoading by remember(wallpaper.id) { mutableStateOf(true) }
 
     var showDateCustomizeSheet by remember { mutableStateOf(false) }
+    var isStyleBrowseMode by remember { mutableStateOf(false) }
     var showLayersSheet by remember { mutableStateOf(false) }
     var showApplyOptions by remember { mutableStateOf(false) }
 
     var activeLayerTab by remember { mutableStateOf(ActiveLayerTab.CLOCK) }
     var activeActionIndex by remember { mutableIntStateOf(0) }
 
+    val activeStyle = remember(state.clockKitConfig.styleId) {
+        ClockKitEngine.getStyle(state.clockKitConfig.styleId)
+    }
+
+    var focusedCarouselIndex by remember(activeStyle.id) {
+        mutableIntStateOf(ClockKitEngine.styles.indexOfFirst { it.id == activeStyle.id }.coerceAtLeast(0))
+    }
+    var focusedCarouselStyle by remember(activeStyle.id) {
+        mutableStateOf(activeStyle)
+    }
+
+    BackHandler(enabled = isStyleBrowseMode) {
+        isStyleBrowseMode = false
+    }
+
     LaunchedEffect(activeLayerTab) {
         activeActionIndex = 0
     }
 
-    val minClockSizeDp = (realW * 0.08f) / densityVal
-    val maxClockSizeDp = (realW * 0.55f) / densityVal
+    LaunchedEffect(state.layerStack.isDepthEnabled, state.layerStack.depthOcclusionLimit) {
+        if (state.clockKitConfig.isDepthEnabled != state.layerStack.isDepthEnabled ||
+            state.clockKitConfig.depthOcclusionLimit != state.layerStack.depthOcclusionLimit
+        ) {
+            state.updateConfig {
+                it.copy(
+                    isDepthEnabled = state.layerStack.isDepthEnabled,
+                    depthOcclusionLimit = state.layerStack.depthOcclusionLimit
+                )
+            }
+        }
+    }
 
-    val currentLayerActions = remember(activeLayerTab, state, minClockSizeDp, maxClockSizeDp) {
+    val currentLayerActions = remember(
+        activeLayerTab,
+        activeStyle.id,
+        state.clockKitConfig.isGravityEnabled,
+        state
+    ) {
         when (activeLayerTab) {
             ActiveLayerTab.ALL -> listOf(
                 LayerAction(
@@ -89,7 +121,10 @@ fun ClockStudio(
                     icon = Icons.Rounded.Layers,
                     toolType = ContextualToolType.SLIDER,
                     getVal = { state.layerStack.depthOcclusionLimit },
-                    setVal = { state.layerStack.depthOcclusionLimit = it },
+                    setVal = {
+                        state.layerStack.depthOcclusionLimit = it
+                        state.updateConfig { cfg -> cfg.copy(depthOcclusionLimit = it) }
+                    },
                     range = 0.10f..0.85f,
                     formatDisplay = { "${(it * 100).toInt()}%" }
                 ),
@@ -129,56 +164,57 @@ fun ClockStudio(
                     formatDisplay = { "${(it * 100).toInt()}%" }
                 )
             )
-            ActiveLayerTab.CLOCK -> listOf(
-                LayerAction(
-                    id = "clock_thickness",
-                    label = "Thickness",
-                    icon = Icons.Rounded.LineWeight,
-                    toolType = ContextualToolType.SLIDER,
-                    getVal = { state.strokeWidth.floatValue },
-                    setVal = { state.strokeWidth.floatValue = it },
-                    range = 0f..25f,
-                    formatDisplay = { String.format("%.1f", it) }
-                ),
-                LayerAction(
-                    id = "clock_roundness",
-                    label = "Roundness",
-                    icon = Icons.Rounded.RoundedCorner,
-                    toolType = ContextualToolType.SLIDER,
-                    getVal = { state.roundness.floatValue },
-                    setVal = { state.roundness.floatValue = it },
-                    range = 0f..80f,
-                    formatDisplay = { String.format("%.1f", it) }
-                ),
-                LayerAction(
-                    id = "clock_gravity_intensity",
-                    label = "Gravity Slant",
-                    icon = Icons.Rounded.Explore,
-                    toolType = ContextualToolType.SLIDER,
-                    getVal = { state.gravityIntensity.floatValue },
-                    setVal = { state.gravityIntensity.floatValue = it },
-                    range = 0.2f..2.5f,
-                    formatDisplay = { String.format("%.1fx", it) }
-                ),
-                LayerAction(
-                    id = "clock_font",
-                    label = "Typography",
-                    icon = Icons.Rounded.Title,
-                    toolType = ContextualToolType.FONT
-                ),
-                LayerAction(
-                    id = "clock_color",
-                    label = "Color Palette",
-                    icon = Icons.Rounded.Palette,
-                    toolType = ContextualToolType.COLOR
-                ),
-                LayerAction(
-                    id = "clock_options",
-                    label = "Layout & Fit",
-                    icon = Icons.Rounded.DashboardCustomize,
-                    toolType = ContextualToolType.OPTIONS
-                )
-            )
+            ActiveLayerTab.CLOCK -> buildList {
+                activeStyle.describeControls(state.clockKitConfig).forEach { ctrl ->
+                    val toolType = when (ctrl) {
+                        is ClockControl.Slider -> ContextualToolType.SLIDER
+                        is ClockControl.Toggle -> ContextualToolType.TOGGLE
+                        is ClockControl.Choice -> ContextualToolType.CHOICE
+                        is ClockControl.FontPicker -> ContextualToolType.FONT
+                        is ClockControl.ColorPicker -> ContextualToolType.COLOR
+                        is ClockControl.QuickChips -> ContextualToolType.QUICK_CHIPS
+                    }
+                    if (ctrl is ClockControl.Slider) {
+                        add(
+                            LayerAction(
+                                id = "ck_${activeStyle.id}_${ctrl.id}",
+                                label = ctrl.label,
+                                icon = clockIconToImageVector(ctrl.icon),
+                                toolType = toolType,
+                                getVal = { state.clockKitConfig.getFloat(activeStyle.id, ctrl.id, ctrl.defaultValue) },
+                                setVal = { v -> state.updateConfig { it.withFloat(activeStyle.id, ctrl.id, v) } },
+                                range = ctrl.min..ctrl.max,
+                                formatDisplay = ctrl.formatter,
+                                clockControl = ctrl
+                            )
+                        )
+                    } else {
+                        add(
+                            LayerAction(
+                                id = "ck_${activeStyle.id}_${ctrl.id}",
+                                label = ctrl.label,
+                                icon = clockIconToImageVector(ctrl.icon),
+                                toolType = toolType,
+                                clockControl = ctrl
+                            )
+                        )
+                    }
+                }
+                if (state.clockKitConfig.isGravityEnabled) {
+                    add(
+                        LayerAction(
+                            id = "clock_gravity_intensity",
+                            label = "Gravity Slant",
+                            icon = Icons.Rounded.Explore,
+                            toolType = ContextualToolType.SLIDER,
+                            getVal = { state.clockKitConfig.gravityIntensity },
+                            setVal = { v -> state.updateConfig { it.copy(gravityIntensity = v) } },
+                            range = 0.2f..2.5f,
+                            formatDisplay = { String.format("%.1fx", it) }
+                        )
+                    )
+                }
+            }
             ActiveLayerTab.SUBJECT -> listOf(
                 LayerAction(
                     id = "subject_opacity",
@@ -211,7 +247,10 @@ fun ClockStudio(
                     icon = Icons.Rounded.Layers,
                     toolType = ContextualToolType.SLIDER,
                     getVal = { state.layerStack.depthOcclusionLimit },
-                    setVal = { state.layerStack.depthOcclusionLimit = it },
+                    setVal = {
+                        state.layerStack.depthOcclusionLimit = it
+                        state.updateConfig { cfg -> cfg.copy(depthOcclusionLimit = it) }
+                    },
                     range = 0.10f..0.85f,
                     formatDisplay = { "${(it * 100).toInt()}%" }
                 )
@@ -219,15 +258,27 @@ fun ClockStudio(
         }
     }
 
-    val activeAction = currentLayerActions.getOrNull(activeActionIndex) ?: currentLayerActions.first()
+    LaunchedEffect(currentLayerActions.size) {
+        if (activeActionIndex >= currentLayerActions.size) {
+            activeActionIndex = 0
+        }
+    }
+
+    val safeActionIndex = activeActionIndex.coerceIn(0, (currentLayerActions.size - 1).coerceAtLeast(0))
+    val activeAction = currentLayerActions.getOrNull(safeActionIndex) ?: currentLayerActions.first()
 
     var extractedColors by remember { mutableStateOf<List<Int>>(emptyList()) }
     var timeString by remember { mutableStateOf("") }
     var dateText by remember { mutableStateOf("") }
     val availableFonts = remember { viewModel.getAvailableFonts(context) }
 
-    LaunchedEffect(state.hourSize.floatValue) {
-        state.dateSize.floatValue = (state.hourSize.floatValue * 0.24f).coerceIn(14f, 34f)
+    val activeHourSize = state.clockKitConfig.getFloat("adaptive_vector", "hour_size", 100f)
+    LaunchedEffect(activeHourSize, state.clockKitConfig.styleId) {
+        state.dateSize.floatValue = if (state.clockKitConfig.styleId == "adaptive_vector") {
+            (activeHourSize * 0.24f).coerceIn(14f, 34f)
+        } else {
+            (20f * state.clockKitConfig.scale).coerceIn(14f, 32f)
+        }
     }
 
     LaunchedEffect(Unit) {
@@ -241,7 +292,10 @@ fun ClockStudio(
                     state.udfpsRadius.floatValue = coords.third
                 }
             }
-            val prefs = context.getSharedPreferences("cave_art_clock_prefs", Context.MODE_PRIVATE)
+            val safeCtx = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                context.createDeviceProtectedStorageContext()
+            } else context
+            val prefs = safeCtx.getSharedPreferences(ClockKitConfigStore.PREFS_NAME, Context.MODE_PRIVATE)
             val zoom = prefs.getFloat("telemetry_zoom", displayGeometry.wallpaperMaxScale)
             val nssl = prefs.getFloat("telemetry_nssl_top", -1f)
             val ux = prefs.getFloat("udfps_x", -1f)
@@ -294,7 +348,7 @@ fun ClockStudio(
         val components = viewModel.getHighQualityComponents(context, wallpaper)
         previewOriginal = components.first
         previewMask = components.second ?: viewModel.getMaskForClock(context, wallpaper)
-        
+
         scope.launch(Dispatchers.IO) {
             val depthResult = viewModel.getOrGenerateDepth(context, wallpaper)
             withContext(Dispatchers.Main) {
@@ -308,30 +362,27 @@ fun ClockStudio(
 
     val currentMask = previewMask
     val currentZoom = state.liveWallpaperZoom.floatValue
-    LaunchedEffect(currentMask, state.stretchEnabled.value, currentZoom) {
-        if (state.stretchEnabled.value && currentMask != null) {
+    val needsCollisionMap = activeStyle.needsCollisionMap(state.clockKitConfig)
+    LaunchedEffect(currentMask, needsCollisionMap, currentZoom) {
+        if (needsCollisionMap && currentMask != null) {
             withContext(Dispatchers.Default) {
                 val mapStr = AdaptiveClockHelper.generateCollisionMap(currentMask, realW, realH, currentZoom)
                 withContext(Dispatchers.Main) { state.collisionMap.value = mapStr }
             }
-        } else if (!state.stretchEnabled.value) {
+        } else if (!needsCollisionMap) {
             state.collisionMap.value = ""
         }
     }
 
-    LaunchedEffect(state.dateFormat.intValue) {
+    LaunchedEffect(state.clockKitConfig.dateFormat) {
         while (true) {
+            val now = System.currentTimeMillis()
             val is24 = android.text.format.DateFormat.is24HourFormat(context)
-            val date = java.util.Date()
-            val locale = java.util.Locale.getDefault()
-            timeString = java.text.SimpleDateFormat(if (is24) "HH:mm" else "hh:mm", locale).format(date)
-            dateText = when (state.dateFormat.intValue) {
-                0 -> java.text.SimpleDateFormat("EEE, d MMMM", locale).format(date)
-                1 -> java.text.SimpleDateFormat("EEE, d MMM", locale).format(date)
-                2 -> java.text.SimpleDateFormat("d MMM yyyy", locale).format(date).uppercase(locale)
-                3 -> java.text.SimpleDateFormat("EEEE, MMMM d", locale).format(date)
-                else -> java.text.SimpleDateFormat("EEE, d MMMM", locale).format(date)
-            }
+            timeString = java.text.SimpleDateFormat(
+                if (is24) "HH:mm" else "hh:mm",
+                java.util.Locale.getDefault()
+            ).format(java.util.Date(now))
+            dateText = ClockTypefaceResolver.formatDate(now, state.clockKitConfig.dateFormat)
             delay(1000L)
         }
     }
@@ -341,23 +392,16 @@ fun ClockStudio(
             val dynamicTheme = MonetEngine.getThemePalette(context, wallpaper, isDarkTheme)
             withContext(Dispatchers.Main) {
                 extractedColors = dynamicTheme.allColors
-                if (state.clockColor.intValue == 0 || isDefaultColor(state.clockColor.intValue)) {
-                    state.clockColor.intValue = dynamicTheme.tonalSpot.firstOrNull() ?: dynamicTheme.seedColor
+                if (state.clockKitConfig.color == 0 || isDefaultColor(state.clockKitConfig.color)) {
+                    val picked = dynamicTheme.tonalSpot.firstOrNull() ?: dynamicTheme.seedColor
+                    state.updateConfig { it.copy(color = picked) }
                 }
             }
         }
     }
 
-    val customTypeface = remember(state.clockFont.value) {
-        if (state.clockFont.value == "default" || state.clockFont.value.isEmpty()) {
-            Typeface.create("sans-serif-bold", Typeface.NORMAL)
-        } else {
-            try {
-                Typeface.createFromAsset(context.assets, "fonts/${state.clockFont.value}")
-            } catch (_: Exception) {
-                Typeface.create("sans-serif-bold", Typeface.NORMAL)
-            }
-        }
+    val customTypeface = remember(state.clockKitConfig.font) {
+        ClockTypefaceResolver.resolve(context, state.clockKitConfig.font)
     }
 
     val collisionMapArray = remember(state.collisionMap.value) {
@@ -396,45 +440,49 @@ fun ClockStudio(
                 CenterAlignedTopAppBar(
                     title = {
                         Text(
-                            "Lock Screen",
+                            text = if (isStyleBrowseMode) "Choose Style" else "Lock Screen",
                             style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Black)
                         )
                     },
                     navigationIcon = {
-                        IconButton(onClick = onBack) {
+                        IconButton(onClick = {
+                            if (isStyleBrowseMode) isStyleBrowseMode = false else onBack()
+                        }) {
                             Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back")
                         }
                     },
                     actions = {
-                        IconButton(
-                            onClick = {
-                                view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                                val willBeVisible = !state.layerStack.depthVisionLayer.isVisible
-                                state.layerStack.depthVisionLayer.isVisible = willBeVisible
-                                if (willBeVisible) {
-                                    state.layerStack.depthVisionLayer.opacity = 1.0f
-                                    activeLayerTab = ActiveLayerTab.DEPTH
+                        if (!isStyleBrowseMode) {
+                            IconButton(
+                                onClick = {
+                                    view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                                    val willBeVisible = !state.layerStack.depthVisionLayer.isVisible
+                                    state.layerStack.depthVisionLayer.isVisible = willBeVisible
+                                    if (willBeVisible) {
+                                        state.layerStack.depthVisionLayer.opacity = 1.0f
+                                        activeLayerTab = ActiveLayerTab.DEPTH
+                                    }
                                 }
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.ViewInAr,
+                                    contentDescription = "Toggle 3D Depth Vision",
+                                    tint = if (state.layerStack.depthVisionLayer.isVisible) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.ViewInAr,
-                                contentDescription = "Toggle 3D Depth Vision",
-                                tint = if (state.layerStack.depthVisionLayer.isVisible) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
 
-                        IconButton(
-                            onClick = {
-                                view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                                state.layerStack.isMaskInspectorActive = !state.layerStack.isMaskInspectorActive
+                            IconButton(
+                                onClick = {
+                                    view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                                    state.layerStack.isMaskInspectorActive = !state.layerStack.isMaskInspectorActive
+                                }
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Visibility,
+                                    contentDescription = "Inspect Mask Overlay",
+                                    tint = if (state.layerStack.isMaskInspectorActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Visibility,
-                                contentDescription = "Inspect Mask Overlay",
-                                tint = if (state.layerStack.isMaskInspectorActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                            )
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
@@ -455,79 +503,105 @@ fun ClockStudio(
                                 .padding(horizontal = 18.dp),
                             contentAlignment = Alignment.Center
                         ) {
+                            val slotKey: Any = if (isStyleBrowseMode) "STYLE_BROWSE" else activeAction.toolType
                             AnimatedContent(
-                                targetState = activeAction.toolType,
+                                targetState = slotKey,
                                 transitionSpec = {
                                     (fadeIn(tween(180)) + slideInVertically { it / 3 }) togetherWith
                                     (fadeOut(tween(140)) + slideOutVertically { -it / 3 })
                                 },
                                 label = "dynamicToolSlot"
-                            ) { tool ->
-                                when (tool) {
-                                    ContextualToolType.SLIDER -> {
-                                        SlimRulerSlider(
-                                            value = activeAction.getVal(),
-                                            onValueChange = activeAction.setVal,
-                                            valueRange = activeAction.range,
-                                            icon = activeAction.icon,
-                                            label = activeAction.label,
-                                            valueDisplay = activeAction.formatDisplay(activeAction.getVal()),
-                                            accentColor = MaterialTheme.colorScheme.primary
-                                        )
-                                    }
-                                    ContextualToolType.FONT -> {
-                                        CompactFontSelectorStrip(
-                                            availableFonts = availableFonts,
-                                            selectedFont = state.clockFont.value,
-                                            onFontSelected = { state.clockFont.value = it },
-                                            hours = hoursString,
-                                            mins = minsString
-                                        )
-                                    }
-                                    ContextualToolType.COLOR -> {
-                                        CompactColorSelectorStrip(
-                                            extractedColors = extractedColors,
-                                            selectedColor = state.clockColor.intValue,
-                                            onColorSelected = { state.clockColor.intValue = it }
-                                        )
-                                    }
-                                    ContextualToolType.OPTIONS -> {
-                                        CompactClockOptionsStrip(
-                                            isVertical = state.clockLayout.intValue == 1,
-                                            onToggleLayout = {
-                                                state.clockLayout.intValue = if (state.clockLayout.intValue == 0) 1 else 0
-                                            },
-                                            isDualTone = state.dualTone.value,
-                                            onToggleDualTone = { state.dualTone.value = !state.dualTone.value },
-                                            isDepthEnabled = state.layerStack.isDepthEnabled,
-                                            onToggleDepth = {
-                                                view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
-                                                state.layerStack.setDepthClockActive(!state.layerStack.isDepthEnabled)
-                                            },
-                                            isAdaptive = state.stretchEnabled.value,
-                                            onToggleAdaptive = { state.stretchEnabled.value = !state.stretchEnabled.value },
-                                            isGravity = state.gravityEnabled.value,
-                                            onToggleGravity = {
-                                                state.gravityEnabled.value = !state.gravityEnabled.value
-                                            },
-                                            onAutoFit = {
-                                                val mask = previewMask
-                                                if (mask != null) scope.launch(Dispatchers.Default) {
-                                                    val result = AdaptiveClockHelper.calculateAutoFit(
-                                                        mask, realW, realH,
-                                                        state.hourSize.floatValue, state.minSize.floatValue,
-                                                        densityVal, viewModel.isMagicShapeEnabled,
-                                                        viewModel.magicScale, viewModel.isCentered
-                                                    )
-                                                    if (result != null) withContext(Dispatchers.Main) {
-                                                        state.hourSize.floatValue = result.hourSize
-                                                        state.minSize.floatValue = result.minSize
-                                                        state.clockX.floatValue = 0f
-                                                        state.clockY.floatValue = result.yDp
+                            ) { key ->
+                                if (key == "STYLE_BROWSE") {
+                                    MinimalStyleBrowseFooter(
+                                        style = focusedCarouselStyle,
+                                        currentIndex = focusedCarouselIndex,
+                                        totalCount = ClockKitEngine.styles.size
+                                    )
+                                } else {
+                                    when (key as ContextualToolType) {
+                                        ContextualToolType.SLIDER -> {
+                                            SlimRulerSlider(
+                                                value = activeAction.getVal(),
+                                                onValueChange = activeAction.setVal,
+                                                valueRange = activeAction.range,
+                                                icon = activeAction.icon,
+                                                label = activeAction.label,
+                                                valueDisplay = activeAction.formatDisplay(activeAction.getVal()),
+                                                accentColor = MaterialTheme.colorScheme.primary
+                                            )
+                                        }
+                                        ContextualToolType.CHOICE -> {
+                                            val ctrl = activeAction.clockControl as? ClockControl.Choice
+                                            if (ctrl != null) {
+                                                CompactChoiceStrip(
+                                                    options = ctrl.options,
+                                                    selectedKey = state.clockKitConfig.getString(activeStyle.id, ctrl.id, ctrl.defaultKey),
+                                                    onSelected = { selectedKey ->
+                                                        state.updateConfig { it.withString(activeStyle.id, ctrl.id, selectedKey) }
                                                     }
-                                                }
+                                                )
                                             }
-                                        )
+                                        }
+                                        ContextualToolType.QUICK_CHIPS, ContextualToolType.OPTIONS -> {
+                                            val ctrl = activeAction.clockControl as? ClockControl.QuickChips
+                                            if (ctrl != null) {
+                                                CompactQuickChipsStrip(
+                                                    items = ctrl.items,
+                                                    styleId = activeStyle.id,
+                                                    config = state.clockKitConfig,
+                                                    onConfigChange = { next -> state.updateConfig { next } },
+                                                    onCustomAction = { actionId ->
+                                                        scope.launch(Dispatchers.Default) {
+                                                            val updated = activeStyle.onAction(
+                                                                actionId = actionId,
+                                                                config = state.clockKitConfig,
+                                                                mask = previewMask,
+                                                                screenW = realW,
+                                                                screenH = realH,
+                                                                density = densityVal
+                                                            )
+                                                            withContext(Dispatchers.Main) {
+                                                                state.updateConfig { updated }
+                                                            }
+                                                        }
+                                                    }
+                                                )
+                                            }
+                                        }
+                                        ContextualToolType.TOGGLE -> {
+                                            val ctrl = activeAction.clockControl as? ClockControl.Toggle
+                                            if (ctrl != null) {
+                                                CompactSingleToggleBar(
+                                                    label = ctrl.label,
+                                                    icon = activeAction.icon,
+                                                    checked = state.clockKitConfig.getBool(activeStyle.id, ctrl.id, ctrl.defaultValue),
+                                                    onCheckedChange = { checked ->
+                                                        state.updateConfig { it.withBool(activeStyle.id, ctrl.id, checked) }
+                                                    }
+                                                )
+                                            }
+                                        }
+                                        ContextualToolType.FONT -> {
+                                            CompactFontSelectorStrip(
+                                                availableFonts = availableFonts,
+                                                selectedFont = state.clockKitConfig.font,
+                                                onFontSelected = { fontName ->
+                                                    state.updateConfig { it.copy(font = fontName) }
+                                                },
+                                                hours = hoursString,
+                                                mins = minsString
+                                            )
+                                        }
+                                        ContextualToolType.COLOR -> {
+                                            CompactColorSelectorStrip(
+                                                extractedColors = extractedColors,
+                                                selectedColor = state.clockKitConfig.color,
+                                                onColorSelected = { col ->
+                                                    state.updateConfig { it.copy(color = col) }
+                                                }
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -538,7 +612,7 @@ fun ClockStudio(
                         Surface(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 16.dp),
+                                .padding(horizontal = 14.dp),
                             shape = CircleShape,
                             color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.95f),
                             shadowElevation = 8.dp
@@ -547,15 +621,15 @@ fun ClockStudio(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(58.dp)
-                                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                                    .padding(horizontal = 6.dp, vertical = 6.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
                                 ) {
-                                    val isClockActive = activeLayerTab == ActiveLayerTab.CLOCK
+                                    val isClockActive = !isStyleBrowseMode && activeLayerTab == ActiveLayerTab.CLOCK
                                     Surface(
                                         shape = CircleShape,
                                         color = if (isClockActive) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.7f),
@@ -563,29 +637,63 @@ fun ClockStudio(
                                             .height(44.dp)
                                             .clickable {
                                                 view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                                                isStyleBrowseMode = false
                                                 activeLayerTab = ActiveLayerTab.CLOCK
                                             }
                                     ) {
                                         Row(
-                                            modifier = Modifier.padding(horizontal = 18.dp),
+                                            modifier = Modifier.padding(horizontal = 12.dp),
                                             verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                            horizontalArrangement = Arrangement.spacedBy(5.dp)
                                         ) {
                                             Icon(
                                                 imageVector = Icons.Rounded.Schedule,
                                                 contentDescription = "Clock",
-                                                modifier = Modifier.size(17.dp),
+                                                modifier = Modifier.size(16.dp),
                                                 tint = if (isClockActive) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
                                             )
                                             Text(
                                                 text = "Clock",
-                                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                                maxLines = 1,
+                                                softWrap = false,
+                                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 11.5.sp),
                                                 color = if (isClockActive) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
                                             )
                                         }
                                     }
 
-                                    val isNonClockActive = activeLayerTab != ActiveLayerTab.CLOCK
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = if (isStyleBrowseMode) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.7f),
+                                        modifier = Modifier
+                                            .height(44.dp)
+                                            .clickable {
+                                                view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                                                isStyleBrowseMode = !isStyleBrowseMode
+                                            }
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 12.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Rounded.AutoAwesome,
+                                                contentDescription = "Style",
+                                                modifier = Modifier.size(16.dp),
+                                                tint = if (isStyleBrowseMode) MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.primary
+                                            )
+                                            Text(
+                                                text = "Style",
+                                                maxLines = 1,
+                                                softWrap = false,
+                                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 11.5.sp),
+                                                color = if (isStyleBrowseMode) MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+
+                                    val isNonClockActive = !isStyleBrowseMode && activeLayerTab != ActiveLayerTab.CLOCK
                                     Surface(
                                         shape = CircleShape,
                                         color = if (showLayersSheet || isNonClockActive) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.7f),
@@ -593,23 +701,26 @@ fun ClockStudio(
                                             .height(44.dp)
                                             .clickable {
                                                 view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                                                isStyleBrowseMode = false
                                                 showLayersSheet = true
                                             }
                                     ) {
                                         Row(
-                                            modifier = Modifier.padding(horizontal = 18.dp),
+                                            modifier = Modifier.padding(horizontal = 12.dp),
                                             verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                            horizontalArrangement = Arrangement.spacedBy(5.dp)
                                         ) {
                                             Icon(
                                                 imageVector = Icons.Rounded.Layers,
                                                 contentDescription = "Layers",
-                                                modifier = Modifier.size(17.dp),
+                                                modifier = Modifier.size(16.dp),
                                                 tint = if (showLayersSheet || isNonClockActive) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
                                             )
                                             Text(
-                                                text = if (isNonClockActive) activeLayerTab.label else "Layers",
-                                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                                text = "Layers",
+                                                maxLines = 1,
+                                                softWrap = false,
+                                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 11.5.sp),
                                                 color = if (showLayersSheet || isNonClockActive) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
                                             )
                                         }
@@ -619,15 +730,21 @@ fun ClockStudio(
                                 Button(
                                     onClick = {
                                         view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                                        isStyleBrowseMode = false
                                         showApplyOptions = true
                                     },
                                     shape = CircleShape,
                                     modifier = Modifier.height(44.dp),
-                                    contentPadding = PaddingValues(horizontal = 20.dp)
+                                    contentPadding = PaddingValues(horizontal = 15.dp)
                                 ) {
-                                    Icon(Icons.Rounded.CheckCircle, null, modifier = Modifier.size(17.dp))
-                                    Spacer(Modifier.width(6.dp))
-                                    Text("Apply", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Black))
+                                    Icon(Icons.Rounded.CheckCircle, null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(5.dp))
+                                    Text(
+                                        text = "Apply",
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Black, fontSize = 12.sp)
+                                    )
                                 }
                             }
                         }
@@ -639,29 +756,71 @@ fun ClockStudio(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(padding)
-                    .padding(top = 4.dp, bottom = 14.dp, start = 20.dp, end = 20.dp),
+                    .padding(
+                        top = 4.dp,
+                        bottom = 14.dp,
+                        start = if (isStyleBrowseMode) 0.dp else 20.dp,
+                        end = if (isStyleBrowseMode) 0.dp else 20.dp
+                    ),
                 contentAlignment = Alignment.Center
             ) {
-                ClockStudioPreviewCard(
-                    state = state,
-                    wallpaper = wallpaper,
-                    viewModel = viewModel,
-                    isMlLoading = isMlLoading,
-                    displayGeometry = displayGeometry,
-                    previewOriginal = previewOriginal,
-                    previewMask = previewMask,
-                    timeString = timeString,
-                    dateText = dateText,
-                    customTypeface = customTypeface,
-                    collisionMapArray = collisionMapArray,
-                    focusedLayerType = focusedLayerType,
-                    currentLayerActions = currentLayerActions,
-                    activeActionIndex = activeActionIndex,
-                    onActionSelected = { activeActionIndex = it },
-                    sharedElementModifier = sharedElementModifier,
-                    onDateClick = { showDateCustomizeSheet = true },
-                    onClockClick = { activeLayerTab = ActiveLayerTab.CLOCK }
-                )
+                AnimatedContent(
+                    targetState = isStyleBrowseMode && !isMlLoading,
+                    transitionSpec = {
+                        (fadeIn(tween(220)) + scaleIn(initialScale = 0.94f, animationSpec = tween(240))) togetherWith
+                        (fadeOut(tween(160)) + scaleOut(targetScale = 0.94f, animationSpec = tween(180)))
+                    },
+                    label = "previewCarouselSwitch"
+                ) { browsingStyles ->
+                    if (browsingStyles) {
+                        ClockStyleCarousel(
+                            currentConfig = state.clockKitConfig,
+                            displayGeometry = displayGeometry,
+                            previewOriginal = previewOriginal,
+                            previewMask = previewMask,
+                            rawDepthMap = state.layerStack.depthVisionLayer.rawDepthMap,
+                            liveWallpaperZoom = state.liveWallpaperZoom.floatValue,
+                            dateSizeDp = state.dateSize.floatValue,
+                            timeString = timeString,
+                            dateText = dateText,
+                            customTypeface = customTypeface,
+                            collisionMapArray = collisionMapArray,
+                            onStyleChanged = { settled ->
+                                state.updateConfig { it.copy(styleId = settled.id) }
+                            },
+                            onConfirmAndExit = { chosen ->
+                                state.updateConfig { it.copy(styleId = chosen.id) }
+                                activeLayerTab = ActiveLayerTab.CLOCK
+                                isStyleBrowseMode = false
+                            },
+                            onFocusedPageChanged = { idx, style ->
+                                focusedCarouselIndex = idx
+                                focusedCarouselStyle = style
+                            }
+                        )
+                    } else {
+                        ClockStudioPreviewCard(
+                            state = state,
+                            wallpaper = wallpaper,
+                            viewModel = viewModel,
+                            isMlLoading = isMlLoading,
+                            displayGeometry = displayGeometry,
+                            previewOriginal = previewOriginal,
+                            previewMask = previewMask,
+                            timeString = timeString,
+                            dateText = dateText,
+                            customTypeface = customTypeface,
+                            collisionMapArray = collisionMapArray,
+                            focusedLayerType = focusedLayerType,
+                            currentLayerActions = currentLayerActions,
+                            activeActionIndex = safeActionIndex,
+                            onActionSelected = { activeActionIndex = it },
+                            sharedElementModifier = sharedElementModifier,
+                            onDateClick = { showDateCustomizeSheet = true },
+                            onClockClick = { activeLayerTab = ActiveLayerTab.CLOCK }
+                        )
+                    }
+                }
             }
 
             if (showLayersSheet) {

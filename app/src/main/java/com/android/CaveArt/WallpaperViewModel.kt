@@ -17,6 +17,8 @@ import androidx.lifecycle.viewModelScope
 import com.android.CaveArt.animations.AnimationFactory
 import com.android.CaveArt.animations.AnimationStyle
 import com.android.CaveArt.animations.AnimSetting
+import com.android.CaveArt.clockkit.ClockKitConfig
+import com.android.CaveArt.clockkit.ClockKitConfigStore
 import com.android.CaveArt.layer.LockscreenLayerStack
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -103,39 +105,41 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     var isLockscreenClockPreviewVisible by mutableStateOf(false)
+    
+    var clockKitConfig by mutableStateOf(ClockKitConfigStore.loadFromPrefs(clockPrefs))
 
-    var lockscreenClockOffsetX by mutableFloatStateOf(clockPrefs.getFloat("clock_x", 0f))
-    var lockscreenClockOffsetY by mutableFloatStateOf(clockPrefs.getFloat("clock_y", 110f))
+    var lockscreenClockOffsetX by mutableFloatStateOf(clockKitConfig.clockX)
+    var lockscreenClockOffsetY by mutableFloatStateOf(clockKitConfig.clockY)
 
-    var lockscreenDateOffsetX by mutableFloatStateOf(clockPrefs.getFloat("date_x", 0f))
-    var lockscreenDateOffsetY by mutableFloatStateOf(clockPrefs.getFloat("date_y", 75f))
+    var lockscreenDateOffsetX by mutableFloatStateOf(clockKitConfig.dateX)
+    var lockscreenDateOffsetY by mutableFloatStateOf(clockKitConfig.dateY)
 
-    var clockHourSize by mutableFloatStateOf(clockPrefs.getFloat("clock_hour_size", 100f))
-    var clockMinuteSize by mutableFloatStateOf(clockPrefs.getFloat("clock_minute_size", 75f))
-    var clockStrokeWidth by mutableFloatStateOf(clockPrefs.getFloat("clock_stroke_width", 8f))
-    var clockRoundness by mutableFloatStateOf(clockPrefs.getFloat("clock_roundness", 30f))
+    var clockHourSize by mutableFloatStateOf(clockKitConfig.getFloat("adaptive_vector", "hour_size", 100f))
+    var clockMinuteSize by mutableFloatStateOf(clockKitConfig.getFloat("adaptive_vector", "min_size", 75f))
+    var clockStrokeWidth by mutableFloatStateOf(clockKitConfig.getFloat("adaptive_vector", "stroke_width", 8f))
+    var clockRoundness by mutableFloatStateOf(clockKitConfig.getFloat("adaptive_vector", "roundness", 30f))
 
-    var clockColor by mutableIntStateOf(clockPrefs.getInt("clock_color", AndroidColor.WHITE))
-    var clockFont by mutableStateOf(clockPrefs.getString("clock_font", "default") ?: "default")
-    var isDualToneEnabled by mutableStateOf(clockPrefs.getBoolean("clock_dual_tone", true))
-    var clockLayout by mutableIntStateOf(clockPrefs.getInt("clock_layout", 0))
+    var clockColor by mutableIntStateOf(clockKitConfig.color)
+    var clockFont by mutableStateOf(clockKitConfig.font)
+    var isDualToneEnabled by mutableStateOf(clockKitConfig.getBool("adaptive_vector", "dual_tone", true))
+    var clockLayout by mutableIntStateOf(if (clockKitConfig.getString("adaptive_vector", "layout", "horizontal") == "vertical") 1 else 0)
 
-    var dateLayout by mutableIntStateOf(clockPrefs.getInt("date_format", 0))
-    var isDateAttached by mutableStateOf(clockPrefs.getBoolean("date_attached", true))
+    var dateLayout by mutableIntStateOf(clockKitConfig.dateFormat)
+    var isDateAttached by mutableStateOf(clockKitConfig.dateAttached)
 
-    var isClockStretchEnabled by mutableStateOf(clockPrefs.getBoolean("clock_stretch", false))
+    var isClockStretchEnabled by mutableStateOf(clockKitConfig.getBool("adaptive_vector", "stretch", false))
     var clockCollisionMap by mutableStateOf(clockPrefs.getString("clock_collision_map", "") ?: "")
 
-    var isClockDepthEnabled by mutableStateOf(clockPrefs.getBoolean("clock_depth_enabled", true))
-    var clockLayerOrder by mutableIntStateOf(clockPrefs.getInt("clock_layer_order", 1))
-    var clockDepthOcclusion by mutableFloatStateOf(clockPrefs.getFloat("clock_depth_occlusion", 0.45f))
-    
-    var isClockGravityEnabled by mutableStateOf(clockPrefs.getBoolean("clock_gravity", false))
-    var clockGravityIntensity by mutableFloatStateOf(clockPrefs.getFloat("clock_gravity_intensity", 1.0f))
+    var isClockDepthEnabled by mutableStateOf(clockKitConfig.isDepthEnabled)
+    var clockLayerOrder by mutableIntStateOf(if (clockKitConfig.isDepthEnabled) 1 else 0)
+    var clockDepthOcclusion by mutableFloatStateOf(clockKitConfig.depthOcclusionLimit)
 
-    var layerBackgroundStructure by mutableFloatStateOf(0f)
-    var layerSubjectOpacity by mutableFloatStateOf(1.0f)
-    var layerBackgroundOpacity by mutableFloatStateOf(1.0f)
+    var isClockGravityEnabled by mutableStateOf(clockKitConfig.isGravityEnabled)
+    var clockGravityIntensity by mutableFloatStateOf(clockKitConfig.gravityIntensity)
+
+    var layerBackgroundStructure by mutableFloatStateOf(clockPrefs.getFloat("layer_structure", 0f))
+    var layerSubjectOpacity by mutableFloatStateOf(clockPrefs.getFloat("layer_subject_opacity", 1.0f))
+    var layerBackgroundOpacity by mutableFloatStateOf(clockPrefs.getFloat("layer_bg_opacity", 1.0f))
 
     private val wallpaperColorMap = mutableMapOf<String, Int>()
 
@@ -155,48 +159,71 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    fun updateClockKitConfig(
+        context: Context,
+        newConfig: ClockKitConfig,
+        collisionMap: String? = null
+    ) {
+        clockKitConfig = newConfig
+
+        lockscreenClockOffsetX = newConfig.clockX
+        lockscreenClockOffsetY = newConfig.clockY
+        lockscreenDateOffsetX = newConfig.dateX
+        lockscreenDateOffsetY = newConfig.dateY
+        clockColor = newConfig.color
+        clockFont = newConfig.font
+        dateLayout = newConfig.dateFormat
+        isDateAttached = newConfig.dateAttached
+        isClockDepthEnabled = newConfig.isDepthEnabled
+        clockLayerOrder = if (newConfig.isDepthEnabled) 1 else 0
+        clockDepthOcclusion = newConfig.depthOcclusionLimit
+        isClockGravityEnabled = newConfig.isGravityEnabled
+        clockGravityIntensity = newConfig.gravityIntensity
+
+        clockHourSize = newConfig.getFloat("adaptive_vector", "hour_size", clockHourSize)
+        clockMinuteSize = newConfig.getFloat("adaptive_vector", "min_size", clockMinuteSize)
+        clockStrokeWidth = newConfig.getFloat("adaptive_vector", "stroke_width", clockStrokeWidth)
+        clockRoundness = newConfig.getFloat("adaptive_vector", "roundness", clockRoundness)
+        isDualToneEnabled = newConfig.getBool("adaptive_vector", "dual_tone", isDualToneEnabled)
+        clockLayout = if (newConfig.getString("adaptive_vector", "layout", "horizontal") == "vertical") 1 else 0
+        isClockStretchEnabled = newConfig.getBool("adaptive_vector", "stretch", isClockStretchEnabled)
+
+        if (collisionMap != null) {
+            clockCollisionMap = collisionMap
+        }
+
+        ClockKitConfigStore.saveAndBroadcast(context, newConfig, collisionMap)
+    }
+
     fun updateClockFont(context: Context, fontFilename: String) {
-        clockFont = fontFilename
-        clockPrefs.edit().putString("clock_font", fontFilename).apply()
-        context.sendBroadcast(android.content.Intent("com.android.CaveArt.UPDATE_CLOCK_FONT").apply { putExtra("clock_font", fontFilename) })
+        updateClockKitConfig(context, clockKitConfig.copy(font = fontFilename))
     }
 
     fun updateDualTone(context: Context, enabled: Boolean) {
-        isDualToneEnabled = enabled
-        clockPrefs.edit().putBoolean("clock_dual_tone", enabled).apply()
-        context.sendBroadcast(android.content.Intent("com.android.CaveArt.UPDATE_CLOCK_DUAL_TONE").apply { putExtra("clock_dual_tone", enabled) })
+        updateClockKitConfig(context, clockKitConfig.withBool("adaptive_vector", "dual_tone", enabled))
     }
 
     fun updateClockLayout(context: Context, layout: Int) {
-        clockLayout = layout
-        clockPrefs.edit().putInt("clock_layout", layout).apply()
-        context.sendBroadcast(android.content.Intent("com.android.CaveArt.UPDATE_CLOCK_LAYOUT").apply { putExtra("clock_layout", layout) })
+        updateClockKitConfig(
+            context,
+            clockKitConfig.withString("adaptive_vector", "layout", if (layout == 1) "vertical" else "horizontal")
+        )
     }
 
     fun updateDateLayout(context: Context, formatIndex: Int) {
-        dateLayout = formatIndex
-        clockPrefs.edit().putInt("date_format", formatIndex).apply()
-        context.sendBroadcast(android.content.Intent("com.android.CaveArt.UPDATE_DATE_FORMAT").apply { putExtra("date_format", formatIndex) })
+        updateClockKitConfig(context, clockKitConfig.copy(dateFormat = formatIndex))
     }
 
     fun updateDateAttached(context: Context, attached: Boolean) {
-        isDateAttached = attached
-        clockPrefs.edit().putBoolean("date_attached", attached).apply()
-        context.sendBroadcast(android.content.Intent("com.android.CaveArt.UPDATE_DATE_ATTACHED").apply { putExtra("date_attached", attached) })
+        updateClockKitConfig(context, clockKitConfig.copy(dateAttached = attached))
     }
 
     fun updateLockscreenClockPosition(context: Context, x: Float, y: Float) {
-        lockscreenClockOffsetX = x
-        lockscreenClockOffsetY = y
-        clockPrefs.edit().putFloat("clock_x", x).putFloat("clock_y", y).apply()
-        context.sendBroadcast(android.content.Intent("com.android.CaveArt.UPDATE_CLOCK_POSITION").apply { putExtra("clock_x", x); putExtra("clock_y", y) })
+        updateClockKitConfig(context, clockKitConfig.copy(clockX = x, clockY = y))
     }
 
     fun updateLockscreenDatePosition(context: Context, x: Float, y: Float) {
-        lockscreenDateOffsetX = x
-        lockscreenDateOffsetY = y
-        clockPrefs.edit().putFloat("date_x", x).putFloat("date_y", y).apply()
-        context.sendBroadcast(android.content.Intent("com.android.CaveArt.UPDATE_DATE_POSITION").apply { putExtra("date_x", x); putExtra("date_y", y) })
+        updateClockKitConfig(context, clockKitConfig.copy(dateX = x, dateY = y))
     }
 
     fun updateClockStyle(
@@ -207,55 +234,28 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         roundness: Float,
         dateSize: Float = (hourSize * 0.24f).coerceIn(14f, 34f)
     ) {
-        clockHourSize = hourSize
-        clockMinuteSize = minuteSize
-        clockStrokeWidth = strokeWidth
-        clockRoundness = roundness
-
-        val autoDateSize = dateSize.coerceIn(14f, 34f)
-
-        clockPrefs.edit()
-            .putFloat("clock_hour_size", hourSize)
-            .putFloat("clock_minute_size", minuteSize)
-            .putFloat("clock_stroke_width", strokeWidth)
-            .putFloat("clock_roundness", roundness)
-            .putFloat("date_size", autoDateSize)
-            .apply()
-
-        context.sendBroadcast(android.content.Intent("com.android.CaveArt.UPDATE_CLOCK_STYLE").apply {
-            putExtra("clock_hour_size", hourSize)
-            putExtra("clock_minute_size", minuteSize)
-            putExtra("clock_stroke_width", strokeWidth)
-            putExtra("clock_roundness", roundness)
-            putExtra("date_size", autoDateSize)
-        })
+        val updated = clockKitConfig
+            .withFloat("adaptive_vector", "hour_size", hourSize)
+            .withFloat("adaptive_vector", "min_size", minuteSize)
+            .withFloat("adaptive_vector", "stroke_width", strokeWidth)
+            .withFloat("adaptive_vector", "roundness", roundness)
+        updateClockKitConfig(context, updated)
     }
 
     fun updateClockColor(context: Context, color: Int) {
-        clockColor = color
-        clockPrefs.edit().putInt("clock_color", color).apply()
-        context.sendBroadcast(android.content.Intent("com.android.CaveArt.UPDATE_CLOCK_COLOR").apply { putExtra("clock_color", color) })
+        updateClockKitConfig(context, clockKitConfig.copy(color = color))
     }
 
     fun toggleClockStretch(context: Context, enabled: Boolean, mask: Bitmap?, screenW: Float, screenH: Float) {
-        isClockStretchEnabled = enabled
-        clockPrefs.edit().putBoolean("clock_stretch", enabled).apply()
-        context.sendBroadcast(android.content.Intent("com.android.CaveArt.UPDATE_CLOCK_STRETCH").apply { putExtra("clock_stretch", enabled) })
+        updateClockKitConfig(context, clockKitConfig.withBool("adaptive_vector", "stretch", enabled))
         if (enabled && mask != null) generateCollisionMap(context, mask, screenW, screenH)
     }
 
     fun updateClockGravity(context: Context, enabled: Boolean, intensity: Float) {
-        isClockGravityEnabled = enabled
-        clockGravityIntensity = intensity
-        clockPrefs.edit()
-            .putBoolean("clock_gravity", enabled)
-            .putFloat("clock_gravity_intensity", intensity)
-            .apply()
-
-        context.sendBroadcast(android.content.Intent("com.android.CaveArt.UPDATE_CLOCK_GRAVITY").apply {
-            putExtra("clock_gravity", enabled)
-            putExtra("clock_gravity_intensity", intensity)
-        })
+        updateClockKitConfig(
+            context,
+            clockKitConfig.copy(isGravityEnabled = enabled, gravityIntensity = intensity)
+        )
     }
 
     fun generateCollisionMap(context: Context, mask: Bitmap, screenW: Float, screenH: Float) {
@@ -264,7 +264,9 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
             withContext(Dispatchers.Main) {
                 clockCollisionMap = mapString
                 clockPrefs.edit().putString("clock_collision_map", mapString).apply()
-                context.sendBroadcast(android.content.Intent("com.android.CaveArt.UPDATE_COLLISION_MAP").apply { putExtra("collision_map", mapString) })
+                context.sendBroadcast(android.content.Intent("com.android.CaveArt.UPDATE_COLLISION_MAP").apply {
+                    putExtra("collision_map", mapString)
+                })
             }
         }
     }
@@ -279,15 +281,18 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
             ) ?: return@launch
 
             withContext(Dispatchers.Main) {
-                updateClockStyle(context, result.hourSize, result.minSize, clockStrokeWidth, clockRoundness)
-                updateLockscreenClockPosition(context, 0f, result.yDp)
+                val updated = clockKitConfig
+                    .withFloat("adaptive_vector", "hour_size", result.hourSize)
+                    .withFloat("adaptive_vector", "min_size", result.minSize)
+                    .copy(clockX = 0f, clockY = result.yDp)
+                updateClockKitConfig(context, updated)
             }
         }
     }
 
     fun saveLayerStackSettings(context: Context, stack: LockscreenLayerStack) {
         val isDepth = stack.isDepthEnabled
-        val order = stack.clockLayer.zIndex
+        val order = if (isDepth) 1 else 0
         val occlusion = stack.depthOcclusionLimit
         val structure = stack.backgroundLayer.structure
         val subjectOpacity = stack.subjectLayer.opacity
@@ -300,7 +305,13 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         layerSubjectOpacity = subjectOpacity
         layerBackgroundOpacity = bgOpacity
 
+        clockKitConfig = clockKitConfig.copy(
+            isDepthEnabled = isDepth,
+            depthOcclusionLimit = occlusion
+        )
+
         clockPrefs.edit()
+            .putString(ClockKitConfigStore.KEY_JSON, ClockKitConfigStore.toJson(clockKitConfig))
             .putBoolean("clock_depth_enabled", isDepth)
             .putInt("clock_layer_order", order)
             .putFloat("clock_depth_occlusion", occlusion)
@@ -444,7 +455,6 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     private val originalCache = object : LruCache<String, Bitmap>(maxMemory / 32) {
         override fun sizeOf(key: String, bitmap: Bitmap) = bitmap.byteCount / 1024
     }
-    
     private val depthCache = object : LruCache<String, DepthResult>(maxMemory / 32) {
         override fun sizeOf(key: String, value: DepthResult) =
             (value.rawDepthMap.byteCount + value.heatMapBitmap.byteCount) / 1024

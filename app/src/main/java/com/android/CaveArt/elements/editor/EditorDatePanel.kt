@@ -65,8 +65,10 @@ fun EditorDatePanel(
                         )
                     }
                     Switch(
-                        checked = state.dateAttached.value,
-                        onCheckedChange = { state.dateAttached.value = it }
+                        checked = state.clockKitConfig.dateAttached,
+                        onCheckedChange = { attached ->
+                            state.updateConfig { it.copy(dateAttached = attached) }
+                        }
                     )
                 }
             }
@@ -87,8 +89,10 @@ fun EditorDatePanel(
                     val formatTitles = listOf("Standard", "Short", "CAPS Year", "Full Spell", "Modern Minimal")
                     items(formatTitles.size) { index ->
                         FilterChip(
-                            selected = state.dateFormat.intValue == index,
-                            onClick = { state.dateFormat.intValue = index },
+                            selected = state.clockKitConfig.dateFormat == index,
+                            onClick = {
+                                state.updateConfig { it.copy(dateFormat = index) }
+                            },
                             label = { Text(formatTitles[index], fontSize = 15.sp, fontWeight = FontWeight.Bold) },
                             shape = RoundedCornerShape(24.dp),
                             modifier = Modifier.padding(vertical = 4.dp),

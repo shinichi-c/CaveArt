@@ -1,10 +1,8 @@
 package com.android.CaveArt
 
 import android.graphics.Bitmap
-import android.graphics.CornerPathEffect
 import android.graphics.DashPathEffect
 import android.graphics.Paint
-import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.RenderNode
 import android.graphics.Typeface
@@ -35,14 +33,15 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
-import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChanged
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
+import com.android.CaveArt.clockkit.*
 import com.android.CaveArt.layer.LayerCompositor
 import com.android.CaveArt.layer.LayerType
 import kotlin.math.abs
@@ -70,6 +69,7 @@ fun ClockStudioPreviewCard(
     onDateClick: () -> Unit,
     onClockClick: () -> Unit
 ) {
+    val context = LocalContext.current
     val view = LocalView.current
     val realW = displayGeometry.widthPx
     val realH = displayGeometry.heightPx
@@ -77,22 +77,33 @@ fun ClockStudioPreviewCard(
     val statusBarDp = displayGeometry.statusBarHeightPx / densityVal
     val navBarDp = displayGeometry.navBarHeightPx / densityVal
     val minSafeYDp = statusBarDp + (displayGeometry.statusBarHeightPx * 0.12f / densityVal)
-    val minClockSizeDp = (realW * 0.08f) / densityVal
-    val maxClockSizeDp = (realW * 0.55f) / densityVal
     val magneticSnapThresholdDp = (realW * 0.025f) / densityVal
     val cardCornerRadiusDp = (displayGeometry.physicalCornerRadiusPx / densityVal).coerceAtLeast(0f)
 
     var isDraggingClock by remember { mutableStateOf(false) }
     var isDraggingDate by remember { mutableStateOf(false) }
 
-    val vectorPaint = remember {
-        Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.FILL_AND_STROKE
-            strokeCap = Paint.Cap.ROUND
-            strokeJoin = Paint.Join.ROUND
-            setShadowLayer(15f, 0f, 5f, android.graphics.Color.argb(160, 0, 0, 0))
+    val activeStyle = remember(state.clockKitConfig.styleId) {
+        ClockKitEngine.getStyle(state.clockKitConfig.styleId)
+    }
+    val latestStyle by rememberUpdatedState(activeStyle)
+    val latestTime by rememberUpdatedState(timeString)
+    val latestDate by rememberUpdatedState(dateText)
+    val latestTypeface by rememberUpdatedState(customTypeface)
+
+    val needsContinuous = activeStyle.needsContinuousFrames(state.clockKitConfig, 0f)
+    var animFrameMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
+
+    LaunchedEffect(needsContinuous, isMlLoading) {
+        if (needsContinuous && !isMlLoading) {
+            while (true) {
+                withFrameNanos {
+                    animFrameMillis = System.currentTimeMillis()
+                }
+            }
         }
     }
+
     val datePaint = remember {
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
             textAlign = Paint.Align.CENTER
@@ -113,7 +124,6 @@ fun ClockStudioPreviewCard(
             pathEffect = DashPathEffect(floatArrayOf(15f, 15f), 0f)
         }
     }
-    val combinedClockPath = remember { Path() }
     val sharedPathBounds = remember { RectF() }
 
     val hardwareRenderNode = remember {
@@ -125,81 +135,88 @@ fun ClockStudioPreviewCard(
         } else null
     }
 
-    LaunchedEffect(
-        state.clockX.floatValue, state.clockY.floatValue, state.dateAttached.value,
-        state.hourSize.floatValue, state.clockLayout.intValue, state.dateSize.floatValue,
-        state.stretchEnabled.value, dateText, timeString, customTypeface, state.strokeWidth.floatValue
-    ) {
+    val measureContext = remember(realW, realH, densityVal, customTypeface, timeString, dateText) {
+        ClockMeasureContext(
+            context = context,
+            screenW = realW,
+            screenH = realH,
+            density = densityVal,
+            typeface = customTypeface,
+            timeString = timeString.ifEmpty { "00:00" },
+            dateString = dateText.ifEmpty { "Wednesday, 14 October" }
+        )
+    }
+
+    LaunchedEffect(state.clockKitConfig, state.dateSize.floatValue, dateText, timeString, customTypeface) {
+        val cfg = state.clockKitConfig
         val sideSafeMarginDp = 18f
         val halfScreenDp = realW / densityVal / 2f
-        val hPx = state.hourSize.floatValue * densityVal
-        val mPx = state.minSize.floatValue * densityVal
-        val isVert = state.clockLayout.intValue == 1
-        val sampleTime = if (timeString.isNotEmpty()) timeString else "00:00"
-        val totalClockWidthPx = AdaptiveClockHelper.measureClockWidth(sampleTime, hPx, mPx, customTypeface, isVert)
-        val strokePaddingPx = (state.strokeWidth.floatValue * densityVal) + (4f * densityVal)
-        val clockWidthDp = (totalClockWidthPx + strokePaddingPx) / densityVal
+
+        val measured = activeStyle.measure(measureContext, cfg)
+        val clockWidthDp = measured.contentWidthPx / densityVal
         val halfClockWDp = clockWidthDp / 2f
-        val minSafeClockX = -halfScreenDp + halfClockWDp + sideSafeMarginDp
-        val maxSafeClockX = halfScreenDp - halfClockWDp - sideSafeMarginDp
+        val minSafeClockX = (-halfScreenDp + halfClockWDp + sideSafeMarginDp).coerceAtMost(0f)
+        val maxSafeClockX = (halfScreenDp - halfClockWDp - sideSafeMarginDp).coerceAtLeast(0f)
 
-        if (minSafeClockX <= maxSafeClockX) {
-            state.clockX.floatValue = state.clockX.floatValue.coerceIn(minSafeClockX, maxSafeClockX)
-        } else {
-            state.clockX.floatValue = 0f
-        }
+        val clampedClockX = cfg.clockX.coerceIn(minSafeClockX, maxSafeClockX)
+        var newDateX = cfg.dateX
+        var newDateY = cfg.dateY
 
-        datePaint.textSize = state.dateSize.floatValue * densityVal
-        val sampleDate = if (dateText.isNotEmpty()) dateText else "Wednesday, 14 October"
-        val dateWidthDp = datePaint.measureText(sampleDate) / densityVal
-        val halfDateWDp = dateWidthDp / 2f
-        val minSafeDateX = -halfScreenDp + halfDateWDp + sideSafeMarginDp
-        val maxSafeDateX = halfScreenDp - halfDateWDp - sideSafeMarginDp
+        if (activeStyle.datePolicy(cfg) == ClockDatePolicy.EXTERNAL_STANDARD && cfg.dateAttached) {
+            datePaint.textSize = state.dateSize.floatValue * densityVal
+            val sampleDate = if (dateText.isNotEmpty()) dateText else "Wednesday, 14 October"
+            val dateWidthDp = datePaint.measureText(sampleDate) / densityVal
+            val halfDateWDp = dateWidthDp / 2f
+            val minSafeDateX = (-halfScreenDp + halfDateWDp + sideSafeMarginDp).coerceAtMost(0f)
+            val maxSafeDateX = (halfScreenDp - halfDateWDp - sideSafeMarginDp).coerceAtLeast(0f)
 
-        if (state.dateAttached.value) {
-            state.dateX.floatValue = if (minSafeDateX <= maxSafeDateX) {
-                state.clockX.floatValue.coerceIn(minSafeDateX, maxSafeDateX)
-            } else 0f
+            newDateX = clampedClockX.coerceIn(minSafeDateX, maxSafeDateX)
 
             val fontMetrics = datePaint.fontMetrics
             val dateLineHeightDp = (fontMetrics.descent - fontMetrics.ascent) / densityVal
-            val dynamicGapDp = (state.strokeWidth.floatValue * 0.4f) + (dateLineHeightDp * 0.35f)
+            val strokeW = cfg.getFloat("adaptive_vector", "stroke_width", 8f)
+            val dynamicGapDp = (strokeW * 0.4f) + (dateLineHeightDp * 0.35f)
             val compoundDateOffsetDp = dateLineHeightDp + dynamicGapDp
-            val idealAboveYDp = state.clockY.floatValue - compoundDateOffsetDp
+            val idealAboveYDp = cfg.clockY - compoundDateOffsetDp
             val touchesTopBorder = idealAboveYDp < minSafeYDp
 
-            if (state.stretchEnabled.value) {
-                state.dateY.floatValue = max(minSafeYDp, idealAboveYDp)
+            newDateY = if (activeStyle.needsCollisionMap(cfg)) {
+                max(minSafeYDp, idealAboveYDp)
+            } else if (touchesTopBorder) {
+                val clockEstimatedHDp = measured.contentHeightPx / densityVal
+                cfg.clockY + clockEstimatedHDp + dynamicGapDp
             } else {
-                if (touchesTopBorder) {
-                    val clockEstimatedHDp = if (isVert) {
-                        (state.hourSize.floatValue * 2.15f) + (state.strokeWidth.floatValue * 0.5f)
-                    } else {
-                        (state.hourSize.floatValue * 1.15f) + (state.strokeWidth.floatValue * 0.5f)
-                    }
-                    state.dateY.floatValue = state.clockY.floatValue + clockEstimatedHDp + dynamicGapDp
-                } else {
-                    state.dateY.floatValue = max(minSafeYDp, idealAboveYDp)
-                }
+                max(minSafeYDp, idealAboveYDp)
+            }
+        }
+
+        if (abs(clampedClockX - cfg.clockX) > 0.01f ||
+            abs(newDateX - cfg.dateX) > 0.01f ||
+            abs(newDateY - cfg.dateY) > 0.01f
+        ) {
+            state.updateConfig {
+                it.copy(clockX = clampedClockX, dateX = newDateX, dateY = newDateY)
             }
         }
     }
 
-    val datePhysicsSpringY = remember { Animatable(state.dateY.floatValue) }
+    val datePhysicsSpringY = remember { Animatable(state.clockKitConfig.dateY) }
     LaunchedEffect(
-        isDraggingDate, isDraggingClock, state.dateAttached.value,
-        state.clockX.floatValue, state.clockY.floatValue, state.dateX.floatValue,
-        state.hourSize.floatValue, state.clockLayout.intValue
+        isDraggingDate, isDraggingClock,
+        state.clockKitConfig, state.dateSize.floatValue
     ) {
-        if (!state.dateAttached.value && !isDraggingDate && !isDraggingClock) {
+        val cfg = state.clockKitConfig
+        if (activeStyle.datePolicy(cfg) == ClockDatePolicy.EXTERNAL_STANDARD &&
+            !cfg.dateAttached && !isDraggingDate && !isDraggingClock
+        ) {
             datePaint.textSize = state.dateSize.floatValue * densityVal
             val sampleDate = if (dateText.isNotEmpty()) dateText else "Wednesday, 14 October"
             val dateWDp = datePaint.measureText(sampleDate) / densityVal
             val dateHDp = (datePaint.fontMetrics.descent - datePaint.fontMetrics.ascent) / densityVal
-            val nativeDateCenterX = (realW / densityVal / 2f) + state.dateX.floatValue
+            val nativeDateCenterX = (realW / densityVal / 2f) + cfg.dateX
             val dateLeft = nativeDateCenterX - (dateWDp / 2f)
             val dateRight = nativeDateCenterX + (dateWDp / 2f)
-            val dateTop = state.dateY.floatValue
+            val dateTop = cfg.dateY
             val dateBottom = dateTop + dateHDp
 
             val clockLeft = sharedPathBounds.left / densityVal
@@ -226,7 +243,7 @@ fun ClockStudioPreviewCard(
 
                 val safeClampedY = targetY.coerceIn(minSafeYDp, maxDateSafeYDp)
                 if (abs(datePhysicsSpringY.targetValue - safeClampedY) > 1.5f) {
-                    datePhysicsSpringY.snapTo(state.dateY.floatValue)
+                    datePhysicsSpringY.snapTo(cfg.dateY)
                     datePhysicsSpringY.animateTo(
                         targetValue = safeClampedY,
                         animationSpec = spring(
@@ -234,7 +251,7 @@ fun ClockStudioPreviewCard(
                             stiffness = Spring.StiffnessLow
                         )
                     ) {
-                        state.dateY.floatValue = value
+                        state.updateConfig { it.copy(dateY = value) }
                     }
                 }
             }
@@ -243,10 +260,10 @@ fun ClockStudioPreviewCard(
 
     val gestureModifier = if (!isMlLoading) {
         Modifier.pointerInput(realW, realH) {
-            var rawClockX = state.clockX.floatValue
-            var rawClockY = state.clockY.floatValue
-            var rawDateX = state.dateX.floatValue
-            var rawDateY = state.dateY.floatValue
+            var rawClockX = state.clockKitConfig.clockX
+            var rawClockY = state.clockKitConfig.clockY
+            var rawDateX = state.clockKitConfig.dateX
+            var rawDateY = state.clockKitConfig.dateY
 
             awaitEachGesture {
                 val down = awaitFirstDown(requireUnconsumed = true)
@@ -254,18 +271,21 @@ fun ClockStudioPreviewCard(
                 val timeStart = System.currentTimeMillis()
                 var dragged = false
 
+                val styleAtDown = latestStyle
+                val cfgAtDown = state.clockKitConfig
                 val previewScale = size.width / realW
-                val scaledDateY = (state.dateY.floatValue * densityVal) * previewScale
-                val scaledClockY = (state.clockY.floatValue * densityVal) * previewScale
+                val externalDateActive = styleAtDown.datePolicy(cfgAtDown) == ClockDatePolicy.EXTERNAL_STANDARD
+                val scaledDateY = (cfgAtDown.dateY * densityVal) * previewScale
+                val scaledClockY = (cfgAtDown.clockY * densityVal) * previewScale
                 val distToDate = abs(down.position.y - scaledDateY)
                 val distToClock = abs(down.position.y - scaledClockY)
                 val dateHitThresholdPx = (state.dateSize.floatValue * densityVal * 1.5f) * previewScale
-                val activeDrag = if (distToDate < distToClock && distToDate < dateHitThresholdPx) "DATE" else "CLOCK"
+                val activeDrag = if (externalDateActive && distToDate < distToClock && distToDate < dateHitThresholdPx) "DATE" else "CLOCK"
 
-                rawClockX = state.clockX.floatValue
-                rawClockY = state.clockY.floatValue
-                rawDateX = state.dateX.floatValue
-                rawDateY = state.dateY.floatValue
+                rawClockX = cfgAtDown.clockX
+                rawClockY = cfgAtDown.clockY
+                rawDateX = cfgAtDown.dateX
+                rawDateY = cfgAtDown.dateY
 
                 do {
                     val event = awaitPointerEvent()
@@ -275,64 +295,81 @@ fun ClockStudioPreviewCard(
                     if (pan.getDistance() > 2f || abs(zoom - 1f) > 0.01f) dragged = true
 
                     if (dragged) {
+                        val curStyle = latestStyle
+                        val curCfg = state.clockKitConfig
                         val deltaNativeDpX = (pan.x / previewScale) / densityVal
                         val deltaNativeDpY = (pan.y / previewScale) / densityVal
-                        val maxClockSafeYDp = (realH / densityVal) - navBarDp - (state.hourSize.floatValue * 0.75f)
-                        val maxDateSafeYDp = (realH / densityVal) - navBarDp - (state.dateSize.floatValue * 1.5f)
 
                         val sideSafeMarginDp = 18f
                         val halfScreenDp = realW / densityVal / 2f
 
-                        val sampleDate = if (dateText.isNotEmpty()) dateText else "Wednesday, 14 October"
-                        val dateWidthDp = datePaint.measureText(sampleDate) / densityVal
-                        val halfDateWDp = dateWidthDp / 2f
-                        val minSafeDateX = -halfScreenDp + halfDateWDp + sideSafeMarginDp
-                        val maxSafeDateX = halfScreenDp - halfDateWDp - sideSafeMarginDp
-
-                        val hPx = state.hourSize.floatValue * densityVal
-                        val mPx = state.minSize.floatValue * densityVal
-                        val isVert = state.clockLayout.intValue == 1
-                        val sampleTime = if (timeString.isNotEmpty()) timeString else "00:00"
-                        val rawClockWidthPx = AdaptiveClockHelper.measureClockWidth(sampleTime, hPx, mPx, customTypeface, isVert)
-                        val strokePaddingPx = (state.strokeWidth.floatValue * densityVal) + (4f * densityVal)
-                        val clockWidthDp = (rawClockWidthPx + strokePaddingPx) / densityVal
+                        val mCtx = ClockMeasureContext(
+                            context = context,
+                            screenW = realW,
+                            screenH = realH,
+                            density = densityVal,
+                            typeface = latestTypeface,
+                            timeString = latestTime.ifEmpty { "00:00" },
+                            dateString = latestDate.ifEmpty { "Wednesday, 14 October" }
+                        )
+                        val measured = curStyle.measure(mCtx, curCfg)
+                        val clockWidthDp = measured.contentWidthPx / densityVal
+                        val clockHeightDp = measured.contentHeightPx / densityVal
                         val halfClockWDp = clockWidthDp / 2f
-                        val minSafeClockX = -halfScreenDp + halfClockWDp + sideSafeMarginDp
-                        val maxSafeClockX = halfScreenDp - halfClockWDp - sideSafeMarginDp
 
-                        if (activeDrag == "DATE" && !state.dateAttached.value) {
+                        val minSafeClockX = (-halfScreenDp + halfClockWDp + sideSafeMarginDp).coerceAtMost(0f)
+                        val maxSafeClockX = (halfScreenDp - halfClockWDp - sideSafeMarginDp).coerceAtLeast(0f)
+                        val maxClockSafeYDp = ((realH / densityVal) - navBarDp - (clockHeightDp * 0.55f)).coerceAtLeast(minSafeYDp)
+
+                        if (activeDrag == "DATE" &&
+                            curStyle.datePolicy(curCfg) == ClockDatePolicy.EXTERNAL_STANDARD &&
+                            !curCfg.dateAttached
+                        ) {
                             isDraggingDate = true
+                            val sampleDate = latestDate.ifEmpty { "Wednesday, 14 October" }
+                            val dateWidthDp = datePaint.measureText(sampleDate) / densityVal
+                            val halfDateWDp = dateWidthDp / 2f
+                            val minSafeDateX = (-halfScreenDp + halfDateWDp + sideSafeMarginDp).coerceAtMost(0f)
+                            val maxSafeDateX = (halfScreenDp - halfDateWDp - sideSafeMarginDp).coerceAtLeast(0f)
+                            val maxDateSafeYDp = (realH / densityVal) - navBarDp - (state.dateSize.floatValue * 1.5f)
+
                             rawDateX += deltaNativeDpX
                             rawDateY += deltaNativeDpY
-                            state.dateX.floatValue = if (minSafeDateX <= maxSafeDateX) {
-                                rawDateX.coerceIn(minSafeDateX, maxSafeDateX)
-                            } else 0f
-                            state.dateY.floatValue = rawDateY.coerceIn(minSafeYDp, maxDateSafeYDp)
-                            rawDateX = state.dateX.floatValue
-                            rawDateY = state.dateY.floatValue
+                            val nextDateX = rawDateX.coerceIn(minSafeDateX, maxSafeDateX)
+                            val nextDateY = rawDateY.coerceIn(minSafeYDp, maxDateSafeYDp)
+                            rawDateX = nextDateX
+                            rawDateY = nextDateY
+                            state.updateConfig { it.copy(dateX = nextDateX, dateY = nextDateY) }
                         } else {
                             isDraggingClock = true
-                            state.hourSize.floatValue = (state.hourSize.floatValue * zoom).coerceIn(minClockSizeDp, maxClockSizeDp)
-                            state.minSize.floatValue = (state.minSize.floatValue * zoom).coerceIn(minClockSizeDp, maxClockSizeDp)
+                            val zoomedCfg = if (abs(zoom - 1f) > 0.005f) {
+                                curStyle.onPinchZoom(curCfg, zoom)
+                            } else curCfg
+
                             rawClockX += deltaNativeDpX
                             rawClockY += deltaNativeDpY
+
                             val fontMetrics = datePaint.fontMetrics
                             val dateLineHeightDp = (fontMetrics.descent - fontMetrics.ascent) / densityVal
-                            val dynamicGapDp = (state.strokeWidth.floatValue * 0.4f) + (dateLineHeightDp * 0.35f)
+                            val strokeW = zoomedCfg.getFloat("adaptive_vector", "stroke_width", 8f)
+                            val dynamicGapDp = (strokeW * 0.4f) + (dateLineHeightDp * 0.35f)
                             val compoundDateOffsetDp = dateLineHeightDp + dynamicGapDp
 
-                            val effectiveMinClockYDp = if (state.dateAttached.value && state.stretchEnabled.value) {
+                            val effectiveMinClockYDp = if (
+                                curStyle.datePolicy(zoomedCfg) == ClockDatePolicy.EXTERNAL_STANDARD &&
+                                zoomedCfg.dateAttached &&
+                                curStyle.needsCollisionMap(zoomedCfg)
+                            ) {
                                 minSafeYDp + compoundDateOffsetDp
                             } else {
                                 minSafeYDp
                             }
 
-                            state.clockX.floatValue = if (minSafeClockX <= maxSafeClockX) {
-                                rawClockX.coerceIn(minSafeClockX, maxSafeClockX)
-                            } else 0f
-                            state.clockY.floatValue = rawClockY.coerceIn(effectiveMinClockYDp, maxClockSafeYDp)
-                            rawClockX = state.clockX.floatValue
-                            rawClockY = state.clockY.floatValue
+                            val nextClockX = rawClockX.coerceIn(minSafeClockX, maxSafeClockX)
+                            val nextClockY = rawClockY.coerceIn(effectiveMinClockYDp, maxClockSafeYDp)
+                            rawClockX = nextClockX
+                            rawClockY = nextClockY
+                            state.updateConfig { zoomedCfg.copy(clockX = nextClockX, clockY = nextClockY) }
                         }
                         event.changes.forEach { if (it.positionChanged()) it.consume() }
                     }
@@ -346,13 +383,11 @@ fun ClockStudioPreviewCard(
                 isDraggingClock = false
                 isDraggingDate = false
 
-                if (abs(state.clockX.floatValue) < magneticSnapThresholdDp) {
-                    state.clockX.floatValue = 0f
-                    rawClockX = 0f
-                }
-                if (!state.dateAttached.value && abs(state.dateX.floatValue) < magneticSnapThresholdDp) {
-                    state.dateX.floatValue = 0f
-                    rawDateX = 0f
+                val endCfg = state.clockKitConfig
+                val snapClockX = if (abs(endCfg.clockX) < magneticSnapThresholdDp) 0f else endCfg.clockX
+                val snapDateX = if (!endCfg.dateAttached && abs(endCfg.dateX) < magneticSnapThresholdDp) 0f else endCfg.dateX
+                if (snapClockX != endCfg.clockX || snapDateX != endCfg.dateX) {
+                    state.updateConfig { it.copy(clockX = snapClockX, dateX = snapDateX) }
                 }
             }
         }
@@ -398,101 +433,56 @@ fun ClockStudioPreviewCard(
                 Box(modifier = Modifier.fillMaxSize()) {
                     Canvas(modifier = Modifier.fillMaxSize()) {
                         val previewScale = size.width / realW
+                        val cfg = state.clockKitConfig
+                        val frameMillis = if (needsContinuous) animFrameMillis else System.currentTimeMillis()
 
                         drawIntoCanvas { canvas ->
                             val nativeCanvas = canvas.nativeCanvas
+                            var capturedFrameCtx: ClockFrameContext? = null
 
                             val drawClockAndDateRoutine: (android.graphics.Canvas) -> Unit = { targetCanvas ->
-                                if (dateText.isNotEmpty()) {
-                                    datePaint.color = state.clockColor.intValue
+                                if (activeStyle.datePolicy(cfg) == ClockDatePolicy.EXTERNAL_STANDARD && dateText.isNotEmpty()) {
+                                    datePaint.color = cfg.color
                                     datePaint.textSize = state.dateSize.floatValue * densityVal
-                                    val nativeDateX = (realW / 2f) + (state.dateX.floatValue * densityVal)
-                                    val nativeDateY = state.dateY.floatValue * densityVal
+                                    val nativeDateX = (realW / 2f) + (cfg.dateX * densityVal)
+                                    val nativeDateY = cfg.dateY * densityVal
                                     val drawBaselineY = nativeDateY - datePaint.fontMetrics.top
                                     targetCanvas.drawText(dateText, nativeDateX, drawBaselineY, datePaint)
                                 }
 
                                 if (timeString.isNotEmpty()) {
-                                    val hPx = state.hourSize.floatValue * densityVal
-                                    val mPx = state.minSize.floatValue * densityVal
-                                    val isVert = state.clockLayout.intValue == 1
-                                    val totalWidth = AdaptiveClockHelper.measureClockWidth(timeString, hPx, mPx, customTypeface, isVert)
-                                    val nativeClockCenterX = (realW / 2f) + (state.clockX.floatValue * densityVal)
-                                    val startX = nativeClockCenterX - (totalWidth / 2f)
-                                    val startY = state.clockY.floatValue * densityVal
-
-                                    val paths = AdaptiveClockHelper.buildPaths(
-                                        timeString = timeString,
-                                        startX = startX,
-                                        startY = startY,
-                                        absoluteClockX = 0f,
-                                        absoluteClockY = 0f,
-                                        hourSizePx = hPx,
-                                        minSizePx = mPx,
-                                        typeface = customTypeface,
+                                    val frameCtx = ClockFrameContext(
+                                        context = context,
                                         screenW = realW,
                                         screenH = realH,
-                                        isStretchEnabled = state.stretchEnabled.value,
-                                        isVertical = isVert,
-                                        collisionMap = collisionMapArray,
                                         density = densityVal,
-                                        strokeWidth = state.strokeWidth.floatValue,
-                                        stretchProgress = 1f
+                                        clockCenterX = (realW / 2f) + (cfg.clockX * densityVal),
+                                        clockTopY = cfg.clockY * densityVal,
+                                        timeMillis = frameMillis,
+                                        timeString = timeString,
+                                        dateString = dateText,
+                                        is24Hour = android.text.format.DateFormat.is24HourFormat(context),
+                                        typeface = customTypeface,
+                                        notificationProgress = 0f,
+                                        collisionMap = collisionMapArray,
+                                        depthMask = previewMask,
+                                        rawDepthMap = state.layerStack.depthVisionLayer.rawDepthMap,
+                                        zoomFactor = state.liveWallpaperZoom.floatValue
                                     )
-                                    
-                                    if (state.gravityEnabled.value) {
-                                        val rawDepth = state.layerStack.depthVisionLayer.rawDepthMap
-                                        val rawBounds = RectF()
-                                        val tempPath = Path().apply {
-                                            addPath(paths.hours)
-                                            addPath(paths.colon)
-                                            addPath(paths.mins)
-                                            computeBounds(rawBounds, true)
-                                        }
+                                    capturedFrameCtx = frameCtx
 
-                                        val perspective = PerspectiveFitHelper.calculateAutoPerspective(
-                                            rawDepthMap = rawDepth,
-                                            clockRect = rawBounds,
-                                            sampleRectOnScreen = rawBounds,
-                                            screenW = realW,
-                                            screenH = realH,
-                                            intensity = state.gravityIntensity.floatValue,
-                                            mode = state.gravityMode.value
-                                        )
+                                    val (renderResult, elevateAboveSubject) = ClockKitEngine.renderForPreview(
+                                        canvas = targetCanvas,
+                                        style = activeStyle,
+                                        frame = frameCtx,
+                                        config = cfg
+                                    )
 
-                                        paths.hours.transform(perspective.transformMatrix)
-                                        paths.colon.transform(perspective.transformMatrix)
-                                        paths.mins.transform(perspective.transformMatrix)
-                                    }
-
-                                    combinedClockPath.rewind()
-                                    combinedClockPath.addPath(paths.hours)
-                                    combinedClockPath.addPath(paths.colon)
-                                    combinedClockPath.addPath(paths.mins)
-                                    combinedClockPath.computeBounds(sharedPathBounds, true)
+                                    sharedPathBounds.set(renderResult.boundsOnScreen)
 
                                     if (state.layerStack.isDepthEnabled && previewMask != null) {
-                                        val ratio = AdaptiveClockHelper.calculateOcclusionRatio(
-                                            clockPath = combinedClockPath,
-                                            mask = previewMask,
-                                            screenW = realW,
-                                            screenH = realH,
-                                            clockAbsoluteX = 0f,
-                                            clockAbsoluteY = 0f,
-                                            zoomFactor = state.liveWallpaperZoom.floatValue
-                                        )
-                                        val isOccludedTooMuch = ratio > state.layerStack.depthOcclusionLimit
-                                        state.layerStack.clockLayer.zIndex = if (isOccludedTooMuch) 3 else 1
+                                        state.layerStack.clockLayer.zIndex = if (elevateAboveSubject) 4 else 2
                                     }
-
-                                    vectorPaint.strokeWidth = state.strokeWidth.floatValue * densityVal
-                                    vectorPaint.pathEffect = CornerPathEffect(state.roundness.floatValue * densityVal)
-                                    vectorPaint.color = if (state.dualTone.value) android.graphics.Color.WHITE else state.clockColor.intValue
-                                    targetCanvas.drawPath(paths.hours, vectorPaint)
-                                    targetCanvas.drawPath(paths.colon, vectorPaint)
-
-                                    vectorPaint.color = state.clockColor.intValue
-                                    targetCanvas.drawPath(paths.mins, vectorPaint)
                                 }
                             }
 
@@ -519,6 +509,20 @@ fun ClockStudioPreviewCard(
                                         )
                                     }
 
+                                    capturedFrameCtx?.let { fCtx ->
+                                        if (state.layerStack.clockLayer.isVisible) {
+                                            val overlayRes = ClockKitEngine.renderPreviewOverlay(
+                                                canvas = recordingCanvas,
+                                                style = activeStyle,
+                                                frame = fCtx,
+                                                config = cfg
+                                            )
+                                            if (overlayRes != null) {
+                                                sharedPathBounds.union(overlayRes.boundsOnScreen)
+                                            }
+                                        }
+                                    }
+
                                     val nsslTop = state.notificationShelfTop.floatValue
                                     if (nsslTop > 0f && isDraggingClock && sharedPathBounds.bottom > nsslTop) {
                                         recordingCanvas.drawLine(
@@ -534,7 +538,7 @@ fun ClockStudioPreviewCard(
                                         val cy = state.udfpsY.floatValue
                                         val sensorBufferPx = sensorR * 0.15f
                                         val isOverlapping = (cx in (sharedPathBounds.left - sensorBufferPx)..(sharedPathBounds.right + sensorBufferPx)) &&
-                                                (cy in (sharedPathBounds.top - sensorBufferPx)..(sharedPathBounds.bottom + sensorBufferPx))
+                                            (cy in (sharedPathBounds.top - sensorBufferPx)..(sharedPathBounds.bottom + sensorBufferPx))
 
                                         udfpsPaint.color = if (isOverlapping) {
                                             android.graphics.Color.argb(230, 255, 82, 82)
@@ -564,14 +568,27 @@ fun ClockStudioPreviewCard(
                                         drawClockAndDate = drawClockAndDateRoutine
                                     )
                                 }
+                                capturedFrameCtx?.let { fCtx ->
+                                    if (state.layerStack.clockLayer.isVisible) {
+                                        val overlayRes = ClockKitEngine.renderPreviewOverlay(
+                                            canvas = nativeCanvas,
+                                            style = activeStyle,
+                                            frame = fCtx,
+                                            config = cfg
+                                        )
+                                        if (overlayRes != null) {
+                                            sharedPathBounds.union(overlayRes.boundsOnScreen)
+                                        }
+                                    }
+                                }
                                 nativeCanvas.restore()
                             }
                         }
 
-                        if (isDraggingClock) {
+                        if (isDraggingClock && sharedPathBounds.width() > 0f && sharedPathBounds.height() > 0f) {
                             val scale = size.width / realW
-                            val padXPx = (state.strokeWidth.floatValue * densityVal + 8f * densityVal) * scale
-                            val padYPx = (state.strokeWidth.floatValue * densityVal * 0.5f + 6f * densityVal) * scale
+                            val padXPx = 12f * densityVal * scale
+                            val padYPx = 8f * densityVal * scale
 
                             drawRoundRect(
                                 color = Color.White.copy(alpha = 0.6f),

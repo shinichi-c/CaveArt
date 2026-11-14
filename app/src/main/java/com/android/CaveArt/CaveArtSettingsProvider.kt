@@ -66,7 +66,7 @@ class CaveArtSettingsProvider : ContentProvider() {
         } else baseContext
 
         val segment = uri.lastPathSegment
-        
+
         if (segment == "depth_mask" || segment == "boot_cutout.png" || segment == "lock_depth_mask.png") {
             val candidateFiles = listOf(
                 File(safeContext.filesDir, "lock_depth_mask.png"),
@@ -79,7 +79,7 @@ class CaveArtSettingsProvider : ContentProvider() {
                 }
             }
         }
-        
+
         if (segment == "raw_depth" || segment == "lock_raw_depth.png") {
             val candidateFiles = listOf(
                 File(safeContext.filesDir, "lock_raw_depth.png"),
@@ -111,6 +111,7 @@ class CaveArtSettingsProvider : ContentProvider() {
         val cursor = MatrixCursor(arrayOf("value"))
 
         when (uri.lastPathSegment) {
+            "clockkit_config" -> cursor.addRow(arrayOf(prefs.getString("clockkit_config", "")))
             "clock_x" -> cursor.addRow(arrayOf(prefs.getFloat("clock_x", 0f)))
             "clock_y" -> cursor.addRow(arrayOf(prefs.getFloat("clock_y", 110f)))
             "date_x" -> cursor.addRow(arrayOf(prefs.getFloat("date_x", 0f)))
@@ -141,7 +142,7 @@ class CaveArtSettingsProvider : ContentProvider() {
             "layer_subject_opacity" -> cursor.addRow(arrayOf(prefs.getFloat("layer_subject_opacity", 1.0f)))
             "layer_bg_opacity" -> cursor.addRow(arrayOf(prefs.getFloat("layer_bg_opacity", 1.0f)))
             "telemetry_zoom" -> cursor.addRow(arrayOf(prefs.getFloat("telemetry_zoom", 1.10f)))
-            
+
             "clock_gravity" -> cursor.addRow(arrayOf(if (prefs.getBoolean("clock_gravity", false)) 1 else 0))
             "clock_gravity_intensity" -> cursor.addRow(arrayOf(prefs.getFloat("clock_gravity_intensity", 1.0f)))
         }

@@ -2,8 +2,13 @@ package com.android.CaveArt
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.os.Build
 import androidx.compose.runtime.*
 import androidx.compose.ui.graphics.vector.ImageVector
+import com.android.CaveArt.clockkit.ClockControl
+import com.android.CaveArt.clockkit.ClockKitConfig
+import com.android.CaveArt.clockkit.ClockKitConfigStore
+import com.android.CaveArt.clockkit.ClockKitEngine
 import com.android.CaveArt.layer.LockscreenLayerStack
 
 enum class ActiveLayerTab(val label: String) {
@@ -18,7 +23,10 @@ enum class ContextualToolType {
     SLIDER,
     FONT,
     COLOR,
-    OPTIONS
+    OPTIONS,
+    CHOICE,
+    QUICK_CHIPS,
+    TOGGLE
 }
 
 data class LayerAction(
@@ -29,13 +37,14 @@ data class LayerAction(
     val getVal: () -> Float = { 0f },
     val setVal: (Float) -> Unit = {},
     val range: ClosedFloatingPointRange<Float> = 0f..1f,
-    val formatDisplay: (Float) -> String = { "" }
+    val formatDisplay: (Float) -> String = { "" },
+    val clockControl: ClockControl? = null
 )
 
 class ClockStudioState(viewModel: WallpaperViewModel) {
     val layerStack: LockscreenLayerStack = LockscreenLayerStack().apply {
-        setDepthClockActive(viewModel.isClockDepthEnabled && viewModel.clockLayerOrder == 1)
-        depthOcclusionLimit = viewModel.clockDepthOcclusion
+        setDepthClockActive(viewModel.clockKitConfig.isDepthEnabled)
+        depthOcclusionLimit = viewModel.clockKitConfig.depthOcclusionLimit
         backgroundLayer.structure = viewModel.layerBackgroundStructure
         subjectLayer.opacity = viewModel.layerSubjectOpacity.coerceAtLeast(1.0f)
         backgroundLayer.opacity = viewModel.layerBackgroundOpacity.coerceAtLeast(1.0f)
@@ -43,27 +52,24 @@ class ClockStudioState(viewModel: WallpaperViewModel) {
         subjectLayer.isVisible = true
     }
 
-    val clockX: MutableFloatState = mutableFloatStateOf(viewModel.lockscreenClockOffsetX)
-    val clockY: MutableFloatState = mutableFloatStateOf(viewModel.lockscreenClockOffsetY)
-    val dateX: MutableFloatState = mutableFloatStateOf(viewModel.lockscreenDateOffsetX)
-    val dateY: MutableFloatState = mutableFloatStateOf(viewModel.lockscreenDateOffsetY)
-    val hourSize: MutableFloatState = mutableFloatStateOf(viewModel.clockHourSize)
-    val minSize: MutableFloatState = mutableFloatStateOf(viewModel.clockMinuteSize)
-    val strokeWidth: MutableFloatState = mutableFloatStateOf(viewModel.clockStrokeWidth)
-    val roundness: MutableFloatState = mutableFloatStateOf(viewModel.clockRoundness)
-    val stretchEnabled: MutableState<Boolean> = mutableStateOf(viewModel.isClockStretchEnabled)
-    val collisionMap: MutableState<String> = mutableStateOf(viewModel.clockCollisionMap)
-    val clockColor: MutableIntState = mutableIntStateOf(viewModel.clockColor)
-    val dualTone: MutableState<Boolean> = mutableStateOf(viewModel.isDualToneEnabled)
-    val clockLayout: MutableIntState = mutableIntStateOf(viewModel.clockLayout)
-    val dateFormat: MutableIntState = mutableIntStateOf(viewModel.dateLayout)
-    val dateAttached: MutableState<Boolean> = mutableStateOf(viewModel.isDateAttached)
-    val clockFont: MutableState<String> = mutableStateOf(viewModel.clockFont)
-    val dateSize: MutableFloatState = mutableFloatStateOf((viewModel.clockHourSize * 0.24f).coerceIn(14f, 34f))
-    val gravityEnabled: MutableState<Boolean> = mutableStateOf(viewModel.isClockGravityEnabled)
-    val gravityIntensity: MutableFloatState = mutableFloatStateOf(viewModel.clockGravityIntensity)
-    val gravityMode: MutableState<GravityMode> = mutableStateOf(GravityMode.SURFACE_PLANE)
+    var clockKitConfig: ClockKitConfig by mutableStateOf(viewModel.clockKitConfig)
 
+    fun updateConfig(transform: (ClockKitConfig) -> ClockKitConfig) {
+        val next = transform(clockKitConfig)
+        clockKitConfig = next
+        if (next.isDepthEnabled != layerStack.isDepthEnabled) {
+            layerStack.setDepthClockActive(next.isDepthEnabled)
+        }
+        if (next.depthOcclusionLimit != layerStack.depthOcclusionLimit) {
+            layerStack.depthOcclusionLimit = next.depthOcclusionLimit
+        }
+    }
+
+    val dateSize: MutableFloatState = mutableFloatStateOf(
+        (viewModel.clockKitConfig.getFloat("adaptive_vector", "hour_size", 100f) * 0.24f).coerceIn(14f, 34f)
+    )
+
+    val collisionMap: MutableState<String> = mutableStateOf(viewModel.clockCollisionMap)
     val udfpsX: MutableFloatState = mutableFloatStateOf(-1f)
     val udfpsY: MutableFloatState = mutableFloatStateOf(-1f)
     val udfpsRadius: MutableFloatState = mutableFloatStateOf(0f)
@@ -83,27 +89,38 @@ fun saveAndBroadcastClockSettings(
     realW: Float,
     realH: Float
 ) {
-    viewModel.updateClockLayout(context, state.clockLayout.intValue)
-    viewModel.updateDualTone(context, state.dualTone.value)
-    viewModel.updateClockFont(context, state.clockFont.value)
-    viewModel.updateClockColor(context, state.clockColor.intValue)
-    viewModel.updateDateLayout(context, state.dateFormat.intValue)
-    viewModel.updateDateAttached(context, state.dateAttached.value)
-    viewModel.updateClockStyle(
-        context, state.hourSize.floatValue, state.minSize.floatValue,
-        state.strokeWidth.floatValue, state.roundness.floatValue,
-        state.dateSize.floatValue
+    val safeCtx = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+        context.createDeviceProtectedStorageContext()
+    } else context
+
+    safeCtx.getSharedPreferences(ClockKitConfigStore.PREFS_NAME, Context.MODE_PRIVATE)
+        .edit()
+        .putFloat("telemetry_zoom", state.liveWallpaperZoom.floatValue)
+        .apply()
+
+    val finalConfig = state.clockKitConfig.copy(
+        isDepthEnabled = state.layerStack.isDepthEnabled,
+        depthOcclusionLimit = state.layerStack.depthOcclusionLimit
     )
-    viewModel.updateLockscreenClockPosition(context, state.clockX.floatValue, state.clockY.floatValue)
-    viewModel.updateLockscreenDatePosition(context, state.dateX.floatValue, state.dateY.floatValue)
-    viewModel.toggleClockStretch(context, state.stretchEnabled.value, previewMask, realW, realH)
-    
+
+    val activeStyle = ClockKitEngine.getStyle(finalConfig.styleId)
+    val mapToSave = if (activeStyle.needsCollisionMap(finalConfig) && previewMask != null) {
+        state.collisionMap.value.ifEmpty {
+            AdaptiveClockHelper.generateCollisionMap(previewMask, realW, realH, state.liveWallpaperZoom.floatValue)
+        }
+    } else {
+        state.collisionMap.value
+    }
+
+    if (previewMask != null && !previewMask.isRecycled) {
+        viewModel.saveDepthMaskToDisk(context, previewMask)
+    }
+
     val activeRawDepth = state.layerStack.depthVisionLayer.rawDepthMap
     if (activeRawDepth != null && !activeRawDepth.isRecycled) {
         viewModel.saveRawDepthToDisk(context, activeRawDepth)
     }
-    
-    viewModel.updateClockGravity(context, state.gravityEnabled.value, state.gravityIntensity.floatValue)
 
+    viewModel.updateClockKitConfig(context, finalConfig, mapToSave)
     viewModel.saveLayerStackSettings(context, state.layerStack)
 }
