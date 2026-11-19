@@ -8,9 +8,9 @@ import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.os.Build
 import android.view.HapticFeedbackConstants
-import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -18,15 +18,16 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.outlined.*
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
@@ -69,12 +70,23 @@ fun ClockStudio(
     var isMlLoading by remember(wallpaper.id) { mutableStateOf(true) }
 
     var showDateCustomizeSheet by remember { mutableStateOf(false) }
-    var isStyleBrowseMode by remember { mutableStateOf(false) }
+    var isStyleBrowseMode by remember { mutableStateOf(true) }
     var showLayersSheet by remember { mutableStateOf(false) }
     var showApplyOptions by remember { mutableStateOf(false) }
 
     var activeLayerTab by remember { mutableStateOf(ActiveLayerTab.CLOCK) }
     var activeActionIndex by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(viewModel.clockKitConfig) {
+        if (state.clockKitConfig != viewModel.clockKitConfig) {
+            state.updateConfig { viewModel.clockKitConfig }
+        }
+    }
+    LaunchedEffect(viewModel.clockCollisionMap) {
+        if (state.collisionMap.value != viewModel.clockCollisionMap) {
+            state.collisionMap.value = viewModel.clockCollisionMap
+        }
+    }
 
     val styles = ClockKitEngine.styles
     val activeStyle = remember(state.clockKitConfig.styleId) {
@@ -93,10 +105,6 @@ fun ClockStudio(
                 stylePagerState.scrollToPage(targetIdx)
             }
         }
-    }
-
-    BackHandler(enabled = isStyleBrowseMode) {
-        isStyleBrowseMode = false
     }
 
     LaunchedEffect(activeLayerTab) {
@@ -127,7 +135,7 @@ fun ClockStudio(
                 LayerAction(
                     id = "all_occlusion",
                     label = "Depth Occlusion",
-                    icon = Icons.Rounded.Layers,
+                    icon = Icons.Outlined.Layers,
                     toolType = ContextualToolType.SLIDER,
                     getVal = { state.layerStack.depthOcclusionLimit },
                     setVal = {
@@ -140,7 +148,7 @@ fun ClockStudio(
                 LayerAction(
                     id = "all_zoom",
                     label = "Wallpaper Zoom",
-                    icon = Icons.Rounded.ZoomIn,
+                    icon = Icons.Outlined.ZoomIn,
                     toolType = ContextualToolType.SLIDER,
                     getVal = { state.liveWallpaperZoom.floatValue },
                     setVal = { state.liveWallpaperZoom.floatValue = it },
@@ -152,7 +160,7 @@ fun ClockStudio(
                 LayerAction(
                     id = "bg_vibrance",
                     label = "Background Vibrance",
-                    icon = Icons.Rounded.AutoFixHigh,
+                    icon = Icons.Outlined.Tonality,
                     toolType = ContextualToolType.SLIDER,
                     getVal = { state.layerStack.backgroundLayer.structure },
                     setVal = { state.layerStack.backgroundLayer.structure = it },
@@ -165,7 +173,7 @@ fun ClockStudio(
                 LayerAction(
                     id = "bg_opacity",
                     label = "Background Opacity",
-                    icon = Icons.Rounded.Opacity,
+                    icon = Icons.Outlined.Opacity,
                     toolType = ContextualToolType.SLIDER,
                     getVal = { state.layerStack.backgroundLayer.opacity },
                     setVal = { state.layerStack.backgroundLayer.opacity = it },
@@ -214,7 +222,7 @@ fun ClockStudio(
                         LayerAction(
                             id = "clock_gravity_intensity",
                             label = "Gravity Slant",
-                            icon = Icons.Rounded.Explore,
+                            icon = Icons.Outlined.Explore,
                             toolType = ContextualToolType.SLIDER,
                             getVal = { state.clockKitConfig.gravityIntensity },
                             setVal = { v -> state.updateConfig { it.copy(gravityIntensity = v) } },
@@ -228,7 +236,7 @@ fun ClockStudio(
                 LayerAction(
                     id = "subject_opacity",
                     label = "Subject Opacity",
-                    icon = Icons.Rounded.Opacity,
+                    icon = Icons.Outlined.Contrast,
                     toolType = ContextualToolType.SLIDER,
                     getVal = { state.layerStack.subjectLayer.opacity },
                     setVal = { state.layerStack.subjectLayer.opacity = it },
@@ -240,7 +248,7 @@ fun ClockStudio(
                 LayerAction(
                     id = "depth_opacity",
                     label = "Heatmap Opacity",
-                    icon = Icons.Rounded.Visibility,
+                    icon = Icons.Outlined.Gradient,
                     toolType = ContextualToolType.SLIDER,
                     getVal = { state.layerStack.depthVisionLayer.opacity },
                     setVal = {
@@ -253,7 +261,7 @@ fun ClockStudio(
                 LayerAction(
                     id = "depth_occlusion",
                     label = "Occlusion Threshold",
-                    icon = Icons.Rounded.Layers,
+                    icon = Icons.Outlined.Layers,
                     toolType = ContextualToolType.SLIDER,
                     getVal = { state.layerStack.depthOcclusionLimit },
                     setVal = {
@@ -401,6 +409,7 @@ fun ClockStudio(
             val dynamicTheme = MonetEngine.getThemePalette(context, wallpaper, isDarkTheme)
             withContext(Dispatchers.Main) {
                 extractedColors = dynamicTheme.allColors
+                viewModel.savePaletteColorsForLockEditor(dynamicTheme.allColors)
                 if (state.clockKitConfig.color == 0 || isDefaultColor(state.clockKitConfig.color)) {
                     val picked = dynamicTheme.tonalSpot.firstOrNull() ?: dynamicTheme.seedColor
                     state.updateConfig { it.copy(color = picked) }
@@ -431,93 +440,35 @@ fun ClockStudio(
     }
 
     Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
-        if (viewModel.isAmbientBlurEnabled) {
-            AsyncWallpaperImage(
-                wallpaper = wallpaper,
-                contentDescription = null,
-                viewModel = viewModel,
-                modifier = Modifier.fillMaxSize().blur(85.dp),
-                contentScale = ContentScale.Crop,
-                allowMagic = false
-            )
-            Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface.copy(alpha = 0.72f)))
-        }
+        AsyncWallpaperImage(
+            wallpaper = wallpaper,
+            contentDescription = null,
+            viewModel = viewModel,
+            modifier = Modifier.fillMaxSize().blur(85.dp),
+            contentScale = ContentScale.Crop,
+            allowMagic = false
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    MaterialTheme.colorScheme.surface.copy(
+                        alpha = if (viewModel.isAmbientBlurEnabled) 0.58f else 0.90f
+                    )
+                )
+        )
 
         Scaffold(
             containerColor = Color.Transparent,
-            topBar = {
-                val topBarTitle = if (isStyleBrowseMode) {
-                    styles.getOrNull(stylePagerState.currentPage)?.name ?: activeStyle.name
-                } else {
-                    "Lock Screen"
-                }
-
-                CenterAlignedTopAppBar(
-                    title = {
-                        AnimatedContent(
-                            targetState = topBarTitle,
-                            transitionSpec = {
-                                fadeIn(tween(180)) togetherWith fadeOut(tween(140))
-                            },
-                            label = "topBarStyleTitle"
-                        ) { title ->
-                            Text(
-                                text = title,
-                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Black)
-                            )
-                        }
-                    },
-                    navigationIcon = {
-                        IconButton(onClick = {
-                            if (isStyleBrowseMode) isStyleBrowseMode = false else onBack()
-                        }) {
-                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back")
-                        }
-                    },
-                    actions = {
-                        if (!isStyleBrowseMode) {
-                            IconButton(
-                                onClick = {
-                                    view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                                    val willBeVisible = !state.layerStack.depthVisionLayer.isVisible
-                                    state.layerStack.depthVisionLayer.isVisible = willBeVisible
-                                    if (willBeVisible) {
-                                        state.layerStack.depthVisionLayer.opacity = 1.0f
-                                        activeLayerTab = ActiveLayerTab.DEPTH
-                                    }
-                                }
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.ViewInAr,
-                                    contentDescription = "Toggle 3D Depth Vision",
-                                    tint = if (state.layerStack.depthVisionLayer.isVisible) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-
-                            IconButton(
-                                onClick = {
-                                    view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                                    state.layerStack.isMaskInspectorActive = !state.layerStack.isMaskInspectorActive
-                                }
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.Visibility,
-                                    contentDescription = "Inspect Mask Overlay",
-                                    tint = if (state.layerStack.isMaskInspectorActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
-                )
-            },
+            contentWindowInsets = WindowInsets(0, 0, 0, 0),
             bottomBar = {
                 if (!isLandscape) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .navigationBarsPadding()
-                            .padding(top = 8.dp, bottom = 12.dp)
+                            .padding(top = 6.dp, bottom = 10.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Box(
                             modifier = Modifier
@@ -639,147 +590,22 @@ fun ClockStudio(
                             }
                         }
 
-                        Spacer(Modifier.height(10.dp))
+                        Spacer(Modifier.height(6.dp))
 
-                        Surface(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 14.dp),
-                            shape = CircleShape,
-                            color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.95f),
-                            shadowElevation = 8.dp
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(58.dp)
-                                    .padding(horizontal = 6.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
-                                ) {
-                                    val isClockActive = !isStyleBrowseMode && activeLayerTab == ActiveLayerTab.CLOCK
-                                    Surface(
-                                        shape = CircleShape,
-                                        color = if (isClockActive) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.7f),
-                                        modifier = Modifier
-                                            .height(44.dp)
-                                            .clickable {
-                                                view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                                                isStyleBrowseMode = false
-                                                activeLayerTab = ActiveLayerTab.CLOCK
-                                            }
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.padding(horizontal = 12.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(5.dp)
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Rounded.Schedule,
-                                                contentDescription = "Clock",
-                                                modifier = Modifier.size(16.dp),
-                                                tint = if (isClockActive) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                            Text(
-                                                text = "Clock",
-                                                maxLines = 1,
-                                                softWrap = false,
-                                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 11.5.sp),
-                                                color = if (isClockActive) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
-                                    }
-
-                                    Surface(
-                                        shape = CircleShape,
-                                        color = if (isStyleBrowseMode) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.7f),
-                                        modifier = Modifier
-                                            .height(44.dp)
-                                            .clickable {
-                                                view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                                                isStyleBrowseMode = !isStyleBrowseMode
-                                            }
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.padding(horizontal = 12.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(5.dp)
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Rounded.AutoAwesome,
-                                                contentDescription = "Style",
-                                                modifier = Modifier.size(16.dp),
-                                                tint = if (isStyleBrowseMode) MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.primary
-                                            )
-                                            Text(
-                                                text = "Style",
-                                                maxLines = 1,
-                                                softWrap = false,
-                                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 11.5.sp),
-                                                color = if (isStyleBrowseMode) MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
-                                    }
-
-                                    val isNonClockActive = !isStyleBrowseMode && activeLayerTab != ActiveLayerTab.CLOCK
-                                    Surface(
-                                        shape = CircleShape,
-                                        color = if (showLayersSheet || isNonClockActive) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.7f),
-                                        modifier = Modifier
-                                            .height(44.dp)
-                                            .clickable {
-                                                view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                                                isStyleBrowseMode = false
-                                                showLayersSheet = true
-                                            }
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.padding(horizontal = 12.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(5.dp)
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Rounded.Layers,
-                                                contentDescription = "Layers",
-                                                modifier = Modifier.size(16.dp),
-                                                tint = if (showLayersSheet || isNonClockActive) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                            Text(
-                                                text = "Layers",
-                                                maxLines = 1,
-                                                softWrap = false,
-                                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 11.5.sp),
-                                                color = if (showLayersSheet || isNonClockActive) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
-                                    }
-                                }
-
-                                Button(
-                                    onClick = {
-                                        view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
-                                        isStyleBrowseMode = false
-                                        showApplyOptions = true
-                                    },
-                                    shape = CircleShape,
-                                    modifier = Modifier.height(44.dp),
-                                    contentPadding = PaddingValues(horizontal = 15.dp)
-                                ) {
-                                    Icon(Icons.Rounded.CheckCircle, null, modifier = Modifier.size(16.dp))
-                                    Spacer(Modifier.width(5.dp))
-                                    Text(
-                                        text = "Apply",
-                                        maxLines = 1,
-                                        softWrap = false,
-                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Black, fontSize = 12.sp)
-                                    )
-                                }
+                        HorizontalBottomToolbarStrip(
+                            actions = currentLayerActions,
+                            selectedIndex = safeActionIndex,
+                            isStyleSelected = isStyleBrowseMode,
+                            showStyleItem = activeLayerTab == ActiveLayerTab.CLOCK,
+                            onStyleSelected = {
+                                activeLayerTab = ActiveLayerTab.CLOCK
+                                isStyleBrowseMode = true
+                            },
+                            onActionSelected = { idx ->
+                                isStyleBrowseMode = false
+                                activeActionIndex = idx
                             }
-                        }
+                        )
                     }
                 }
             }
@@ -788,29 +614,17 @@ fun ClockStudio(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(padding)
-                    .padding(top = 4.dp, bottom = 14.dp),
+                    .statusBarsPadding()
+                    .padding(top = 10.dp, bottom = 6.dp),
                 contentAlignment = Alignment.Center
             ) {
-                val showLeftTools = !isStyleBrowseMode && !isMlLoading && currentLayerActions.size > 1
-                val naturalCardW = maxHeight * displayGeometry.aspectRatio
-                val leftFreeSpace = (maxWidth - naturalCardW) / 2f
-                val hasRoomCentered = leftFreeSpace >= 46.dp
-
-                val previewPadStart = when {
-                    isStyleBrowseMode -> 0.dp
-                    showLeftTools && !hasRoomCentered -> 48.dp
-                    else -> 20.dp
-                }
-                val previewPadEnd = when {
-                    isStyleBrowseMode -> 0.dp
-                    showLeftTools && !hasRoomCentered -> 12.dp
-                    else -> 20.dp
-                }
+                val previewContainerPadH = if (isStyleBrowseMode) 0.dp else 16.dp
+                val activeCardHeight = if (isStyleBrowseMode) maxHeight * 0.94f else maxHeight
 
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(start = previewPadStart, end = previewPadEnd),
+                        .padding(horizontal = previewContainerPadH),
                     contentAlignment = Alignment.Center
                 ) {
                     AnimatedContent(
@@ -865,26 +679,67 @@ fun ClockStudio(
                         }
                     }
                 }
-
-                androidx.compose.animation.AnimatedVisibility(
-                    visible = showLeftTools,
-                    enter = fadeIn(tween(220)) + slideInHorizontally(initialOffsetX = { -it / 2 }),
-                    exit = fadeOut(tween(150)) + slideOutHorizontally(targetOffsetX = { -it / 2 }),
+                
+                Box(
                     modifier = Modifier
-                        .align(Alignment.CenterStart)
-                        .padding(
-                            start = if (hasRoomCentered) {
-                                ((leftFreeSpace - 36.dp) / 2f).coerceAtLeast(8.dp)
-                            } else {
-                                6.dp
-                            }
-                        )
+                        .height(activeCardHeight)
+                        .aspectRatio(displayGeometry.aspectRatio, matchHeightConstraintsFirst = true)
+                        .padding(horizontal = 14.dp, vertical = 14.dp)
                 ) {
-                    VerticalLayerActionSwitcher(
-                        actions = currentLayerActions,
-                        selectedIndex = safeActionIndex,
-                        onActionSelected = { activeActionIndex = it }
-                    )
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = !isStyleBrowseMode && !isMlLoading,
+                        enter = fadeIn(tween(200)),
+                        exit = fadeOut(tween(150)),
+                        modifier = Modifier.fillMaxSize()
+                    ) {
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            PreviewCornerPill(
+                                label = "Layers",
+                                icon = Icons.Outlined.Layers,
+                                onClick = {
+                                    view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                                    showLayersSheet = true
+                                },
+                                modifier = Modifier.align(Alignment.TopStart)
+                            )
+
+                            PreviewCornerPill(
+                                label = "Done",
+                                icon = null,
+                                onClick = {
+                                    view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                                    showApplyOptions = true
+                                },
+                                modifier = Modifier.align(Alignment.TopEnd)
+                            )
+                        }
+                    }
+
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = isStyleBrowseMode && !isMlLoading,
+                        enter = fadeIn(tween(180)),
+                        exit = fadeOut(tween(140)),
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(bottom = 14.dp)
+                    ) {
+                        val currentStyleName = styles.getOrNull(stylePagerState.currentPage)?.name ?: activeStyle.name
+                        Surface(
+                            shape = CircleShape,
+                            color = Color.Black.copy(alpha = 0.44f),
+                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.18f))
+                        ) {
+                            Text(
+                                text = currentStyleName,
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp
+                                ),
+                                color = Color.White,
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
+                            )
+                        }
+                    }
                 }
             }
 
@@ -894,7 +749,10 @@ fun ClockStudio(
                     previewOriginal = previewOriginal,
                     previewMask = previewMask,
                     activeLayerTab = activeLayerTab,
-                    onSelectLayerTab = { activeLayerTab = it },
+                    onSelectLayerTab = { selectedTab ->
+                        activeLayerTab = selectedTab
+                        isStyleBrowseMode = false
+                    },
                     onDismiss = { showLayersSheet = false }
                 )
             }
@@ -957,6 +815,49 @@ fun ClockStudio(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun PreviewCornerPill(
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector?,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier
+            .height(34.dp)
+            .clip(CircleShape)
+            .clickable(onClick = onClick),
+        shape = CircleShape,
+        color = Color.Black.copy(alpha = 0.44f),
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.22f))
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(5.dp)
+        ) {
+            if (icon != null) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(15.dp)
+                )
+            }
+            Text(
+                text = label,
+                maxLines = 1,
+                softWrap = false,
+                style = MaterialTheme.typography.labelMedium.copy(
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 13.sp
+                ),
+                color = Color.White
+            )
         }
     }
 }

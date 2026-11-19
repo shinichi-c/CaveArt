@@ -1,7 +1,6 @@
 package com.android.CaveArt
 
 import android.content.Intent
-import android.graphics.RectF
 import android.graphics.Typeface
 import android.os.Build
 import android.view.HapticFeedbackConstants
@@ -19,13 +18,16 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.outlined.*
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -36,39 +38,644 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
-import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.android.CaveArt.clockkit.*
 import kotlin.math.abs
 
 fun clockIconToImageVector(icon: ClockIcon): ImageVector = when (icon) {
-    ClockIcon.STYLE -> Icons.Rounded.AutoAwesome
-    ClockIcon.SIZE -> Icons.Rounded.ZoomIn
-    ClockIcon.THICKNESS -> Icons.Rounded.LineWeight
-    ClockIcon.ROUNDNESS -> Icons.Rounded.RoundedCorner
-    ClockIcon.SPACING -> Icons.Rounded.SwapHoriz
-    ClockIcon.OPACITY -> Icons.Rounded.Opacity
-    ClockIcon.GRAVITY -> Icons.Rounded.Explore
-    ClockIcon.FONT -> Icons.Rounded.Title
-    ClockIcon.COLOR -> Icons.Rounded.Palette
-    ClockIcon.LAYOUT -> Icons.Rounded.DashboardCustomize
-    ClockIcon.OPTIONS -> Icons.Rounded.Tune
-    ClockIcon.DEPTH -> Icons.Rounded.Layers
-    ClockIcon.DATE -> Icons.Rounded.Schedule
-    ClockIcon.DIAL -> Icons.Rounded.Schedule
-    ClockIcon.EFFECTS -> Icons.Rounded.AutoFixHigh
-    ClockIcon.TUNE -> Icons.Rounded.Tune
+    ClockIcon.STYLE -> Icons.Outlined.Style
+    ClockIcon.SIZE -> Icons.Outlined.AspectRatio
+    ClockIcon.THICKNESS -> Icons.Outlined.LineWeight
+    ClockIcon.ROUNDNESS -> Icons.Outlined.RoundedCorner
+    ClockIcon.SPACING -> Icons.Outlined.SwapHoriz
+    ClockIcon.OPACITY -> Icons.Outlined.Opacity
+    ClockIcon.GRAVITY -> Icons.Outlined.Explore
+    ClockIcon.FONT -> Icons.Outlined.TextFields
+    ClockIcon.COLOR -> Icons.Outlined.Palette
+    ClockIcon.LAYOUT -> Icons.Outlined.DashboardCustomize
+    ClockIcon.OPTIONS -> Icons.Outlined.Tune
+    ClockIcon.DEPTH -> Icons.Outlined.Layers
+    ClockIcon.DATE -> Icons.Outlined.CalendarToday
+    ClockIcon.DIAL -> Icons.Outlined.Schedule
+    ClockIcon.EFFECTS -> Icons.Outlined.BlurOn
+    ClockIcon.TUNE -> Icons.Outlined.Straighten
+}
+
+private enum class ToolbarIconKind {
+    STYLE,
+    OPTIONS,
+    FONT,
+    COLOR,
+    THICKNESS,
+    ROUNDNESS,
+    WIDTH,
+    OUTLINE,
+    OVERLAP,
+    SURFACE,
+    LAYOUT,
+    ALIGN,
+    DATE,
+    SLANT,
+    VIBRANCE,
+    OPACITY,
+    HEATMAP,
+    DEPTH,
+    ZOOM,
+    CUBE,
+    CLOCK,
+    SPARK,
+    GRID,
+    SCALE,
+    TOGGLE
+}
+
+private fun shortActionLabel(label: String): String = when (label) {
+    "Typography" -> "Font"
+    "Color Palette" -> "Color"
+    "Layout & Fit" -> "Options"
+    "Gravity Slant" -> "Slant"
+    "Row Overlap" -> "Overlap"
+    "Condensed Width" -> "Width"
+    "Glass Outline" -> "Outline"
+    "Minute Surface" -> "Surface"
+    "Composition" -> "Layout"
+    "Date Tag" -> "Date"
+    "Background Vibrance" -> "Vibrance"
+    "Background Opacity" -> "Opacity"
+    "Subject Opacity" -> "Opacity"
+    "Heatmap Opacity" -> "Heatmap"
+    "Occlusion Threshold" -> "Depth"
+    "Depth Occlusion" -> "Depth"
+    "Wallpaper Zoom" -> "Zoom"
+    else -> label
+}
+
+private fun preferredToolbarIconKind(action: LayerAction): ToolbarIconKind {
+    val label = action.label
+    val id = action.id.lowercase()
+    return when {
+        label == "Thickness" || id.endsWith("_stroke_width") -> ToolbarIconKind.THICKNESS
+        label == "Roundness" || id.endsWith("_roundness") -> ToolbarIconKind.ROUNDNESS
+        label == "Glass Outline" || id.endsWith("_stroke") -> ToolbarIconKind.OUTLINE
+        label == "Condensed Width" || id.endsWith("_tallness") -> ToolbarIconKind.WIDTH
+        label == "Row Overlap" || id.endsWith("_overlap") || id.endsWith("_row_gap") -> ToolbarIconKind.OVERLAP
+        label == "Minute Surface" || id.endsWith("_minute_style") -> ToolbarIconKind.SURFACE
+        label == "Composition" || id.endsWith("_layout_mode") -> ToolbarIconKind.LAYOUT
+        label == "Alignment" || id.endsWith("_align") -> ToolbarIconKind.ALIGN
+        label == "Date Tag" || id.endsWith("_date_mode") -> ToolbarIconKind.DATE
+        label == "Typography" || action.toolType == ContextualToolType.FONT -> ToolbarIconKind.FONT
+        label == "Color Palette" || action.toolType == ContextualToolType.COLOR -> ToolbarIconKind.COLOR
+        label == "Layout & Fit" || label == "Options" || action.toolType == ContextualToolType.QUICK_CHIPS -> ToolbarIconKind.OPTIONS
+        label == "Gravity Slant" || id == "clock_gravity_intensity" -> ToolbarIconKind.SLANT
+        label == "Background Vibrance" || id == "bg_vibrance" -> ToolbarIconKind.VIBRANCE
+        label == "Background Opacity" || id == "bg_opacity" || label == "Subject Opacity" || id == "subject_opacity" -> ToolbarIconKind.OPACITY
+        label == "Heatmap Opacity" || id == "depth_opacity" -> ToolbarIconKind.HEATMAP
+        label == "Occlusion Threshold" || label == "Depth Occlusion" -> ToolbarIconKind.DEPTH
+        label == "Wallpaper Zoom" || id == "all_zoom" -> ToolbarIconKind.ZOOM
+        action.clockControl != null -> when (action.clockControl.icon) {
+            ClockIcon.STYLE -> ToolbarIconKind.STYLE
+            ClockIcon.SIZE -> ToolbarIconKind.ZOOM
+            ClockIcon.THICKNESS -> ToolbarIconKind.THICKNESS
+            ClockIcon.ROUNDNESS -> ToolbarIconKind.ROUNDNESS
+            ClockIcon.SPACING -> ToolbarIconKind.WIDTH
+            ClockIcon.OPACITY -> ToolbarIconKind.OPACITY
+            ClockIcon.GRAVITY -> ToolbarIconKind.SLANT
+            ClockIcon.FONT -> ToolbarIconKind.FONT
+            ClockIcon.COLOR -> ToolbarIconKind.COLOR
+            ClockIcon.LAYOUT -> ToolbarIconKind.LAYOUT
+            ClockIcon.OPTIONS -> ToolbarIconKind.OPTIONS
+            ClockIcon.DEPTH -> ToolbarIconKind.DEPTH
+            ClockIcon.DATE -> ToolbarIconKind.DATE
+            ClockIcon.DIAL -> ToolbarIconKind.CLOCK
+            ClockIcon.EFFECTS -> ToolbarIconKind.SURFACE
+            ClockIcon.TUNE -> ToolbarIconKind.SCALE
+        }
+        else -> ToolbarIconKind.SPARK
+    }
+}
+
+private val fallbackIconKinds = listOf(
+    ToolbarIconKind.CUBE,
+    ToolbarIconKind.SPARK,
+    ToolbarIconKind.GRID,
+    ToolbarIconKind.SCALE,
+    ToolbarIconKind.TOGGLE,
+    ToolbarIconKind.CLOCK,
+    ToolbarIconKind.SURFACE,
+    ToolbarIconKind.DEPTH,
+    ToolbarIconKind.SLANT,
+    ToolbarIconKind.ZOOM,
+    ToolbarIconKind.VIBRANCE,
+    ToolbarIconKind.OUTLINE
+)
+
+private fun buildUniqueToolbarIcons(
+    actions: List<LayerAction>,
+    reserveStyle: Boolean
+): List<ToolbarIconKind> {
+    val used = if (reserveStyle) mutableSetOf(ToolbarIconKind.STYLE) else mutableSetOf()
+    return actions.map { action ->
+        val candidate = preferredToolbarIconKind(action)
+        if (used.add(candidate)) {
+            candidate
+        } else {
+            fallbackIconKinds.firstOrNull { used.add(it) } ?: candidate
+        }
+    }
+}
+
+@Composable
+private fun UnifiedLineIcon(
+    kind: ToolbarIconKind,
+    tint: Color,
+    modifier: Modifier = Modifier
+) {
+    Canvas(modifier = modifier.size(22.dp)) {
+        val u = size.minDimension / 24f
+        val sw = 1.85.dp.toPx()
+        val stroke = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round)
+
+        when (kind) {
+            ToolbarIconKind.STYLE -> {
+                drawRoundRect(
+                    color = tint,
+                    topLeft = Offset(4.5f * u, 5.2f * u),
+                    size = Size(11.2f * u, 14.2f * u),
+                    cornerRadius = CornerRadius(3.2f * u, 3.2f * u),
+                    style = stroke
+                )
+                val backCard = Path().apply {
+                    moveTo(15.7f * u, 7.2f * u)
+                    lineTo(17.2f * u, 7.2f * u)
+                    cubicTo(18.8f * u, 7.2f * u, 19.8f * u, 8.2f * u, 19.8f * u, 9.8f * u)
+                    lineTo(19.8f * u, 16.4f * u)
+                    cubicTo(19.8f * u, 18.0f * u, 18.8f * u, 19.0f * u, 17.2f * u, 19.0f * u)
+                    lineTo(15.7f * u, 19.0f * u)
+                }
+                drawPath(backCard, tint, style = stroke)
+            }
+
+            ToolbarIconKind.OPTIONS -> {
+                
+                drawLine(tint, Offset(3.5f * u, 8.2f * u), Offset(6.4f * u, 8.2f * u), sw, StrokeCap.Round)
+                drawCircle(tint, radius = 2.4f * u, center = Offset(8.8f * u, 8.2f * u), style = stroke)
+                drawLine(tint, Offset(11.2f * u, 8.2f * u), Offset(20.5f * u, 8.2f * u), sw, StrokeCap.Round)
+
+                drawLine(tint, Offset(3.5f * u, 15.8f * u), Offset(12.8f * u, 15.8f * u), sw, StrokeCap.Round)
+                drawCircle(tint, radius = 2.4f * u, center = Offset(15.2f * u, 15.8f * u), style = stroke)
+                drawLine(tint, Offset(17.6f * u, 15.8f * u), Offset(20.5f * u, 15.8f * u), sw, StrokeCap.Round)
+            }
+
+            ToolbarIconKind.FONT -> {
+                
+                val aPath = Path().apply {
+                    moveTo(3.8f * u, 18.2f * u)
+                    lineTo(8.1f * u, 5.8f * u)
+                    lineTo(12.4f * u, 18.2f * u)
+                }
+                drawPath(aPath, tint, style = stroke)
+                drawLine(tint, Offset(5.2f * u, 14.3f * u), Offset(11.0f * u, 14.3f * u), sw, StrokeCap.Round)
+                drawCircle(tint, radius = 3.3f * u, center = Offset(17.2f * u, 14.9f * u), style = stroke)
+            }
+
+            ToolbarIconKind.COLOR -> {
+                
+                drawCircle(tint, radius = 8.6f * u, center = Offset(12f * u, 12f * u), style = stroke)
+                drawCircle(tint, radius = 1.35f * u, center = Offset(12f * u, 8.2f * u))
+                drawCircle(tint, radius = 1.35f * u, center = Offset(8.6f * u, 14.2f * u))
+                drawCircle(tint, radius = 1.35f * u, center = Offset(15.4f * u, 14.2f * u))
+            }
+
+            ToolbarIconKind.THICKNESS -> {
+                drawLine(tint, Offset(4.5f * u, 6.5f * u), Offset(19.5f * u, 6.5f * u), sw * 0.75f, StrokeCap.Round)
+                drawLine(tint, Offset(4.5f * u, 12f * u), Offset(19.5f * u, 12f * u), sw * 1.15f, StrokeCap.Round)
+                drawLine(tint, Offset(4.5f * u, 17.5f * u), Offset(19.5f * u, 17.5f * u), sw * 1.6f, StrokeCap.Round)
+            }
+
+            ToolbarIconKind.ROUNDNESS -> {
+                val corner = Path().apply {
+                    moveTo(5.5f * u, 18.5f * u)
+                    lineTo(5.5f * u, 12f * u)
+                    cubicTo(5.5f * u, 7.5f * u, 7.5f * u, 5.5f * u, 12f * u, 5.5f * u)
+                    lineTo(18.5f * u, 5.5f * u)
+                }
+                drawPath(corner, tint, style = stroke)
+                drawCircle(tint, radius = 1.5f * u, center = Offset(13.5f * u, 13.5f * u))
+            }
+
+            ToolbarIconKind.WIDTH -> {
+                drawLine(tint, Offset(4.5f * u, 5.5f * u), Offset(4.5f * u, 18.5f * u), sw, StrokeCap.Round)
+                drawLine(tint, Offset(19.5f * u, 5.5f * u), Offset(19.5f * u, 18.5f * u), sw, StrokeCap.Round)
+                drawLine(tint, Offset(8f * u, 12f * u), Offset(16f * u, 12f * u), sw, StrokeCap.Round)
+                val lArrow = Path().apply {
+                    moveTo(10.2f * u, 9.6f * u); lineTo(7.8f * u, 12f * u); lineTo(10.2f * u, 14.4f * u)
+                }
+                val rArrow = Path().apply {
+                    moveTo(13.8f * u, 9.6f * u); lineTo(16.2f * u, 12f * u); lineTo(13.8f * u, 14.4f * u)
+                }
+                drawPath(lArrow, tint, style = stroke)
+                drawPath(rArrow, tint, style = stroke)
+            }
+
+            ToolbarIconKind.OUTLINE -> {
+                drawRoundRect(
+                    color = tint,
+                    topLeft = Offset(4f * u, 4f * u),
+                    size = Size(16f * u, 16f * u),
+                    cornerRadius = CornerRadius(4f * u, 4f * u),
+                    style = stroke
+                )
+                drawRoundRect(
+                    color = tint,
+                    topLeft = Offset(8f * u, 8f * u),
+                    size = Size(8f * u, 8f * u),
+                    cornerRadius = CornerRadius(2f * u, 2f * u),
+                    style = stroke
+                )
+            }
+
+            ToolbarIconKind.OVERLAP -> {
+                drawRoundRect(
+                    color = tint,
+                    topLeft = Offset(4.5f * u, 4.5f * u),
+                    size = Size(10f * u, 9.5f * u),
+                    cornerRadius = CornerRadius(2.5f * u, 2.5f * u),
+                    style = stroke
+                )
+                drawRoundRect(
+                    color = tint,
+                    topLeft = Offset(9.5f * u, 10f * u),
+                    size = Size(10f * u, 9.5f * u),
+                    cornerRadius = CornerRadius(2.5f * u, 2.5f * u),
+                    style = stroke
+                )
+            }
+
+            ToolbarIconKind.SURFACE -> {
+                drawCircle(tint, radius = 8.4f * u, center = Offset(12f * u, 12f * u), style = stroke)
+                drawLine(tint, Offset(12f * u, 5.2f * u), Offset(18.2f * u, 11.4f * u), sw * 0.85f, StrokeCap.Round)
+                drawLine(tint, Offset(9.8f * u, 9.2f * u), Offset(17.4f * u, 16.8f * u), sw * 0.85f, StrokeCap.Round)
+                drawLine(tint, Offset(8.5f * u, 14.2f * u), Offset(13.8f * u, 19.5f * u), sw * 0.85f, StrokeCap.Round)
+            }
+
+            ToolbarIconKind.LAYOUT -> {
+                drawRoundRect(
+                    color = tint,
+                    topLeft = Offset(4.2f * u, 4.2f * u),
+                    size = Size(15.6f * u, 15.6f * u),
+                    cornerRadius = CornerRadius(3.5f * u, 3.5f * u),
+                    style = stroke
+                )
+                drawLine(tint, Offset(11.5f * u, 4.5f * u), Offset(11.5f * u, 19.5f * u), sw, StrokeCap.Round)
+                drawLine(tint, Offset(11.5f * u, 12f * u), Offset(19.5f * u, 12f * u), sw, StrokeCap.Round)
+            }
+
+            ToolbarIconKind.ALIGN -> {
+                drawLine(tint, Offset(4.5f * u, 7f * u), Offset(14.5f * u, 7f * u), sw, StrokeCap.Round)
+                drawLine(tint, Offset(7f * u, 12f * u), Offset(17f * u, 12f * u), sw, StrokeCap.Round)
+                drawLine(tint, Offset(9.5f * u, 17f * u), Offset(19.5f * u, 17f * u), sw, StrokeCap.Round)
+            }
+
+            ToolbarIconKind.DATE -> {
+                drawRoundRect(
+                    color = tint,
+                    topLeft = Offset(4.5f * u, 5.8f * u),
+                    size = Size(15f * u, 14f * u),
+                    cornerRadius = CornerRadius(3.2f * u, 3.2f * u),
+                    style = stroke
+                )
+                drawLine(tint, Offset(8.5f * u, 3.8f * u), Offset(8.5f * u, 6.8f * u), sw, StrokeCap.Round)
+                drawLine(tint, Offset(15.5f * u, 3.8f * u), Offset(15.5f * u, 6.8f * u), sw, StrokeCap.Round)
+                drawLine(tint, Offset(4.8f * u, 10.6f * u), Offset(19.2f * u, 10.6f * u), sw, StrokeCap.Round)
+                drawCircle(tint, radius = 1.4f * u, center = Offset(12f * u, 15.2f * u))
+            }
+
+            ToolbarIconKind.SLANT -> {
+                val plane = Path().apply {
+                    moveTo(6.8f * u, 5.5f * u)
+                    lineTo(17.2f * u, 5.5f * u)
+                    lineTo(20f * u, 18.5f * u)
+                    lineTo(4f * u, 18.5f * u)
+                    close()
+                }
+                drawPath(plane, tint, style = stroke)
+                drawLine(tint, Offset(12f * u, 8.2f * u), Offset(12f * u, 15.8f * u), sw * 0.9f, StrokeCap.Round)
+            }
+
+            ToolbarIconKind.VIBRANCE -> {
+                drawCircle(tint, radius = 4.6f * u, center = Offset(12f * u, 12f * u), style = stroke)
+                drawLine(tint, Offset(12f * u, 3.5f * u), Offset(12f * u, 5.2f * u), sw, StrokeCap.Round)
+                drawLine(tint, Offset(12f * u, 18.8f * u), Offset(12f * u, 20.5f * u), sw, StrokeCap.Round)
+                drawLine(tint, Offset(3.5f * u, 12f * u), Offset(5.2f * u, 12f * u), sw, StrokeCap.Round)
+                drawLine(tint, Offset(18.8f * u, 12f * u), Offset(20.5f * u, 12f * u), sw, StrokeCap.Round)
+            }
+
+            ToolbarIconKind.OPACITY -> {
+                val drop = Path().apply {
+                    moveTo(12f * u, 3.8f * u)
+                    cubicTo(16.5f * u, 9.2f * u, 18.5f * u, 12.2f * u, 18.5f * u, 14.5f * u)
+                    cubicTo(18.5f * u, 18.2f * u, 15.6f * u, 20.4f * u, 12f * u, 20.4f * u)
+                    cubicTo(8.4f * u, 20.4f * u, 5.5f * u, 18.2f * u, 5.5f * u, 14.5f * u)
+                    cubicTo(5.5f * u, 12.2f * u, 7.5f * u, 9.2f * u, 12f * u, 3.8f * u)
+                    close()
+                }
+                drawPath(drop, tint, style = stroke)
+                drawLine(tint, Offset(7.2f * u, 15.2f * u), Offset(16.8f * u, 15.2f * u), sw * 0.9f, StrokeCap.Round)
+            }
+
+            ToolbarIconKind.HEATMAP -> {
+                val wave1 = Path().apply {
+                    moveTo(4f * u, 8.5f * u)
+                    cubicTo(8f * u, 5f * u, 16f * u, 12f * u, 20f * u, 8.5f * u)
+                }
+                val wave2 = Path().apply {
+                    moveTo(4f * u, 13f * u)
+                    cubicTo(8f * u, 9.5f * u, 16f * u, 16.5f * u, 20f * u, 13f * u)
+                }
+                val wave3 = Path().apply {
+                    moveTo(4f * u, 17.5f * u)
+                    cubicTo(8f * u, 14f * u, 16f * u, 21f * u, 20f * u, 17.5f * u)
+                }
+                drawPath(wave1, tint, style = stroke)
+                drawPath(wave2, tint, style = stroke)
+                drawPath(wave3, tint, style = stroke)
+            }
+
+            ToolbarIconKind.DEPTH -> {
+                val topLayer = Path().apply {
+                    moveTo(12f * u, 4.5f * u)
+                    lineTo(19.5f * u, 9f * u)
+                    lineTo(12f * u, 13.5f * u)
+                    lineTo(4.5f * u, 9f * u)
+                    close()
+                }
+                val bottomLayer = Path().apply {
+                    moveTo(4.5f * u, 14.2f * u)
+                    lineTo(12f * u, 18.7f * u)
+                    lineTo(19.5f * u, 14.2f * u)
+                }
+                drawPath(topLayer, tint, style = stroke)
+                drawPath(bottomLayer, tint, style = stroke)
+            }
+
+            ToolbarIconKind.ZOOM -> {
+                drawRoundRect(
+                    color = tint,
+                    topLeft = Offset(4.5f * u, 4.5f * u),
+                    size = Size(15f * u, 15f * u),
+                    cornerRadius = CornerRadius(3.2f * u, 3.2f * u),
+                    style = stroke
+                )
+                drawLine(tint, Offset(8.5f * u, 15.5f * u), Offset(15.5f * u, 8.5f * u), sw, StrokeCap.Round)
+                val arrow = Path().apply {
+                    moveTo(11.5f * u, 8.2f * u); lineTo(15.8f * u, 8.2f * u); lineTo(15.8f * u, 12.5f * u)
+                }
+                drawPath(arrow, tint, style = stroke)
+            }
+
+            ToolbarIconKind.CUBE -> {
+                val outer = Path().apply {
+                    moveTo(12f * u, 3.8f * u)
+                    lineTo(19.2f * u, 7.8f * u)
+                    lineTo(19.2f * u, 16.2f * u)
+                    lineTo(12f * u, 20.2f * u)
+                    lineTo(4.8f * u, 16.2f * u)
+                    lineTo(4.8f * u, 7.8f * u)
+                    close()
+                }
+                drawPath(outer, tint, style = stroke)
+                drawLine(tint, Offset(4.8f * u, 7.8f * u), Offset(12f * u, 11.8f * u), sw, StrokeCap.Round)
+                drawLine(tint, Offset(19.2f * u, 7.8f * u), Offset(12f * u, 11.8f * u), sw, StrokeCap.Round)
+                drawLine(tint, Offset(12f * u, 11.8f * u), Offset(12f * u, 20.2f * u), sw, StrokeCap.Round)
+            }
+
+            ToolbarIconKind.CLOCK -> {
+                drawCircle(tint, radius = 8.4f * u, center = Offset(12f * u, 12f * u), style = stroke)
+                drawLine(tint, Offset(12f * u, 12f * u), Offset(12f * u, 7.6f * u), sw, StrokeCap.Round)
+                drawLine(tint, Offset(12f * u, 12f * u), Offset(15.4f * u, 13.8f * u), sw, StrokeCap.Round)
+            }
+
+            ToolbarIconKind.SPARK -> {
+                val star = Path().apply {
+                    moveTo(12f * u, 3.8f * u)
+                    quadraticTo(12.6f * u, 11.4f * u, 20.2f * u, 12f * u)
+                    quadraticTo(12.6f * u, 12.6f * u, 12f * u, 20.2f * u)
+                    quadraticTo(11.4f * u, 12.6f * u, 3.8f * u, 12f * u)
+                    quadraticTo(11.4f * u, 11.4f * u, 12f * u, 3.8f * u)
+                    close()
+                }
+                drawPath(star, tint, style = stroke)
+            }
+
+            ToolbarIconKind.GRID -> {
+                for (r in 0..2) {
+                    for (c in 0..2) {
+                        drawCircle(
+                            color = tint,
+                            radius = 1.45f * u,
+                            center = Offset((6.5f + c * 5.5f) * u, (6.5f + r * 5.5f) * u)
+                        )
+                    }
+                }
+            }
+
+            ToolbarIconKind.SCALE -> {
+                val dashed = Stroke(
+                    width = sw,
+                    cap = StrokeCap.Round,
+                    join = StrokeJoin.Round,
+                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(3f * u, 3f * u), 0f)
+                )
+                drawRoundRect(
+                    color = tint,
+                    topLeft = Offset(4.5f * u, 4.5f * u),
+                    size = Size(15f * u, 15f * u),
+                    cornerRadius = CornerRadius(3.2f * u, 3.2f * u),
+                    style = dashed
+                )
+            }
+
+            ToolbarIconKind.TOGGLE -> {
+                drawRoundRect(
+                    color = tint,
+                    topLeft = Offset(3.5f * u, 7.5f * u),
+                    size = Size(17f * u, 9f * u),
+                    cornerRadius = CornerRadius(4.5f * u, 4.5f * u),
+                    style = stroke
+                )
+                drawCircle(tint, radius = 2.4f * u, center = Offset(15.8f * u, 12f * u))
+            }
+        }
+    }
+}
+
+@Composable
+fun HorizontalBottomToolbarStrip(
+    actions: List<LayerAction>,
+    selectedIndex: Int,
+    isStyleSelected: Boolean,
+    showStyleItem: Boolean = true,
+    onStyleSelected: () -> Unit,
+    onActionSelected: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val view = LocalView.current
+    val uniqueKinds = remember(actions, showStyleItem) {
+        buildUniqueToolbarIcons(actions = actions, reserveStyle = showStyleItem)
+    }
+    val totalCount = actions.size + if (showStyleItem) 1 else 0
+
+    if (totalCount <= 5) {
+        Row(
+            modifier = modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (showStyleItem) {
+                BottomToolbarItem(
+                    iconKind = ToolbarIconKind.STYLE,
+                    label = "Style",
+                    isSelected = isStyleSelected,
+                    onClick = {
+                        view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                        onStyleSelected()
+                    }
+                )
+            }
+            actions.forEachIndexed { index, action ->
+                val isSelected = !isStyleSelected && index == selectedIndex
+                BottomToolbarItem(
+                    iconKind = uniqueKinds[index],
+                    label = shortActionLabel(action.label),
+                    isSelected = isSelected,
+                    onClick = {
+                        view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                        onActionSelected(index)
+                    }
+                )
+            }
+        }
+    } else {
+        LazyRow(
+            modifier = modifier.fillMaxWidth(),
+            contentPadding = PaddingValues(horizontal = 14.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (showStyleItem) {
+                item(key = "tb_style") {
+                    BottomToolbarItem(
+                        iconKind = ToolbarIconKind.STYLE,
+                        label = "Style",
+                        isSelected = isStyleSelected,
+                        onClick = {
+                            view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                            onStyleSelected()
+                        }
+                    )
+                }
+            }
+            itemsIndexed(actions, key = { _, a -> a.id }) { index, action ->
+                val isSelected = !isStyleSelected && index == selectedIndex
+                BottomToolbarItem(
+                    iconKind = uniqueKinds[index],
+                    label = shortActionLabel(action.label),
+                    isSelected = isSelected,
+                    onClick = {
+                        view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                        onActionSelected(index)
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun BottomToolbarItem(
+    iconKind: ToolbarIconKind,
+    label: String,
+    isSelected: Boolean,
+    onClick: () -> Unit
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.90f else 1.0f,
+        animationSpec = spring(stiffness = 500f, dampingRatio = 0.72f),
+        label = "bottomStripScale"
+    )
+    val contentTint by animateColorAsState(
+        targetValue = if (isSelected) MaterialTheme.colorScheme.onSurface
+        else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f),
+        label = "bottomStripTint"
+    )
+    val pillBgColor by animateColorAsState(
+        targetValue = if (isSelected) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.14f)
+        else Color.Transparent,
+        label = "bottomStripPillBg"
+    )
+
+    Column(
+        modifier = Modifier
+            .widthIn(min = 62.dp)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick
+            )
+            .padding(horizontal = 6.dp, vertical = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .size(width = 48.dp, height = 28.dp)
+                .clip(CircleShape)
+                .background(pillBgColor),
+            contentAlignment = Alignment.Center
+        ) {
+            UnifiedLineIcon(
+                kind = iconKind,
+                tint = contentTint,
+                modifier = Modifier.size(22.dp)
+            )
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = label,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis,
+            style = MaterialTheme.typography.labelSmall.copy(
+                fontSize = 11.5.sp,
+                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium
+            ),
+            color = contentTint
+        )
+    }
 }
 
 @Composable
@@ -239,8 +846,8 @@ fun CompactQuickChipsStrip(
                         leadingIcon = {
                             Icon(
                                 imageVector = when (chip.globalBinding) {
-                                    "depth" -> Icons.Rounded.Layers
-                                    "gravity" -> Icons.Rounded.Explore
+                                    "depth" -> Icons.Outlined.Layers
+                                    "gravity" -> Icons.Outlined.Explore
                                     else -> clockIconToImageVector(chip.icon)
                                 },
                                 contentDescription = null,
@@ -282,7 +889,7 @@ fun CompactQuickChipsStrip(
                         },
                         leadingIcon = {
                             Icon(
-                                imageVector = Icons.Rounded.AutoFixHigh,
+                                imageVector = Icons.Outlined.AutoFixHigh,
                                 contentDescription = null,
                                 modifier = Modifier.size(16.dp)
                             )
