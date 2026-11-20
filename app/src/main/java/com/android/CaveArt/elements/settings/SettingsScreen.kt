@@ -1,5 +1,6 @@
 package com.android.CaveArt
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
@@ -17,7 +18,9 @@ import androidx.compose.material.icons.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.BlurOn
 import androidx.compose.material.icons.rounded.Dock
 import androidx.compose.material.icons.rounded.FitScreen
+import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.SwipeVertical
+import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.material.icons.rounded.Vibration
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -102,7 +105,7 @@ fun SettingsScreen(
                     .navigationBarsPadding(),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-            	
+
                 ExpressiveSectionCard {
                     SectionHeader(
                         icon = Icons.Rounded.SwipeVertical,
@@ -201,7 +204,39 @@ fun SettingsScreen(
                         }
                     }
                 }
-                
+
+                ExpressiveSectionCard {
+                    ExpressiveToggleRow(
+                        icon = Icons.Rounded.TouchApp,
+                        title = "Lockscreen Long-Press Edit",
+                        description = if (viewModel.isLockscreenQuickEditEnabled)
+                            "Long-press on lockscreen to customize directly"
+                        else
+                            "In-lockscreen customization gesture disabled",
+                        checked = viewModel.isLockscreenQuickEditEnabled,
+                        onCheckedChange = { viewModel.setLockscreenQuickEditEnabled(it) }
+                    )
+
+                    AnimatedVisibility(visible = viewModel.isLockscreenQuickEditEnabled) {
+                        Column {
+                            Spacer(Modifier.height(12.dp))
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f))
+                            Spacer(Modifier.height(12.dp))
+
+                            ExpressiveToggleRow(
+                                icon = Icons.Rounded.Lock,
+                                title = "Require Unlock to Edit",
+                                description = if (viewModel.isLockscreenEditRequireUnlock)
+                                    "Require biometric/trust verification before editing"
+                                else
+                                    "Allow quick editing directly on locked screen",
+                                checked = viewModel.isLockscreenEditRequireUnlock,
+                                onCheckedChange = { viewModel.setLockscreenEditRequireUnlock(it) }
+                            )
+                        }
+                    }
+                }
+
                 ExpressiveSectionCard {
                     ExpressiveToggleRow(
                         icon = Icons.Rounded.FitScreen,
@@ -235,7 +270,7 @@ fun SettingsScreen(
                         onCheckedChange = { viewModel.setAmbientBlurEnabled(it) }
                     )
                 }
-                
+
                 ExpressiveSectionCard {
                     Text(
                         text = "Diagnostics & Pipeline",

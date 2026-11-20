@@ -2,6 +2,8 @@ package com.android.CaveArt
 
 import android.app.Application
 import android.content.Context
+import android.content.Intent
+import android.content.SharedPreferences
 import android.graphics.Bitmap
 import android.graphics.Color as AndroidColor
 import android.net.Uri
@@ -98,6 +100,36 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         prefs.edit().putBoolean("floating_dock", enabled).apply()
     }
 
+    private val _isLockscreenQuickEditEnabled = mutableStateOf(clockPrefs.getBoolean("lock_edit_enabled", true))
+    val isLockscreenQuickEditEnabled: Boolean by _isLockscreenQuickEditEnabled
+    fun setLockscreenQuickEditEnabled(enabled: Boolean) {
+        _isLockscreenQuickEditEnabled.value = enabled
+        clockPrefs.edit().putBoolean("lock_edit_enabled", enabled).apply()
+        getApplication<Application>().sendBroadcast(
+            Intent("com.android.CaveArt.UPDATE_LOCK_EDIT_SETTINGS").apply {
+                putExtra("lock_edit_enabled", enabled)
+                putExtra("lock_edit_require_unlock", _isLockscreenEditRequireUnlock.value)
+            }
+        )
+    }
+
+    private val _isLockscreenEditRequireUnlock = mutableStateOf(clockPrefs.getBoolean("lock_edit_require_unlock", true))
+    val isLockscreenEditRequireUnlock: Boolean by _isLockscreenEditRequireUnlock
+    fun setLockscreenEditRequireUnlock(required: Boolean) {
+        _isLockscreenEditRequireUnlock.value = required
+        clockPrefs.edit().putBoolean("lock_edit_require_unlock", required).apply()
+        getApplication<Application>().sendBroadcast(
+            Intent("com.android.CaveArt.UPDATE_LOCK_EDIT_SETTINGS").apply {
+                putExtra("lock_edit_enabled", _isLockscreenQuickEditEnabled.value)
+                putExtra("lock_edit_require_unlock", required)
+            }
+        )
+    }
+
+    fun savePaletteColorsForLockEditor(colors: List<Int>) {
+        clockPrefs.edit().putString("palette_colors", colors.joinToString(",")).apply()
+    }
+
     var scrollStyle by mutableIntStateOf(clockPrefs.getInt("scroll_style", 0))
     fun updateScrollStyle(style: Int) {
         scrollStyle = style
@@ -105,7 +137,7 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     var isLockscreenClockPreviewVisible by mutableStateOf(false)
-    
+
     var clockKitConfig by mutableStateOf(ClockKitConfigStore.loadFromPrefs(clockPrefs))
 
     var lockscreenClockOffsetX by mutableFloatStateOf(clockKitConfig.clockX)
@@ -141,6 +173,47 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     var layerSubjectOpacity by mutableFloatStateOf(clockPrefs.getFloat("layer_subject_opacity", 1.0f))
     var layerBackgroundOpacity by mutableFloatStateOf(clockPrefs.getFloat("layer_bg_opacity", 1.0f))
 
+    private val clockPrefsListener = SharedPreferences.OnSharedPreferenceChangeListener { sp, key ->
+        viewModelScope.launch(Dispatchers.Main) {
+            when (key) {
+                ClockKitConfigStore.KEY_JSON -> {
+                    val updated = ClockKitConfigStore.loadFromPrefs(sp)
+                    if (updated != clockKitConfig) {
+                        applyConfigToViewModelFields(updated)
+                    }
+                }
+                "clock_collision_map" -> {
+                    clockCollisionMap = sp.getString("clock_collision_map", "") ?: ""
+                }
+            }
+        }
+    }
+
+    private fun applyConfigToViewModelFields(newConfig: ClockKitConfig) {
+        clockKitConfig = newConfig
+        lockscreenClockOffsetX = newConfig.clockX
+        lockscreenClockOffsetY = newConfig.clockY
+        lockscreenDateOffsetX = newConfig.dateX
+        lockscreenDateOffsetY = newConfig.dateY
+        clockColor = newConfig.color
+        clockFont = newConfig.font
+        dateLayout = newConfig.dateFormat
+        isDateAttached = newConfig.dateAttached
+        isClockDepthEnabled = newConfig.isDepthEnabled
+        clockLayerOrder = if (newConfig.isDepthEnabled) 1 else 0
+        clockDepthOcclusion = newConfig.depthOcclusionLimit
+        isClockGravityEnabled = newConfig.isGravityEnabled
+        clockGravityIntensity = newConfig.gravityIntensity
+
+        clockHourSize = newConfig.getFloat("adaptive_vector", "hour_size", clockHourSize)
+        clockMinuteSize = newConfig.getFloat("adaptive_vector", "min_size", clockMinuteSize)
+        clockStrokeWidth = newConfig.getFloat("adaptive_vector", "stroke_width", clockStrokeWidth)
+        clockRoundness = newConfig.getFloat("adaptive_vector", "roundness", clockRoundness)
+        isDualToneEnabled = newConfig.getBool("adaptive_vector", "dual_tone", isDualToneEnabled)
+        clockLayout = if (newConfig.getString("adaptive_vector", "layout", "horizontal") == "vertical") 1 else 0
+        isClockStretchEnabled = newConfig.getBool("adaptive_vector", "stretch", isClockStretchEnabled)
+    }
+
     private val wallpaperColorMap = mutableMapOf<String, Int>()
 
     fun getColorForWallpaper(wallpaperId: String): Int? = wallpaperColorMap[wallpaperId]
@@ -164,29 +237,7 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         newConfig: ClockKitConfig,
         collisionMap: String? = null
     ) {
-        clockKitConfig = newConfig
-
-        lockscreenClockOffsetX = newConfig.clockX
-        lockscreenClockOffsetY = newConfig.clockY
-        lockscreenDateOffsetX = newConfig.dateX
-        lockscreenDateOffsetY = newConfig.dateY
-        clockColor = newConfig.color
-        clockFont = newConfig.font
-        dateLayout = newConfig.dateFormat
-        isDateAttached = newConfig.dateAttached
-        isClockDepthEnabled = newConfig.isDepthEnabled
-        clockLayerOrder = if (newConfig.isDepthEnabled) 1 else 0
-        clockDepthOcclusion = newConfig.depthOcclusionLimit
-        isClockGravityEnabled = newConfig.isGravityEnabled
-        clockGravityIntensity = newConfig.gravityIntensity
-
-        clockHourSize = newConfig.getFloat("adaptive_vector", "hour_size", clockHourSize)
-        clockMinuteSize = newConfig.getFloat("adaptive_vector", "min_size", clockMinuteSize)
-        clockStrokeWidth = newConfig.getFloat("adaptive_vector", "stroke_width", clockStrokeWidth)
-        clockRoundness = newConfig.getFloat("adaptive_vector", "roundness", clockRoundness)
-        isDualToneEnabled = newConfig.getBool("adaptive_vector", "dual_tone", isDualToneEnabled)
-        clockLayout = if (newConfig.getString("adaptive_vector", "layout", "horizontal") == "vertical") 1 else 0
-        isClockStretchEnabled = newConfig.getBool("adaptive_vector", "stretch", isClockStretchEnabled)
+        applyConfigToViewModelFields(newConfig)
 
         if (collisionMap != null) {
             clockCollisionMap = collisionMap
@@ -264,7 +315,7 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
             withContext(Dispatchers.Main) {
                 clockCollisionMap = mapString
                 clockPrefs.edit().putString("clock_collision_map", mapString).apply()
-                context.sendBroadcast(android.content.Intent("com.android.CaveArt.UPDATE_COLLISION_MAP").apply {
+                context.sendBroadcast(Intent("com.android.CaveArt.UPDATE_COLLISION_MAP").apply {
                     putExtra("collision_map", mapString)
                 })
             }
@@ -320,7 +371,7 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
             .putFloat("layer_bg_opacity", bgOpacity)
             .apply()
 
-        context.sendBroadcast(android.content.Intent("com.android.CaveArt.UPDATE_LAYER_STACK").apply {
+        context.sendBroadcast(Intent("com.android.CaveArt.UPDATE_LAYER_STACK").apply {
             putExtra("clock_depth_enabled", isDepth)
             putExtra("clock_layer_order", order)
             putExtra("clock_depth_occlusion", occlusion)
@@ -400,6 +451,7 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     var allWallpapers by mutableStateOf<List<Wallpaper>>(emptyList())
 
     init {
+        clockPrefs.registerOnSharedPreferenceChangeListener(clockPrefsListener)
         viewModelScope.launch {
             isLoading = true
             launch(MLThread.dispatcher) {
@@ -693,6 +745,7 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
 
     override fun onCleared() {
         super.onCleared()
+        clockPrefs.unregisterOnSharedPreferenceChangeListener(clockPrefsListener)
         segmentationHelper.close()
         refineHelper.close()
         mattingHelper.close()

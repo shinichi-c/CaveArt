@@ -366,6 +366,12 @@ fun ClockStudio(
         previewOriginal = components.first
         previewMask = components.second ?: viewModel.getMaskForClock(context, wallpaper)
 
+        components.first?.let { orig ->
+            scope.launch(Dispatchers.IO) {
+                saveLockWallpaperForOverlay(context, orig)
+            }
+        }
+
         scope.launch(Dispatchers.IO) {
             val depthResult = viewModel.getOrGenerateDepth(context, wallpaper)
             withContext(Dispatchers.Main) {
@@ -440,23 +446,21 @@ fun ClockStudio(
     }
 
     Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
-        AsyncWallpaperImage(
-            wallpaper = wallpaper,
-            contentDescription = null,
-            viewModel = viewModel,
-            modifier = Modifier.fillMaxSize().blur(85.dp),
-            contentScale = ContentScale.Crop,
-            allowMagic = false
-        )
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    MaterialTheme.colorScheme.surface.copy(
-                        alpha = if (viewModel.isAmbientBlurEnabled) 0.58f else 0.90f
-                    )
-                )
-        )
+        if (viewModel.isAmbientBlurEnabled) {
+            AsyncWallpaperImage(
+                wallpaper = wallpaper,
+                contentDescription = null,
+                viewModel = viewModel,
+                modifier = Modifier.fillMaxSize().blur(85.dp),
+                contentScale = ContentScale.Crop,
+                allowMagic = false
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.58f))
+            )
+        }
 
         Scaffold(
             containerColor = Color.Transparent,
@@ -679,7 +683,7 @@ fun ClockStudio(
                         }
                     }
                 }
-                
+
                 Box(
                     modifier = Modifier
                         .height(activeCardHeight)

@@ -6,15 +6,31 @@ import android.content.Context
 import android.database.Cursor
 import android.database.MatrixCursor
 import android.net.Uri
+import android.os.Binder
 import android.os.Build
 import android.os.Bundle
 import android.os.ParcelFileDescriptor
+import android.os.Process
+import com.android.CaveArt.clockkit.ClockKitConfigStore
 import java.io.File
 import java.io.FileNotFoundException
 
 class CaveArtSettingsProvider : ContentProvider() {
 
     override fun onCreate(): Boolean = true
+
+    private fun isTrustedCaller(baseContext: Context): Boolean {
+        val callerUid = Binder.getCallingUid()
+        if (callerUid == Process.myUid() || callerUid == Process.SYSTEM_UID) return true
+        val callerPkg = callingPackage
+        if (callerPkg == "com.android.systemui" || callerPkg == "com.android.CaveArt") return true
+        val uidPackages = try {
+            baseContext.packageManager.getPackagesForUid(callerUid)
+        } catch (_: Exception) {
+            null
+        }
+        return uidPackages?.any { it == "com.android.systemui" || it == "com.android.CaveArt" } == true
+    }
 
     override fun call(method: String, arg: String?, extras: Bundle?): Bundle? {
         val baseContext = context ?: return null
@@ -56,6 +72,18 @@ class CaveArtSettingsProvider : ContentProvider() {
             return Bundle().apply { putBoolean("success", true) }
         }
 
+        if (method == "saveClockKitConfig" && extras != null) {
+            if (!isTrustedCaller(baseContext)) {
+                return Bundle().apply { putBoolean("success", false) }
+            }
+            val json = extras.getString("clockkit_config") ?: return null
+            val parsed = ClockKitConfigStore.fromJson(json) ?: return null
+            val collisionMap = extras.getString("collision_map")
+
+            ClockKitConfigStore.saveAndBroadcast(baseContext, parsed, collisionMap)
+            return Bundle().apply { putBoolean("success", true) }
+        }
+
         return null
     }
 
@@ -66,6 +94,19 @@ class CaveArtSettingsProvider : ContentProvider() {
         } else baseContext
 
         val segment = uri.lastPathSegment
+
+        if (segment == "lock_wallpaper" || segment == "lock_wallpaper.jpg" || segment == "boot_original.png") {
+            val candidateFiles = listOf(
+                File(safeContext.filesDir, "lock_wallpaper.jpg"),
+                File(safeContext.noBackupFilesDir, "boot_original.png"),
+                File(safeContext.filesDir, "active_system_lockscreen.png")
+            )
+            for (file in candidateFiles) {
+                if (file.exists() && file.length() > 0) {
+                    return ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+                }
+            }
+        }
 
         if (segment == "depth_mask" || segment == "boot_cutout.png" || segment == "lock_depth_mask.png") {
             val candidateFiles = listOf(
@@ -145,6 +186,10 @@ class CaveArtSettingsProvider : ContentProvider() {
 
             "clock_gravity" -> cursor.addRow(arrayOf(if (prefs.getBoolean("clock_gravity", false)) 1 else 0))
             "clock_gravity_intensity" -> cursor.addRow(arrayOf(prefs.getFloat("clock_gravity_intensity", 1.0f)))
+
+            "palette_colors" -> cursor.addRow(arrayOf(prefs.getString("palette_colors", "")))
+            "lock_edit_enabled" -> cursor.addRow(arrayOf(if (prefs.getBoolean("lock_edit_enabled", true)) 1 else 0))
+            "lock_edit_require_unlock" -> cursor.addRow(arrayOf(if (prefs.getBoolean("lock_edit_require_unlock", true)) 1 else 0))
         }
         return cursor
     }

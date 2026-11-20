@@ -62,7 +62,7 @@ fun HeroCarouselWithIndicator(
     val flingBehavior = rememberSnapFlingBehavior(lazyListState = listState)
     val coroutineScope = rememberCoroutineScope()
     val isFewItems = filteredWallpapers.size < 4
-    
+
     LaunchedEffect(pagerState.currentPage) {
         if (!listState.isScrollInProgress && filteredWallpapers.isNotEmpty()) {
             listState.animateScrollToItem(pagerState.currentPage.coerceIn(0, filteredWallpapers.size - 1))
@@ -74,7 +74,6 @@ fun HeroCarouselWithIndicator(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         if (isFewItems) {
-            
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -148,7 +147,6 @@ fun HeroCarouselWithIndicator(
                 )
             }
         } else {
-        	
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -236,7 +234,7 @@ fun HeroCarouselWithIndicator(
                 )
             }
         }
-        
+
         AnimatedVisibility(
             visible = viewModel.showFastScrollGuide && pagerState.pageCount > 1,
             enter = expandVertically(animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow), expandFrom = Alignment.Bottom) + fadeIn(),
@@ -543,9 +541,11 @@ fun FastScrollIndicator(
                 val fullWidthPx = with(density) { trackWidth.toPx() }
                 Canvas(modifier = Modifier.fillMaxSize()) {
                     val y = size.height / 2f
+                    val edgePad = 8.dp.toPx()
+                    val usableW = (fullWidthPx - edgePad * 2f).coerceAtLeast(1f)
                     val thumbAbsoluteX = (size.width / 2f) + animatedDragOffset
                     for (i in 0 until pageCount) {
-                        val dotX = if (pageCount > 1) (i.toFloat() / (pageCount - 1)) * fullWidthPx else size.width / 2f
+                        val dotX = if (pageCount > 1) edgePad + (i.toFloat() / (pageCount - 1)) * usableW else size.width / 2f
                         val dist = abs(dotX - thumbAbsoluteX)
                         val pullY = if (dist < 26.dp.toPx()) (26.dp.toPx() - dist) * 0.42f else 0f
                         val isNear = dist < 9.dp.toPx()
