@@ -31,6 +31,39 @@ object WallpaperDestinations {
     const val FLAG_BOTH = FLAG_HOME_SCREEN or FLAG_LOCK_SCREEN
 }
 
+fun saveLockWallpaperForOverlay(context: Context, source: Bitmap) {
+    if (source.isRecycled) return
+    try {
+        val safeCtx = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            context.createDeviceProtectedStorageContext()
+        } else context
+
+        val maxSide = max(source.width, source.height)
+        val toSave = if (maxSide > 1440) {
+            val scale = 1440f / maxSide.toFloat()
+            Bitmap.createScaledBitmap(
+                source,
+                (source.width * scale).toInt().coerceAtLeast(1),
+                (source.height * scale).toInt().coerceAtLeast(1),
+                true
+            )
+        } else {
+            source
+        }
+
+        val outFile = File(safeCtx.filesDir, "lock_wallpaper.jpg")
+        FileOutputStream(outFile).use { out ->
+            toSave.compress(Bitmap.CompressFormat.JPEG, 92, out)
+            out.flush()
+        }
+        outFile.setReadable(true, false)
+
+        if (toSave !== source) {
+            toSave.recycle()
+        }
+    } catch (_: Exception) {}
+}
+
 suspend fun setLiveWallpaper(
     context: Context,
     wallpaper: Wallpaper,
@@ -41,14 +74,14 @@ suspend fun setLiveWallpaper(
     } else {
         context
     }
-    
+
     var savedOriginalPath: String? = null
     var savedCutoutPath: String? = null
-    
+
     val components = viewModel.getHighQualityComponents(context, wallpaper)
     val originalBitmap = components.first
     val cutoutBitmap = components.second
-    
+
     val animNeedsMask = viewModel.isAnimationEnabled && AnimationFactory.getAnimation(viewModel.currentAnimationStyle).needsSegmentationMask()
     val needsCutout = viewModel.isMagicShapeEnabled || animNeedsMask
 
@@ -59,7 +92,9 @@ suspend fun setLiveWallpaper(
             originalBitmap.compress(Bitmap.CompressFormat.PNG, 100, origStream)
             origStream.flush(); origStream.close()
             savedOriginalPath = origFile.absolutePath
-            
+
+            saveLockWallpaperForOverlay(context, originalBitmap)
+
             if (cutoutBitmap != null && needsCutout) {
                 val cutFile = File(deviceProtectedContext.noBackupFilesDir, "boot_cutout.png")
                 val cutStream = FileOutputStream(cutFile)
@@ -71,7 +106,7 @@ suspend fun setLiveWallpaper(
             Log.e("CaveArt", "Failed to save assets: ${e.message}")
         }
     }
-    
+
     val config = LiveWallpaperConfig(
         imagePath = savedOriginalPath,
         cutoutPath = savedCutoutPath,
@@ -91,29 +126,29 @@ suspend fun setLiveWallpaper(
         transitionDurationMs = 750,
         isSpringBouncy = true
     )
-    
+
     WallpaperConfigManager.saveConfig(context, config)
-    
+
     originalBitmap?.recycle()
     cutoutBitmap?.recycle()
-    
+
     val serviceClass = if (viewModel.isFilamentEnabled) {
         CaveArtFilamentService::class.java
     } else {
         CaveArtWallpaperService::class.java
     }
-    
+
     val isRoot = RootUtils.isRootAvailable()
     if (isRoot) {
         withContext(Dispatchers.Main) { Toast.makeText(context, "Attempting System Injection...", Toast.LENGTH_SHORT).show() }
         val resultLog = RootUtils.bruteForceSetWallpaper(context, serviceClass)
         if (resultLog.contains("SUCCESS")) {
-             try { WallpaperManager.getInstance(context).clear(WallpaperManager.FLAG_LOCK) } catch (e: Exception) {}
-             withContext(Dispatchers.Main) { Toast.makeText(context, "Applied via Root!", Toast.LENGTH_SHORT).show() }
-             return@withContext
+            try { WallpaperManager.getInstance(context).clear(WallpaperManager.FLAG_LOCK) } catch (e: Exception) {}
+            withContext(Dispatchers.Main) { Toast.makeText(context, "Applied via Root!", Toast.LENGTH_SHORT).show() }
+            return@withContext
         }
     }
-    
+
     withContext(Dispatchers.Main) {
         try {
             val intent = Intent(WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER)
@@ -144,27 +179,27 @@ suspend fun setDeviceWallpaper(
     } else {
         windowManager.defaultDisplay.getMetrics(metrics)
     }
-    
+
     val maxDimension = max(metrics.widthPixels, metrics.heightPixels)
     val rawBitmap = viewModel.getOrCreateProcessedBitmap(context, wallpaper, allowMagic = false, maxDim = maxDimension) ?: return@withContext
 
     try {
         val finalBitmap = Bitmap.createBitmap(metrics.widthPixels, metrics.heightPixels, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(finalBitmap)
-        
+
         val scale = max(metrics.widthPixels.toFloat() / rawBitmap.width, metrics.heightPixels.toFloat() / rawBitmap.height)
         val w = rawBitmap.width * scale
         val h = rawBitmap.height * scale
         val left = (metrics.widthPixels - w) / 2f
         val top = (metrics.heightPixels - h) / 2f
         val destRect = RectF(left, top, left + w, top + h)
-        
+
         canvas.drawColor(Color.BLACK)
 
         if (viewModel.isMagicShapeEnabled) {
             canvas.drawColor(viewModel.currentBackgroundColor)
         }
-        
+
         val hasCustomEffects = viewModel.layerBackgroundStructure != 0f || viewModel.layerBackgroundOpacity < 0.99f || viewModel.layerSubjectOpacity < 0.99f
 
         if (!hasCustomEffects) {
@@ -180,7 +215,7 @@ suspend fun setDeviceWallpaper(
             }
             bgPaint.alpha = (viewModel.layerBackgroundOpacity * 255).toInt().coerceIn(0, 255)
             canvas.drawBitmap(rawBitmap, null, destRect, bgPaint)
-            
+
             val mask = viewModel.getMaskForClock(context, wallpaper)
             if (mask != null && !mask.isRecycled) {
                 val layerId = canvas.saveLayer(0f, 0f, metrics.widthPixels.toFloat(), metrics.heightPixels.toFloat(), null)
@@ -199,12 +234,16 @@ suspend fun setDeviceWallpaper(
             }
         }
 
+        if ((destination and WallpaperDestinations.FLAG_LOCK_SCREEN) != 0) {
+            saveLockWallpaperForOverlay(context, rawBitmap)
+        }
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             wallpaperManager.setBitmap(finalBitmap, null, !isFixedAlignmentEnabled, destination)
         } else {
             wallpaperManager.setBitmap(finalBitmap)
         }
-    } catch (e: Exception) { 
-        e.printStackTrace() 
+    } catch (e: Exception) {
+        e.printStackTrace()
     }
 }

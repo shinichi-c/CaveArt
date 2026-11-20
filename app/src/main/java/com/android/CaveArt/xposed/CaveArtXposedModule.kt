@@ -1,6 +1,7 @@
 package com.android.CaveArt.xposed
 
 import android.animation.ValueAnimator
+import android.app.KeyguardManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -10,10 +11,16 @@ import android.graphics.*
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.os.PowerManager
+import android.os.SystemClock
 import android.util.DisplayMetrics
 import android.util.TypedValue
 import android.view.Choreographer
 import android.view.Gravity
+import android.view.HapticFeedbackConstants
+import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
@@ -25,7 +32,9 @@ import com.android.CaveArt.clockkit.*
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
 import java.io.File
+import java.util.WeakHashMap
 import kotlin.math.abs
+import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.sqrt
 
@@ -167,14 +176,229 @@ class CaveArtXposedModule : XposedModule() {
 
         var activeClock: VectorTextClock? = null
         var activeDate: IndependentDateView? = null
+        var activeRootLayout: ViewGroup? = null
+        var activeEditorOverlay: LockscreenEditorOverlay? = null
 
         var isShiftedForNotifications = false
         var currentShiftY = 0f
 
+        @Volatile var isEditModeActive = false
+        @Volatile var statusBarState = 1
+        @Volatile var isDozing = false
+        @Volatile var keyguardStateControllerObj: Any? = null
+        @Volatile var lastDownWasOnClock = false
+        @Volatile var keyguardSettingsButtonId = 0
+
+        @Volatile var cachedLockEditEnabled = true
+        @Volatile var cachedLockEditRequireUnlock = true
+        @Volatile var cachedUdfpsX = -1f
+        @Volatile var cachedUdfpsY = -1f
+        @Volatile var cachedUdfpsRadius = 0f
+
+        private val savedChildAlphas = WeakHashMap<View, Float>()
+
+        fun refreshCachedLockEditSettings(ctx: Context) {
+            Thread {
+                val editEnabled = getSettingInt(ctx, "lock_edit_enabled", 1) == 1
+                val requireUnlock = getSettingInt(ctx, "lock_edit_require_unlock", 1) == 1
+                val ux = getSettingFloat(ctx, "udfps_x", -1f)
+                val uy = getSettingFloat(ctx, "udfps_y", -1f)
+                val ur = getSettingFloat(ctx, "udfps_radius", 0f)
+                cachedLockEditEnabled = editEnabled
+                cachedLockEditRequireUnlock = requireUnlock
+                if (ur > 0f) {
+                    cachedUdfpsX = ux
+                    cachedUdfpsY = uy
+                    cachedUdfpsRadius = ur
+                }
+            }.start()
+        }
+
+        fun getClockHitRect(paddingDp: Float = 24f): RectF {
+            val clock = activeClock ?: return RectF()
+            val density = clock.resources.displayMetrics.density
+            val padPx = paddingDp * density
+            val rect = RectF()
+            if (!clock.lastRenderedBounds.isEmpty) {
+                rect.set(clock.lastRenderedBounds)
+            } else {
+                val m = clock.measureForCurrentState(clock.notificationProgress)
+                val cx = (screenW / 2f) + (clock.userTranslationX * (1f - clock.notificationProgress))
+                val userTopY = effectiveTopMarginPx.toFloat()
+                val notifTopY = NOTIF_CLOCK_TOP_DP * density
+                val top = userTopY + (notifTopY - userTopY) * clock.notificationProgress
+                rect.set(
+                    cx - (m.contentWidthPx / 2f),
+                    top,
+                    cx + (m.contentWidthPx / 2f),
+                    top + m.contentHeightPx
+                )
+            }
+
+            val date = activeDate
+            if (date != null && date.visibility == View.VISIBLE && date.isAttachedToClock) {
+                val loc = IntArray(2)
+                date.getLocationOnScreen(loc)
+                if (date.width > 0 && date.height > 0) {
+                    rect.union(
+                        loc[0].toFloat(),
+                        loc[1].toFloat(),
+                        (loc[0] + date.width).toFloat(),
+                        (loc[1] + date.height).toFloat()
+                    )
+                }
+            }
+
+            rect.inset(-padPx, -padPx)
+            return rect
+        }
+
+        fun hideStockSettingsPopupIfPresent(root: ViewGroup) {
+            if (keyguardSettingsButtonId != 0) {
+                val windowRoot = (root.rootView as? ViewGroup) ?: root
+                windowRoot.findViewById<View>(keyguardSettingsButtonId)?.let { btn ->
+                    btn.animate().cancel()
+                    if (btn.alpha != 0f) btn.alpha = 0f
+                    if (btn.visibility != View.GONE) btn.visibility = View.GONE
+                }
+            }
+        }
+
+        fun canEnterEditMode(ctx: Context): Pair<Boolean, Boolean> {
+            val km = ctx.getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
+            val isSecure = km?.isKeyguardSecure == true
+            if (!isSecure || !cachedLockEditRequireUnlock) return true to false
+
+            val canDismiss = try {
+                val ksc = keyguardStateControllerObj
+                if (ksc != null) {
+                    (ksc.javaClass.getMethod("canDismissLockScreen").invoke(ksc) as? Boolean) ?: false
+                } else {
+                    km?.isKeyguardLocked == false
+                }
+            } catch (_: Throwable) {
+                false
+            }
+            return if (canDismiss) (true to false) else (false to true)
+        }
+
+        fun setEditMode(active: Boolean) {
+            isEditModeActive = active
+            val root = activeRootLayout ?: return
+            val clock = activeClock
+            val date = activeDate
+
+            if (active) {
+                updateNotificationShift(root.context, false)
+                hideStockSettingsPopupIfPresent(root)
+                savedChildAlphas.clear()
+                for (i in 0 until root.childCount) {
+                    val child = root.getChildAt(i)
+                    savedChildAlphas[child] = child.alpha
+                    child.animate().cancel()
+                    child.alpha = 0f
+                }
+            } else {
+                for (i in 0 until root.childCount) {
+                    val child = root.getChildAt(i)
+                    if (child.id == customClockId) {
+                        child.animate().cancel()
+                        child.animate().alpha(1f).setDuration(180L).start()
+                        continue
+                    }
+                    if (child.id == customDateId) {
+                        val showExt = clock?.activeDatePolicy() == ClockDatePolicy.EXTERNAL_STANDARD
+                        child.animate().cancel()
+                        child.animate().alpha(if (showExt) 1f else 0f).setDuration(180L).start()
+                        continue
+                    }
+                    val prevAlpha = savedChildAlphas[child] ?: continue
+                    child.animate().cancel()
+                    child.animate().alpha(prevAlpha).setDuration(180L).start()
+                }
+                savedChildAlphas.clear()
+            }
+            date?.invalidate()
+        }
+
+        fun applyLiveEditPreview(cfg: ClockKitConfig, newCollisionMap: FloatArray? = null) {
+            val clock = activeClock ?: return
+            val date = activeDate
+            val ctx = clock.context
+            val dm = ctx.resources.displayMetrics
+
+            topMarginPx = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, cfg.clockY, dm).toInt()
+            dateTopMarginPx = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, cfg.dateY, dm).toInt()
+
+            val prevDepth = clock.clockConfig.isDepthEnabled
+            val prevGravity = clock.clockConfig.isGravityEnabled
+            clock.clockConfig = cfg
+            if (newCollisionMap != null) clock.collisionMap = newCollisionMap
+            clock.userTranslationX = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, cfg.clockX, dm)
+
+            if (prevDepth != cfg.isDepthEnabled || prevGravity != cfg.isGravityEnabled) {
+                clock.reloadDepthMaskAsync()
+            }
+
+            computeEffectiveMargins(ctx)
+            val measured = clock.measureForCurrentState(0f)
+            val visualClockTopMarginPx = if (measured.wantsFullScreenBounds) {
+                0
+            } else {
+                (effectiveTopMarginPx - measured.topPadPx).toInt().coerceAtLeast(0)
+            }
+
+            (clock.layoutParams as? ViewGroup.MarginLayoutParams)?.let { lp ->
+                val targetW = if (measured.wantsFullScreenBounds) screenW.toInt() else -1
+                val targetH = if (measured.wantsFullScreenBounds) screenH.toInt() else -2
+                if (lp.topMargin != visualClockTopMarginPx || lp.width != targetW || lp.height != targetH) {
+                    lp.width = targetW
+                    lp.height = targetH
+                    lp.topMargin = visualClockTopMarginPx
+                    clock.layoutParams = lp
+                }
+            }
+            clock.updateInterpolatedPositions()
+            clock.syncFrameLoop()
+            clock.requestLayout()
+            clock.invalidate()
+
+            if (date != null) {
+                val dateX = if (cfg.dateAttached) cfg.clockX else cfg.dateX
+                date.userTranslationX = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, dateX, dm)
+                date.isAttachedToClock = cfg.dateAttached
+                date.dateFormatIndex = cfg.dateFormat
+                date.setTextColor(cfg.color)
+
+                val dateSp = if (cfg.styleId == "adaptive_vector") {
+                    (cfg.getFloat("adaptive_vector", "hour_size", 100f) * 0.24f).coerceIn(14f, 34f)
+                } else {
+                    (20f * cfg.scale).coerceIn(14f, 32f)
+                }
+                date.dynamicDateSizeSp = dateSp
+                date.applyCurrentTextSize()
+
+                val showExt = clock.activeDatePolicy() == ClockDatePolicy.EXTERNAL_STANDARD
+                date.visibility = if (showExt) View.VISIBLE else View.GONE
+
+                (date.layoutParams as? ViewGroup.MarginLayoutParams)?.let { dlp ->
+                    if (dlp.topMargin != effectiveDateTopMarginPx) {
+                        dlp.topMargin = effectiveDateTopMarginPx
+                        date.layoutParams = dlp
+                    }
+                }
+                date.updateTimeDirectly()
+                date.updatePosition()
+                date.requestLayout()
+                date.invalidate()
+            }
+        }
+
         fun updateNotificationShift(context: Context, hasNotifications: Boolean) {
-            isShiftedForNotifications = hasNotifications
-            activeClock?.setClockState(hasNotifications)
-            activeDate?.setDateState(hasNotifications)
+            val effective = if (isEditModeActive) false else hasNotifications
+            isShiftedForNotifications = effective
+            activeClock?.setClockState(effective)
+            activeDate?.setDateState(effective)
         }
 
         fun computeEffectiveMargins(context: Context) {
@@ -206,6 +430,11 @@ class CaveArtXposedModule : XposedModule() {
         }
 
         fun sendUdfpsCoordinates(ctx: Context, centerX: Float, centerY: Float, radius: Float) {
+            if (radius > 0f) {
+                cachedUdfpsX = centerX
+                cachedUdfpsY = centerY
+                cachedUdfpsRadius = radius
+            }
             try {
                 val bundle = Bundle().apply {
                     putFloat("udfps_x", centerX)
@@ -225,6 +454,172 @@ class CaveArtXposedModule : XposedModule() {
         }
     }
 
+    @Volatile private var windowTouchHookInstalled = false
+    @Volatile private var isInjectingCancel = false
+
+    private fun installWindowTouchHooks(windowRootClass: Class<*>) {
+        if (windowTouchHookInstalled) return
+        windowTouchHookInstalled = true
+
+        val handler = Handler(Looper.getMainLooper())
+        var downX = 0f
+        var downY = 0f
+        var downTime = 0L
+        var touchSlop = -1
+        var pendingLongPress: Runnable? = null
+
+        val clockLongPressDelayMs = 340L
+
+        fun cancelPending() {
+            pendingLongPress?.let { handler.removeCallbacks(it) }
+            pendingLongPress = null
+        }
+
+        try {
+            val dispatchTouchMethod = windowRootClass.getMethod("dispatchTouchEvent", MotionEvent::class.java)
+            hook(dispatchTouchMethod).intercept { chain ->
+                val ev = chain.args[0] as MotionEvent
+                if (isInjectingCancel) {
+                    return@intercept chain.proceed()
+                }
+
+                val overlay = activeEditorOverlay
+                if (isEditModeActive && overlay != null && overlay.isAttachedToWindow && overlay.visibility == View.VISIBLE) {
+                    cancelPending()
+                    return@intercept overlay.dispatchTouchEvent(ev)
+                }
+
+                val windowView = chain.thisObject as? ViewGroup
+                val rootLayout = activeRootLayout
+                val clock = activeClock
+                if (windowView == null || rootLayout == null || clock == null) {
+                    cancelPending()
+                    return@intercept chain.proceed()
+                }
+
+                val ctx = windowView.context
+                if (touchSlop < 0) {
+                    touchSlop = android.view.ViewConfiguration.get(ctx).scaledTouchSlop
+                }
+
+                val pm = ctx.getSystemService(Context.POWER_SERVICE) as? PowerManager
+                val isAwakeKeyguard = (pm?.isInteractive != false) &&
+                    statusBarState == 1 &&
+                    !isDozing &&
+                    rootLayout.isAttachedToWindow &&
+                    rootLayout.isShown &&
+                    rootLayout.alpha > 0.6f &&
+                    clock.isShown
+
+                if (!isAwakeKeyguard || !cachedLockEditEnabled) {
+                    cancelPending()
+                    if (ev.actionMasked == MotionEvent.ACTION_DOWN) lastDownWasOnClock = false
+                    return@intercept chain.proceed()
+                }
+
+                when (ev.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> {
+                        cancelPending()
+                        val rawX = ev.rawX
+                        val rawY = ev.rawY
+                        val nearUdfps = cachedUdfpsRadius > 0f && cachedUdfpsX > 0f &&
+                            hypot((rawX - cachedUdfpsX).toDouble(), (rawY - cachedUdfpsY).toDouble()) < (cachedUdfpsRadius * 1.45)
+
+                        val hitClock = !nearUdfps && getClockHitRect(24f).contains(rawX, rawY)
+                        lastDownWasOnClock = hitClock
+
+                        if (hitClock) {
+                            downX = ev.x
+                            downY = ev.y
+                            downTime = ev.downTime
+                            val r = Runnable {
+                                pendingLongPress = null
+                                val currentOverlay = activeEditorOverlay ?: return@Runnable
+                                if (!currentOverlay.isAttachedToWindow) return@Runnable
+
+                                windowView.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+
+                                val now = SystemClock.uptimeMillis()
+                                val cancelEv = MotionEvent.obtain(downTime, now, MotionEvent.ACTION_CANCEL, downX, downY, 0)
+                                isInjectingCancel = true
+                                try {
+                                    windowView.dispatchTouchEvent(cancelEv)
+                                } finally {
+                                    isInjectingCancel = false
+                                    cancelEv.recycle()
+                                }
+
+                                val (allowed, needsUnlock) = canEnterEditMode(ctx)
+                                if (allowed) {
+                                    currentOverlay.openEditor()
+                                } else if (needsUnlock) {
+                                    currentOverlay.showUnlockPromptPill()
+                                }
+                            }
+                            pendingLongPress = r
+                            handler.postDelayed(r, clockLongPressDelayMs)
+                        }
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        if (pendingLongPress != null) {
+                            val dx = ev.x - downX
+                            val dy = ev.y - downY
+                            if (dx * dx + dy * dy > touchSlop * touchSlop) {
+                                cancelPending()
+                            }
+                        }
+                    }
+                    MotionEvent.ACTION_POINTER_DOWN -> cancelPending()
+                    MotionEvent.ACTION_UP,
+                    MotionEvent.ACTION_CANCEL -> {
+                        cancelPending()
+                        lastDownWasOnClock = false
+                    }
+                }
+
+                chain.proceed()
+            }
+        } catch (_: Throwable) {}
+
+        try {
+            val dispatchKeyMethod = windowRootClass.getMethod("dispatchKeyEvent", KeyEvent::class.java)
+            hook(dispatchKeyMethod).intercept { chain ->
+                val ke = chain.args[0] as KeyEvent
+                val overlay = activeEditorOverlay
+                if (isEditModeActive && overlay != null && overlay.isAttachedToWindow && overlay.visibility == View.VISIBLE) {
+                    if (ke.keyCode == KeyEvent.KEYCODE_BACK && ke.action == KeyEvent.ACTION_UP) {
+                        if (overlay.handleBackPressed()) {
+                            return@intercept true
+                        }
+                    }
+                    if (overlay.dispatchKeyEvent(ke)) {
+                        return@intercept true
+                    }
+                }
+                chain.proceed()
+            }
+        } catch (_: Throwable) {}
+    }
+
+    private fun attachOverlayToWindow(rootLayout: ViewGroup, context: Context) {
+        val windowRoot = (rootLayout.rootView as? ViewGroup) ?: rootLayout
+        installWindowTouchHooks(windowRoot.javaClass)
+
+        val editor = activeEditorOverlay ?: LockscreenEditorOverlay(context).also {
+            activeEditorOverlay = it
+        }
+        editor.visibility = if (isEditModeActive) View.VISIBLE else View.GONE
+        editor.elevation = 250f
+        editor.translationZ = 250f
+
+        if (editor.parent !== windowRoot) {
+            (editor.parent as? ViewGroup)?.removeView(editor)
+            windowRoot.addView(editor, ViewGroup.LayoutParams(-1, -1))
+        } else {
+            editor.bringToFront()
+        }
+    }
+
     override fun onPackageLoaded(param: XposedModuleInterface.PackageLoadedParam) {
         super.onPackageLoaded(param)
 
@@ -233,6 +628,75 @@ class CaveArtXposedModule : XposedModule() {
                 param.javaClass.getMethod("getDefaultClassLoader").invoke(param) as ClassLoader
             } catch (_: Exception) {
                 param.javaClass.getMethod("getClassLoader").invoke(param) as ClassLoader
+            }
+
+            try {
+                val sbscClass = classLoader.loadClass("com.android.systemui.statusbar.StatusBarStateControllerImpl")
+                sbscClass.declaredMethods.filter { it.name == "setState" }.forEach { m ->
+                    hook(m).intercept { chain ->
+                        val res = chain.proceed()
+                        (chain.args.firstOrNull() as? Int)?.let { newState ->
+                            statusBarState = newState
+                            if (newState != 1 && isEditModeActive) {
+                                activeEditorOverlay?.dismiss(save = false)
+                            }
+                        }
+                        res
+                    }
+                }
+                sbscClass.declaredMethods.filter { it.name == "setIsDozing" }.forEach { m ->
+                    hook(m).intercept { chain ->
+                        val res = chain.proceed()
+                        (chain.args.firstOrNull() as? Boolean)?.let { dozing ->
+                            isDozing = dozing
+                            if (dozing && isEditModeActive) {
+                                activeEditorOverlay?.dismiss(save = false)
+                            }
+                        }
+                        res
+                    }
+                }
+            } catch (_: Throwable) {}
+
+            try {
+                val kscClass = classLoader.loadClass("com.android.systemui.statusbar.policy.KeyguardStateControllerImpl")
+                kscClass.declaredConstructors.forEach { ctor ->
+                    hook(ctor).intercept { chain ->
+                        val res = chain.proceed()
+                        keyguardStateControllerObj = chain.thisObject
+                        res
+                    }
+                }
+            } catch (_: Throwable) {}
+
+            listOf(
+                "com.android.systemui.keyguard.ui.viewmodel.KeyguardTouchHandlingViewModel",
+                "com.android.systemui.keyguard.ui.viewmodel.KeyguardLongPressViewModel",
+                "com.android.systemui.keyguard.domain.interactor.KeyguardTouchHandlingInteractor",
+                "com.android.systemui.keyguard.domain.interactor.KeyguardLongPressInteractor"
+            ).forEach { targetName ->
+                try {
+                    val targetClass = classLoader.loadClass(targetName)
+                    targetClass.declaredMethods.filter { it.name == "onLongPress" }.forEach { m ->
+                        hook(m).intercept { chain ->
+                            if (cachedLockEditEnabled && (lastDownWasOnClock || isEditModeActive)) {
+                                if (m.returnType == Boolean::class.javaPrimitiveType) true else null
+                            } else {
+                                chain.proceed()
+                            }
+                        }
+                    }
+                } catch (_: Throwable) {}
+            }
+
+            listOf(
+                "com.android.systemui.shade.NotificationShadeWindowView",
+                "com.android.systemui.statusbar.phone.NotificationShadeWindowView"
+            ).forEach { shadeName ->
+                try {
+                    val shadeClass = classLoader.loadClass(shadeName)
+                    installWindowTouchHooks(shadeClass)
+                } catch (_: Throwable) {}
             }
 
             try {
@@ -289,6 +753,12 @@ class CaveArtXposedModule : XposedModule() {
 
                     if (rootLayout != null) {
                         val context = rootLayout.context
+                        activeRootLayout = rootLayout
+                        if (keyguardSettingsButtonId == 0) {
+                            keyguardSettingsButtonId = context.resources.getIdentifier(
+                                "keyguard_settings_button", "id", context.packageName
+                            )
+                        }
 
                         val wm = context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && wm != null) {
@@ -308,6 +778,7 @@ class CaveArtXposedModule : XposedModule() {
 
                         SystemUIHider.initIds(context)
                         OverlapPreventionHelper.initIds(context)
+                        refreshCachedLockEditSettings(context)
 
                         if (rootLayout.findViewById<View>(customClockId) == null) {
                             val initialConfig = loadClockKitConfigFromProvider(context)
@@ -335,7 +806,7 @@ class CaveArtXposedModule : XposedModule() {
                                 translationZ = 50f
                                 elevation = 50f
                             }
-                            myCustomClock.reloadDepthMask()
+                            myCustomClock.reloadDepthMaskAsync()
                             activeClock = myCustomClock
 
                             val myCustomDate = IndependentDateView(context).apply {
@@ -359,6 +830,11 @@ class CaveArtXposedModule : XposedModule() {
                             rootLayout.viewTreeObserver.addOnPreDrawListener {
                                 if (largeId != 0) rootLayout.findViewById<View>(largeId)?.apply { if (visibility != View.GONE) visibility = View.GONE; if (alpha != 0f) alpha = 0f; scaleX = 0f; scaleY = 0f }
                                 if (smallId != 0) rootLayout.findViewById<View>(smallId)?.apply { if (visibility != View.GONE) visibility = View.GONE; if (alpha != 0f) alpha = 0f; scaleX = 0f; scaleY = 0f }
+                                if (isEditModeActive) {
+                                    hideStockSettingsPopupIfPresent(rootLayout)
+                                    if (myCustomClock.alpha != 0f) myCustomClock.alpha = 0f
+                                    if (myCustomDate.alpha != 0f) myCustomDate.alpha = 0f
+                                }
                                 SystemUIHider.forceHideOnPreDraw(rootLayout)
                                 true
                             }
@@ -371,8 +847,21 @@ class CaveArtXposedModule : XposedModule() {
 
                             OverlapPreventionHelper.forceElementsBelow(rootLayout, myCustomClock, myCustomDate)
 
+                            if (rootLayout.isAttachedToWindow) {
+                                attachOverlayToWindow(rootLayout, context)
+                            } else {
+                                rootLayout.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+                                    override fun onViewAttachedToWindow(v: View) {
+                                        attachOverlayToWindow(rootLayout, context)
+                                    }
+                                    override fun onViewDetachedFromWindow(v: View) {}
+                                })
+                            }
+
                             val filter = IntentFilter().apply {
                                 addAction(ClockKitConfigStore.ACTION_CLOCKKIT_UPDATED)
+                                addAction("com.android.CaveArt.UPDATE_LOCK_EDIT_SETTINGS")
+                                addAction("com.android.CaveArt.UPDATE_UDFPS_LOCATION")
                                 addAction("com.android.CaveArt.UPDATE_TELEMETRY")
                                 addAction("com.android.CaveArt.UPDATE_CLOCK_STYLE")
                                 addAction("com.android.CaveArt.UPDATE_CLOCK_POSITION")
@@ -390,6 +879,7 @@ class CaveArtXposedModule : XposedModule() {
                                 addAction("com.android.CaveArt.UPDATE_CLOCK_GRAVITY")
                                 addAction(Intent.ACTION_USER_PRESENT)
                                 addAction(Intent.ACTION_SCREEN_ON)
+                                addAction(Intent.ACTION_SCREEN_OFF)
                                 addAction(Intent.ACTION_TIME_TICK)
                             }
 
@@ -400,6 +890,23 @@ class CaveArtXposedModule : XposedModule() {
                             context.registerReceiver(object : BroadcastReceiver() {
                                 override fun onReceive(ctx: Context?, intent: Intent?) {
                                     when (intent?.action) {
+                                        "com.android.CaveArt.UPDATE_LOCK_EDIT_SETTINGS" -> {
+                                            cachedLockEditEnabled = intent.getBooleanExtra("lock_edit_enabled", cachedLockEditEnabled)
+                                            cachedLockEditRequireUnlock = intent.getBooleanExtra("lock_edit_require_unlock", cachedLockEditRequireUnlock)
+                                        }
+                                        "com.android.CaveArt.UPDATE_UDFPS_LOCATION" -> {
+                                            val r = intent.getFloatExtra("udfps_radius", 0f)
+                                            if (r > 0f) {
+                                                cachedUdfpsX = intent.getFloatExtra("udfps_x", -1f)
+                                                cachedUdfpsY = intent.getFloatExtra("udfps_y", -1f)
+                                                cachedUdfpsRadius = r
+                                            }
+                                        }
+                                        Intent.ACTION_SCREEN_OFF -> {
+                                            if (isEditModeActive) {
+                                                activeEditorOverlay?.dismiss(save = false)
+                                            }
+                                        }
                                         ClockKitConfigStore.ACTION_CLOCKKIT_UPDATED -> {
                                             val newCfg = ClockKitConfigStore.fromJson(
                                                 intent.getStringExtra("clockkit_config")
@@ -444,6 +951,10 @@ class CaveArtXposedModule : XposedModule() {
                                         Intent.ACTION_TIME_TICK,
                                         Intent.ACTION_USER_PRESENT,
                                         Intent.ACTION_SCREEN_ON -> {
+                                            if (intent.action == Intent.ACTION_SCREEN_ON) {
+                                                refreshCachedLockEditSettings(context)
+                                            }
+                                            if (isEditModeActive) return
                                             myCustomClock.telemetryZoom = getSettingFloat(context, "telemetry_zoom", 1.10f)
                                             val refreshed = loadClockKitConfigFromProvider(context)
                                             applyFullConfigToViews(context, rootLayout, classLoader, myCustomClock, myCustomDate, refreshed)
@@ -451,6 +962,8 @@ class CaveArtXposedModule : XposedModule() {
                                     }
                                 }
                             }, filter, receiverFlags)
+                        } else if (rootLayout.isAttachedToWindow) {
+                            attachOverlayToWindow(rootLayout, context)
                         }
                     }
 
@@ -486,12 +999,16 @@ class CaveArtXposedModule : XposedModule() {
                             try {
                                 val getVisibility = constraintSetClass.getMethod("getVisibility", Int::class.javaPrimitiveType)
                                 val largeVis = getVisibility.invoke(cs, largeId) as Int
-                                hasNotifications = (largeVis == 8 || largeVis == 4)
+                                hasNotifications = !isEditModeActive && (largeVis == 8 || largeVis == 4)
                                 updateNotificationShift(context, hasNotifications)
                             } catch (_: Exception) {}
 
                             if (largeId != 0) { setVisibility.invoke(cs, largeId, 8); setAlpha?.invoke(cs, largeId, 0f) }
                             if (smallId != 0) { setVisibility.invoke(cs, smallId, 8); setAlpha?.invoke(cs, smallId, 0f) }
+                            if (isEditModeActive && keyguardSettingsButtonId != 0) {
+                                setVisibility.invoke(cs, keyguardSettingsButtonId, 8)
+                                setAlpha?.invoke(cs, keyguardSettingsButtonId, 0f)
+                            }
 
                             computeEffectiveMargins(context)
                             val density = context.resources.displayMetrics.density
@@ -509,7 +1026,7 @@ class CaveArtXposedModule : XposedModule() {
                             connect.invoke(cs, customClockId, 6, 0, 6, 0)
                             connect.invoke(cs, customClockId, 7, 0, 7, 0)
                             setVisibility.invoke(cs, customClockId, 0)
-                            setAlpha?.invoke(cs, customClockId, 1f)
+                            setAlpha?.invoke(cs, customClockId, if (isEditModeActive) 0f else 1f)
 
                             val showExternalDate = clock.activeDatePolicy() == ClockDatePolicy.EXTERNAL_STANDARD
                             constrainWidth?.invoke(cs, customDateId, -2)
@@ -518,7 +1035,7 @@ class CaveArtXposedModule : XposedModule() {
                             connect.invoke(cs, customDateId, 6, 0, 6, 0)
                             connect.invoke(cs, customDateId, 7, 0, 7, 0)
                             setVisibility.invoke(cs, customDateId, if (showExternalDate) 0 else 8)
-                            setAlpha?.invoke(cs, customDateId, if (showExternalDate) 1f else 0f)
+                            setAlpha?.invoke(cs, customDateId, if (!isEditModeActive && showExternalDate) 1f else 0f)
 
                             try {
                                 val clockCurrentY = if (hasNotifications) NOTIF_CLOCK_TOP_DP * density else effectiveTopMarginPx.toFloat()
@@ -613,7 +1130,7 @@ class CaveArtXposedModule : XposedModule() {
             }
         } catch (_: Exception) {}
 
-        clock.reloadDepthMask()
+        clock.reloadDepthMaskAsync()
         clock.updateInterpolatedPositions()
         clock.syncFrameLoop()
         clock.requestLayout()
@@ -850,8 +1367,9 @@ class VectorTextClock(context: Context) : TextClock(context) {
     var notificationProgress = 0f
     private var notificationAnimator: ValueAnimator? = null
 
-    private var depthMaskBitmap: Bitmap? = null
-    private var rawDepthBitmap: Bitmap? = null
+    internal var depthMaskBitmap: Bitmap? = null
+    internal var rawDepthBitmap: Bitmap? = null
+    internal val lastRenderedBounds = RectF()
 
     private val screenPos = IntArray(2)
 
@@ -932,51 +1450,46 @@ class VectorTextClock(context: Context) : TextClock(context) {
         return if (hasNotifications) res.notificationCollapsedHeightPx else res.contentHeightPx
     }
 
-    fun reloadDepthMask() {
-        val oldMask = depthMaskBitmap
-        depthMaskBitmap = null
-        oldMask?.takeIf { !it.isRecycled }?.recycle()
-
-        val oldRaw = rawDepthBitmap
-        rawDepthBitmap = null
-        oldRaw?.takeIf { !it.isRecycled }?.recycle()
-
-        if (clockConfig.isGravityEnabled) {
-            try {
-                val depthUri = Uri.parse("content://com.android.CaveArt.settings/raw_depth")
-                context.contentResolver.openInputStream(depthUri)?.use { stream ->
-                    rawDepthBitmap = BitmapFactory.decodeStream(stream)
-                }
-            } catch (_: Exception) {}
-
-            if (rawDepthBitmap == null) {
-                val candidateDepthPaths = listOf(
-                    "/data/user_de/0/com.android.CaveArt/files/lock_raw_depth.png",
-                    "/data/user_de/0/com.android.CaveArt/no_backup/lock_raw_depth.png",
-                    "/data/data/com.android.CaveArt/files/lock_raw_depth.png"
-                )
-                for (path in candidateDepthPaths) {
-                    val file = File(path)
-                    if (file.exists() && file.length() > 0) {
-                        try {
-                            rawDepthBitmap = BitmapFactory.decodeFile(file.absolutePath)
-                            if (rawDepthBitmap != null) break
-                        } catch (_: Exception) {}
-                    }
-                }
-            }
-        }
-
-        if (!clockConfig.isDepthEnabled) return
-
+    private fun decodeRawDepthBitmap(): Bitmap? {
+        if (!clockConfig.isGravityEnabled) return null
+        var decoded: Bitmap? = null
         try {
-            val uri = Uri.parse("content://com.android.CaveArt.settings/depth_mask")
-            context.contentResolver.openInputStream(uri)?.use { stream ->
-                depthMaskBitmap = BitmapFactory.decodeStream(stream)
+            val depthUri = Uri.parse("content://com.android.CaveArt.settings/raw_depth")
+            context.contentResolver.openInputStream(depthUri)?.use { stream ->
+                decoded = BitmapFactory.decodeStream(stream)
             }
         } catch (_: Exception) {}
 
-        if (depthMaskBitmap == null) {
+        if (decoded == null) {
+            val candidateDepthPaths = listOf(
+                "/data/user_de/0/com.android.CaveArt/files/lock_raw_depth.png",
+                "/data/user_de/0/com.android.CaveArt/no_backup/lock_raw_depth.png",
+                "/data/data/com.android.CaveArt/files/lock_raw_depth.png"
+            )
+            for (path in candidateDepthPaths) {
+                val file = File(path)
+                if (file.exists() && file.length() > 0) {
+                    try {
+                        decoded = BitmapFactory.decodeFile(file.absolutePath)
+                        if (decoded != null) break
+                    } catch (_: Exception) {}
+                }
+            }
+        }
+        return decoded
+    }
+
+    private fun decodeDepthMaskBitmap(): Bitmap? {
+        if (!clockConfig.isDepthEnabled) return null
+        var decoded: Bitmap? = null
+        try {
+            val uri = Uri.parse("content://com.android.CaveArt.settings/depth_mask")
+            context.contentResolver.openInputStream(uri)?.use { stream ->
+                decoded = BitmapFactory.decodeStream(stream)
+            }
+        } catch (_: Exception) {}
+
+        if (decoded == null) {
             val candidatePaths = listOf(
                 "/data/user_de/0/com.android.CaveArt/files/lock_depth_mask.png",
                 "/data/user_de/0/com.android.CaveArt/no_backup/boot_cutout.png",
@@ -987,12 +1500,47 @@ class VectorTextClock(context: Context) : TextClock(context) {
                 val file = File(path)
                 if (file.exists() && file.length() > 0) {
                     try {
-                        depthMaskBitmap = BitmapFactory.decodeFile(file.absolutePath)
-                        if (depthMaskBitmap != null) break
+                        decoded = BitmapFactory.decodeFile(file.absolutePath)
+                        if (decoded != null) break
                     } catch (_: Exception) {}
                 }
             }
         }
+        return decoded
+    }
+
+    fun reloadDepthMaskAsync(onLoaded: (() -> Unit)? = null) {
+        val needRaw = clockConfig.isGravityEnabled
+        val needMask = clockConfig.isDepthEnabled
+        Thread {
+            val newRaw = if (needRaw) decodeRawDepthBitmap() else null
+            val newMask = if (needMask) decodeDepthMaskBitmap() else null
+            post {
+                val oldRaw = rawDepthBitmap
+                rawDepthBitmap = newRaw
+                if (oldRaw != null && oldRaw !== newRaw && !oldRaw.isRecycled) oldRaw.recycle()
+
+                val oldMask = depthMaskBitmap
+                depthMaskBitmap = newMask
+                if (oldMask != null && oldMask !== newMask && !oldMask.isRecycled) oldMask.recycle()
+
+                invalidate()
+                onLoaded?.invoke()
+            }
+        }.start()
+    }
+
+    fun reloadDepthMask() {
+        val oldMask = depthMaskBitmap
+        depthMaskBitmap = null
+        oldMask?.takeIf { !it.isRecycled }?.recycle()
+
+        val oldRaw = rawDepthBitmap
+        rawDepthBitmap = null
+        oldRaw?.takeIf { !it.isRecycled }?.recycle()
+
+        rawDepthBitmap = decodeRawDepthBitmap()
+        depthMaskBitmap = decodeDepthMaskBitmap()
     }
 
     fun refreshSettings() {
@@ -1010,7 +1558,7 @@ class VectorTextClock(context: Context) : TextClock(context) {
         userTranslationX = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, clockConfig.clockX, dm)
 
         CaveArtXposedModule.computeEffectiveMargins(context)
-        reloadDepthMask()
+        reloadDepthMaskAsync()
         updateInterpolatedPositions()
         syncFrameLoop()
         requestLayout()
@@ -1032,7 +1580,7 @@ class VectorTextClock(context: Context) : TextClock(context) {
     override fun onWindowVisibilityChanged(visibility: Int) {
         super.onWindowVisibilityChanged(visibility)
         if (visibility == View.VISIBLE) {
-            reloadDepthMask()
+            reloadDepthMaskAsync()
             invalidate()
         }
         syncFrameLoop()
@@ -1078,7 +1626,6 @@ class VectorTextClock(context: Context) : TextClock(context) {
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        
         val m = measureForCurrentState(0f)
         if (m.wantsFullScreenBounds) {
             setMeasuredDimension(
@@ -1155,7 +1702,8 @@ class VectorTextClock(context: Context) : TextClock(context) {
             zoomFactor = telemetryZoom
         )
 
-        ClockKitEngine.renderForSystemUI(canvas, style, frame, clockConfig)
+        val renderRes = ClockKitEngine.renderForSystemUI(canvas, style, frame, clockConfig)
+        lastRenderedBounds.set(renderRes.boundsOnScreen)
 
         canvas.restore()
     }

@@ -27,7 +27,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -395,10 +394,15 @@ fun ClockStudioPreviewCard(
             .fillMaxHeight()
             .aspectRatio(displayGeometry.aspectRatio, matchHeightConstraintsFirst = true)
             .then(sharedElementModifier)
-            .shadow(28.dp, RoundedCornerShape(cardCornerRadiusDp.dp))
             .clip(RoundedCornerShape(cardCornerRadiusDp.dp))
             .then(gestureModifier),
         shape = RoundedCornerShape(cardCornerRadiusDp.dp),
+        elevation = CardDefaults.cardElevation(
+            defaultElevation = 0.dp,
+            pressedElevation = 0.dp,
+            focusedElevation = 0.dp,
+            hoveredElevation = 0.dp
+        ),
         colors = CardDefaults.cardColors(containerColor = Color.Black)
     ) {
         AnimatedContent(
