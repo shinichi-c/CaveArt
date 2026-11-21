@@ -14,9 +14,7 @@ class EditorialSplitClockStyle : BaseClockStyle() {
         ClockDatePolicy.INTEGRATED_BY_STYLE
 
     private class Scratch {
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            setShadowLayer(18f, 0f, 6f, Color.argb(140, 0, 0, 0))
-        }
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
         val datePaint = Paint(Paint.ANTI_ALIAS_FLAG)
         val pillPaint = Paint(Paint.ANTI_ALIAS_FLAG)
         val path = Path()
@@ -26,7 +24,7 @@ class EditorialSplitClockStyle : BaseClockStyle() {
     }
 
     private val scratch = ThreadLocal.withInitial { Scratch() }
-    
+
     override fun describeControls(config: ClockKitConfig): List<ClockControl> = listOf(
         ClockControl.Slider(
             id = "overlap", label = "Row Overlap", icon = ClockIcon.SPACING,

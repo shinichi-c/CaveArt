@@ -22,14 +22,13 @@ class AdaptiveVectorClockStyle : BaseClockStyle() {
             style = Paint.Style.FILL_AND_STROKE
             strokeCap = Paint.Cap.ROUND
             strokeJoin = Paint.Join.ROUND
-            setShadowLayer(15f, 0f, 5f, Color.argb(160, 0, 0, 0))
         }
         val combinedPath = Path()
         val bounds = RectF()
     }
 
     private val scratch = ThreadLocal.withInitial { Scratch() }
-    
+
     override fun describeControls(config: ClockKitConfig): List<ClockControl> = listOf(
         ClockControl.Slider(
             id = "stroke_width", label = "Thickness", icon = ClockIcon.THICKNESS,

@@ -1,7 +1,6 @@
 package com.android.CaveArt
 
 import android.graphics.Bitmap
-import android.graphics.Paint
 import android.graphics.Typeface
 import android.view.HapticFeedbackConstants
 import androidx.compose.foundation.Canvas
@@ -71,14 +70,6 @@ fun ClockStyleCarousel(
     val minSafeYDp = statusBarDp + (displayGeometry.statusBarHeightPx * 0.12f / densityVal)
     val cardCornerRadiusDp = (displayGeometry.physicalCornerRadiusPx / densityVal * 0.90f).coerceAtLeast(22f)
 
-    val datePaint = remember {
-        Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            textAlign = Paint.Align.CENTER
-            setShadowLayer(10f, 0f, 3f, android.graphics.Color.argb(160, 0, 0, 0))
-            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-        }
-    }
-
     BoxWithConstraints(
         modifier = modifier.fillMaxSize(),
         contentAlignment = Alignment.Center
@@ -106,6 +97,9 @@ fun ClockStyleCarousel(
 
             val cardConfig = remember(currentConfig, style.id) {
                 currentConfig.copy(styleId = style.id)
+            }
+            val glanceSnapshot = remember(cardConfig, dateText, timeString) {
+                AtAGlanceDataCollector.collect(context, cardConfig)
             }
             val cardLayerStack = remember(style.id, cardConfig.isDepthEnabled, cardConfig.depthOcclusionLimit) {
                 LockscreenLayerStack().apply {
@@ -180,11 +174,8 @@ fun ClockStyleCarousel(
                                 stack = cardLayerStack,
                                 focusedLayerType = null
                             ) { targetCanvas ->
-                                val showExternalDate = style.datePolicy(cardConfig) == ClockDatePolicy.EXTERNAL_STANDARD
-                                if (showExternalDate && dateText.isNotEmpty()) {
-                                    datePaint.color = cardConfig.color
-                                    datePaint.textSize = dateSizeDp * densityVal
-
+                                val showExternalDate = style.datePolicy(cardConfig) == ClockDatePolicy.EXTERNAL_STANDARD && cardConfig.atGlanceEnabled
+                                if (showExternalDate) {
                                     val safeDateYDp = if (cardConfig.dateAttached) {
                                         val mCtx = ClockMeasureContext(
                                             context = context,
@@ -196,10 +187,10 @@ fun ClockStyleCarousel(
                                             dateString = dateText
                                         )
                                         val measured = style.measure(mCtx, cardConfig)
-                                        val fm = datePaint.fontMetrics
-                                        val dateLineHDp = (fm.descent - fm.ascent) / densityVal
+                                        val glanceM = AtAGlanceRenderer.measure(cardConfig, glanceSnapshot, densityVal, dateSizeDp, realW)
+                                        val dateLineHDp = glanceM.heightPx / densityVal
                                         val strokeW = cardConfig.getFloat("adaptive_vector", "stroke_width", 8f)
-                                        val gapDp = (strokeW * 0.4f) + (dateLineHDp * 0.35f)
+                                        val gapDp = (strokeW * 0.4f) + (dateSizeDp * 0.35f)
                                         val idealAboveDp = cardConfig.clockY - dateLineHDp - gapDp
                                         if (idealAboveDp < minSafeYDp && !style.needsCollisionMap(cardConfig)) {
                                             cardConfig.clockY + (measured.contentHeightPx / densityVal) + gapDp
@@ -212,8 +203,17 @@ fun ClockStyleCarousel(
 
                                     val nativeDateX = (realW / 2f) + ((if (cardConfig.dateAttached) cardConfig.clockX else cardConfig.dateX) * densityVal)
                                     val nativeDateY = safeDateYDp * densityVal
-                                    val drawBaselineY = nativeDateY - datePaint.fontMetrics.top
-                                    targetCanvas.drawText(dateText, nativeDateX, drawBaselineY, datePaint)
+                                    AtAGlanceRenderer.draw(
+                                        canvas = targetCanvas,
+                                        centerX = nativeDateX,
+                                        topY = nativeDateY,
+                                        config = cardConfig,
+                                        snapshot = glanceSnapshot,
+                                        density = densityVal,
+                                        textColor = cardConfig.color,
+                                        dateSizeSp = dateSizeDp,
+                                        maxScreenWidthPx = realW
+                                    )
                                 }
 
                                 if (timeString.isNotEmpty()) {

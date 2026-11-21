@@ -1,13 +1,16 @@
 package com.android.CaveArt.xposed
 
 import android.animation.ValueAnimator
+import android.app.AlarmManager
 import android.app.KeyguardManager
+import android.app.NotificationManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.database.Cursor
 import android.graphics.*
+import android.hardware.camera2.CameraManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -36,6 +39,7 @@ import java.util.WeakHashMap
 import kotlin.math.abs
 import kotlin.math.hypot
 import kotlin.math.max
+import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
 fun getSettingFloat(ctx: Context, path: String, default: Float): Float {
@@ -164,6 +168,7 @@ class CaveArtXposedModule : XposedModule() {
 
     companion object {
         const val NOTIF_CLOCK_TOP_DP = 84f
+        const val COMPACT_DATE_TOP_DP = 46f
 
         val customClockId = View.generateViewId()
         val customDateId = View.generateViewId()
@@ -195,7 +200,26 @@ class CaveArtXposedModule : XposedModule() {
         @Volatile var cachedUdfpsY = -1f
         @Volatile var cachedUdfpsRadius = 0f
 
+        @Volatile private var lastWeatherSyncTemp = Float.NaN
+        @Volatile private var lastWeatherSyncCode = -1
+        @Volatile private var lastWeatherSyncMs = 0L
+
         private val savedChildAlphas = WeakHashMap<View, Float>()
+
+        fun getCompactClockTopPx(context: Context): Float {
+            val density = context.resources.displayMetrics.density
+            val clock = activeClock
+            val date = activeDate
+            val showExternalDate = clock?.activeDatePolicy() == ClockDatePolicy.EXTERNAL_STANDARD &&
+                clock.clockConfig.atGlanceEnabled &&
+                date?.visibility == View.VISIBLE
+            if (!showExternalDate) return NOTIF_CLOCK_TOP_DP * density
+
+            val dateTop = COMPACT_DATE_TOP_DP * density
+            val dateH = date?.measureCompactHeightPx() ?: (20f * density)
+            val gap = 10f * density
+            return max(NOTIF_CLOCK_TOP_DP * density, dateTop + dateH + gap)
+        }
 
         fun refreshCachedLockEditSettings(ctx: Context) {
             Thread {
@@ -214,6 +238,149 @@ class CaveArtXposedModule : XposedModule() {
             }.start()
         }
 
+        fun publishLocalWeather(ctx: Context, data: AtAGlanceWeatherData) {
+            AtAGlanceDataCollector.updateCachedWeather(data)
+            activeDate?.post { activeDate?.updateTimeDirectly() }
+
+            val now = System.currentTimeMillis()
+            val unchanged = !lastWeatherSyncTemp.isNaN() &&
+                abs(lastWeatherSyncTemp - data.tempC) < 0.2f &&
+                lastWeatherSyncCode == data.weatherCode &&
+                (now - lastWeatherSyncMs) < 10 * 60_000L
+            if (unchanged) return
+
+            lastWeatherSyncTemp = data.tempC
+            lastWeatherSyncCode = data.weatherCode
+            lastWeatherSyncMs = now
+
+            Thread {
+                try {
+                    val bundle = Bundle().apply {
+                        putFloat("temp_c", data.tempC)
+                        putInt("weather_code", data.weatherCode)
+                        putBoolean("is_day", data.isDay)
+                        putString("summary", data.summary)
+                        putString("source", data.source)
+                        putLong("updated_at", data.updatedAtMs)
+                    }
+                    ctx.contentResolver.call(
+                        Uri.parse("content://com.android.CaveArt.settings"),
+                        "saveLocalWeather",
+                        null,
+                        bundle
+                    )
+                } catch (_: Throwable) {}
+            }.start()
+        }
+
+        fun extractWeatherFromSmartspaceTargets(ctx: Context, targets: List<*>?) {
+            if (targets.isNullOrEmpty()) return
+            try {
+                for (item in targets) {
+                    if (item == null) continue
+                    val featureType = item.javaClass.getMethod("getFeatureType").invoke(item) as? Int ?: -1
+                    if (featureType != 1 && featureType != 10) continue
+
+                    val headerAction = try {
+                        item.javaClass.getMethod("getHeaderAction").invoke(item)
+                    } catch (_: Throwable) { null }
+                    val baseAction = try {
+                        item.javaClass.getMethod("getBaseAction").invoke(item)
+                    } catch (_: Throwable) { null }
+
+                    val title = headerAction?.javaClass?.getMethod("getTitle")?.invoke(headerAction)?.toString()
+                    val subtitle = headerAction?.javaClass?.getMethod("getSubtitle")?.invoke(headerAction)?.toString()
+                        ?: baseAction?.javaClass?.getMethod("getSubtitle")?.invoke(baseAction)?.toString()
+                    val contentDesc = headerAction?.javaClass?.getMethod("getContentDescription")?.invoke(headerAction)?.toString()
+
+                    val tempC = AtAGlanceDataCollector.parseTemperatureCelsius(title)
+                        ?: AtAGlanceDataCollector.parseTemperatureCelsius(contentDesc)
+                        ?: AtAGlanceDataCollector.parseTemperatureCelsius(subtitle)
+                        ?: continue
+
+                    val descText = listOfNotNull(contentDesc, subtitle, title)
+                        .firstOrNull { it.isNotBlank() && !it.trim().matches(Regex("""-?\d+°.*""")) }
+                    val code = AtAGlanceDataCollector.parseWeatherConditionToCode(descText)
+                    val summary = descText?.take(24)?.trim()
+                        ?.ifBlank { AtAGlanceDataCollector.weatherSummaryForCode(code) }
+                        ?: AtAGlanceDataCollector.weatherSummaryForCode(code)
+
+                    publishLocalWeather(
+                        ctx,
+                        AtAGlanceWeatherData(
+                            tempC = tempC,
+                            weatherCode = code,
+                            isDay = AtAGlanceDataCollector.isCurrentlyDaytime(),
+                            summary = summary,
+                            source = "System Smartspace",
+                            updatedAtMs = System.currentTimeMillis()
+                        )
+                    )
+                    return
+                }
+            } catch (_: Throwable) {}
+        }
+
+        fun scanHiddenSmartspaceOrOmniJaws(ctx: Context, rootLayout: ViewGroup?) {
+            if (rootLayout != null) {
+                val found = scanViewTreeForWeather(rootLayout)
+                if (found != null) {
+                    publishLocalWeather(ctx, found)
+                    return
+                }
+            }
+            Thread {
+                val omni = AtAGlanceDataCollector.readOmniJawsLocal(ctx)
+                if (omni != null) {
+                    publishLocalWeather(ctx, omni)
+                }
+            }.start()
+        }
+
+        private fun scanViewTreeForWeather(group: ViewGroup): AtAGlanceWeatherData? {
+            for (i in 0 until group.childCount) {
+                val child = group.getChildAt(i)
+                val name = child.javaClass.simpleName.lowercase()
+                if (name.contains("smartspace") || name.contains("slice") || name.contains("weather")) {
+                    val res = findWeatherTextInSubtree(child)
+                    if (res != null) return res
+                }
+                if (child is ViewGroup) {
+                    val nested = scanViewTreeForWeather(child)
+                    if (nested != null) return nested
+                }
+            }
+            return null
+        }
+
+        private fun findWeatherTextInSubtree(view: View): AtAGlanceWeatherData? {
+            if (view is TextView) {
+                val txt = view.text?.toString()
+                val desc = view.contentDescription?.toString()
+                val tempC = AtAGlanceDataCollector.parseTemperatureCelsius(txt)
+                    ?: AtAGlanceDataCollector.parseTemperatureCelsius(desc)
+                if (tempC != null) {
+                    val condStr = desc ?: txt
+                    val code = AtAGlanceDataCollector.parseWeatherConditionToCode(condStr)
+                    return AtAGlanceWeatherData(
+                        tempC = tempC,
+                        weatherCode = code,
+                        isDay = AtAGlanceDataCollector.isCurrentlyDaytime(),
+                        summary = AtAGlanceDataCollector.weatherSummaryForCode(code),
+                        source = "System Smartspace",
+                        updatedAtMs = System.currentTimeMillis()
+                    )
+                }
+            }
+            if (view is ViewGroup) {
+                for (i in 0 until view.childCount) {
+                    val found = findWeatherTextInSubtree(view.getChildAt(i))
+                    if (found != null) return found
+                }
+            }
+            return null
+        }
+
         fun getClockHitRect(paddingDp: Float = 24f): RectF {
             val clock = activeClock ?: return RectF()
             val density = clock.resources.displayMetrics.density
@@ -225,7 +392,7 @@ class CaveArtXposedModule : XposedModule() {
                 val m = clock.measureForCurrentState(clock.notificationProgress)
                 val cx = (screenW / 2f) + (clock.userTranslationX * (1f - clock.notificationProgress))
                 val userTopY = effectiveTopMarginPx.toFloat()
-                val notifTopY = NOTIF_CLOCK_TOP_DP * density
+                val notifTopY = getCompactClockTopPx(clock.context)
                 val top = userTopY + (notifTopY - userTopY) * clock.notificationProgress
                 rect.set(
                     cx - (m.contentWidthPx / 2f),
@@ -307,7 +474,8 @@ class CaveArtXposedModule : XposedModule() {
                         continue
                     }
                     if (child.id == customDateId) {
-                        val showExt = clock?.activeDatePolicy() == ClockDatePolicy.EXTERNAL_STANDARD
+                        val showExt = clock?.activeDatePolicy() == ClockDatePolicy.EXTERNAL_STANDARD &&
+                            clock.clockConfig.atGlanceEnabled
                         child.animate().cancel()
                         child.animate().alpha(if (showExt) 1f else 0f).setDuration(180L).start()
                         continue
@@ -364,21 +532,17 @@ class CaveArtXposedModule : XposedModule() {
             clock.invalidate()
 
             if (date != null) {
+                date.clockConfig = cfg
                 val dateX = if (cfg.dateAttached) cfg.clockX else cfg.dateX
                 date.userTranslationX = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, dateX, dm)
                 date.isAttachedToClock = cfg.dateAttached
                 date.dateFormatIndex = cfg.dateFormat
                 date.setTextColor(cfg.color)
 
-                val dateSp = if (cfg.styleId == "adaptive_vector") {
-                    (cfg.getFloat("adaptive_vector", "hour_size", 100f) * 0.24f).coerceIn(14f, 34f)
-                } else {
-                    (20f * cfg.scale).coerceIn(14f, 32f)
-                }
-                date.dynamicDateSizeSp = dateSp
-                date.applyCurrentTextSize()
+                val dateSp = LockscreenSceneRenderer.computeDateSizeSp(cfg)
+                date.updateSizeFromClock(dateSp)
 
-                val showExt = clock.activeDatePolicy() == ClockDatePolicy.EXTERNAL_STANDARD
+                val showExt = clock.activeDatePolicy() == ClockDatePolicy.EXTERNAL_STANDARD && cfg.atGlanceEnabled
                 date.visibility = if (showExt) View.VISIBLE else View.GONE
 
                 (date.layoutParams as? ViewGroup.MarginLayoutParams)?.let { dlp ->
@@ -409,9 +573,12 @@ class CaveArtXposedModule : XposedModule() {
             val cfg = clock?.clockConfig
 
             val needsCollision = style != null && cfg != null && style.needsCollisionMap(cfg)
-            val isAttached = cfg?.dateAttached == true && style?.datePolicy(cfg) == ClockDatePolicy.EXTERNAL_STANDARD
+            val isAttached = cfg?.dateAttached == true && cfg.atGlanceEnabled &&
+                style?.datePolicy(cfg) == ClockDatePolicy.EXTERNAL_STANDARD
 
-            val dateH = (date?.measuredHeight?.toFloat() ?: (20f * density)).coerceAtLeast(18f * density)
+            val dateH = (date?.lastMeasuredH?.takeIf { it > 0f }
+                ?: date?.measuredHeight?.toFloat()?.takeIf { it > 0f }
+                ?: (22f * density))
             val gapPx = 12f * density
             val minSafeTopPx = 38f * density
             val compoundOffsetPx = dateH + gapPx
@@ -467,7 +634,6 @@ class CaveArtXposedModule : XposedModule() {
         var downTime = 0L
         var touchSlop = -1
         var pendingLongPress: Runnable? = null
-
         val clockLongPressDelayMs = 340L
 
         fun cancelPending() {
@@ -630,6 +796,26 @@ class CaveArtXposedModule : XposedModule() {
                 param.javaClass.getMethod("getClassLoader").invoke(param) as ClassLoader
             }
 
+            listOf(
+                "com.android.systemui.statusbar.lockscreen.LockscreenSmartspaceController",
+                "com.google.android.systemui.smartspace.BcSmartspaceDataProvider",
+                "com.android.systemui.smartspace.BcSmartspaceDataProvider"
+            ).forEach { ssName ->
+                try {
+                    val ssClass = classLoader.loadClass(ssName)
+                    ssClass.declaredMethods.filter { it.name == "onTargetsAvailable" }.forEach { m ->
+                        hook(m).intercept { chain ->
+                            val targets = chain.args.firstOrNull() as? List<*>
+                            val ctx = activeClock?.context ?: activeRootLayout?.context
+                            if (ctx != null && targets != null) {
+                                extractWeatherFromSmartspaceTargets(ctx, targets)
+                            }
+                            chain.proceed()
+                        }
+                    }
+                } catch (_: Throwable) {}
+            }
+
             try {
                 val sbscClass = classLoader.loadClass("com.android.systemui.statusbar.StatusBarStateControllerImpl")
                 sbscClass.declaredMethods.filter { it.name == "setState" }.forEach { m ->
@@ -783,9 +969,7 @@ class CaveArtXposedModule : XposedModule() {
                         if (rootLayout.findViewById<View>(customClockId) == null) {
                             val initialConfig = loadClockKitConfigFromProvider(context)
                             val collMap = getSettingString(context, "clock_collision_map", "")
-                            val hSize = initialConfig.getFloat("adaptive_vector", "hour_size", 100f)
-                            val autoDateSize = (hSize * 0.24f).coerceIn(14f, 34f)
-                            val dateSize = getSettingFloat(context, "date_size", autoDateSize)
+                            val dateSize = LockscreenSceneRenderer.computeDateSizeSp(initialConfig)
 
                             topMarginPx = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, initialConfig.clockY, context.resources.displayMetrics).toInt()
                             dateTopMarginPx = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, initialConfig.dateY, context.resources.displayMetrics).toInt()
@@ -809,8 +993,11 @@ class CaveArtXposedModule : XposedModule() {
                             myCustomClock.reloadDepthMaskAsync()
                             activeClock = myCustomClock
 
+                            val showExt = myCustomClock.activeDatePolicy() == ClockDatePolicy.EXTERNAL_STANDARD &&
+                                initialConfig.atGlanceEnabled
                             val myCustomDate = IndependentDateView(context).apply {
                                 id = customDateId
+                                clockConfig = initialConfig
                                 dateFormatIndex = initialConfig.dateFormat
                                 isAttachedToClock = initialConfig.dateAttached
                                 dynamicDateSizeSp = dateSize
@@ -821,7 +1008,7 @@ class CaveArtXposedModule : XposedModule() {
                                 translationY = currentShiftY
                                 translationZ = 60f
                                 elevation = 60f
-                                visibility = if (myCustomClock.activeDatePolicy() == ClockDatePolicy.EXTERNAL_STANDARD) View.VISIBLE else View.GONE
+                                visibility = if (showExt) View.VISIBLE else View.GONE
                             }
                             activeDate = myCustomDate
 
@@ -849,10 +1036,12 @@ class CaveArtXposedModule : XposedModule() {
 
                             if (rootLayout.isAttachedToWindow) {
                                 attachOverlayToWindow(rootLayout, context)
+                                scanHiddenSmartspaceOrOmniJaws(context, rootLayout)
                             } else {
                                 rootLayout.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
                                     override fun onViewAttachedToWindow(v: View) {
                                         attachOverlayToWindow(rootLayout, context)
+                                        scanHiddenSmartspaceOrOmniJaws(context, rootLayout)
                                     }
                                     override fun onViewDetachedFromWindow(v: View) {}
                                 })
@@ -862,6 +1051,7 @@ class CaveArtXposedModule : XposedModule() {
                                 addAction(ClockKitConfigStore.ACTION_CLOCKKIT_UPDATED)
                                 addAction("com.android.CaveArt.UPDATE_LOCK_EDIT_SETTINGS")
                                 addAction("com.android.CaveArt.UPDATE_UDFPS_LOCATION")
+                                addAction("com.android.CaveArt.UPDATE_AT_A_GLANCE")
                                 addAction("com.android.CaveArt.UPDATE_TELEMETRY")
                                 addAction("com.android.CaveArt.UPDATE_CLOCK_STYLE")
                                 addAction("com.android.CaveArt.UPDATE_CLOCK_POSITION")
@@ -877,6 +1067,9 @@ class CaveArtXposedModule : XposedModule() {
                                 addAction("com.android.CaveArt.UPDATE_CLOCK_DEPTH")
                                 addAction("com.android.CaveArt.UPDATE_LAYER_STACK")
                                 addAction("com.android.CaveArt.UPDATE_CLOCK_GRAVITY")
+                                addAction(AlarmManager.ACTION_NEXT_ALARM_CLOCK_CHANGED)
+                                addAction(NotificationManager.ACTION_INTERRUPTION_FILTER_CHANGED)
+                                addAction(Intent.ACTION_BATTERY_CHANGED)
                                 addAction(Intent.ACTION_USER_PRESENT)
                                 addAction(Intent.ACTION_SCREEN_ON)
                                 addAction(Intent.ACTION_SCREEN_OFF)
@@ -900,6 +1093,16 @@ class CaveArtXposedModule : XposedModule() {
                                                 cachedUdfpsX = intent.getFloatExtra("udfps_x", -1f)
                                                 cachedUdfpsY = intent.getFloatExtra("udfps_y", -1f)
                                                 cachedUdfpsRadius = r
+                                            }
+                                        }
+                                        "com.android.CaveArt.UPDATE_AT_A_GLANCE",
+                                        AlarmManager.ACTION_NEXT_ALARM_CLOCK_CHANGED,
+                                        NotificationManager.ACTION_INTERRUPTION_FILTER_CHANGED,
+                                        Intent.ACTION_BATTERY_CHANGED -> {
+                                            if (!isEditModeActive) {
+                                                myCustomDate.updateTimeDirectly()
+                                                myCustomClock.updateInterpolatedPositions()
+                                                myCustomClock.invalidate()
                                             }
                                         }
                                         Intent.ACTION_SCREEN_OFF -> {
@@ -953,6 +1156,7 @@ class CaveArtXposedModule : XposedModule() {
                                         Intent.ACTION_SCREEN_ON -> {
                                             if (intent.action == Intent.ACTION_SCREEN_ON) {
                                                 refreshCachedLockEditSettings(context)
+                                                scanHiddenSmartspaceOrOmniJaws(context, rootLayout)
                                             }
                                             if (isEditModeActive) return
                                             myCustomClock.telemetryZoom = getSettingFloat(context, "telemetry_zoom", 1.10f)
@@ -1028,7 +1232,8 @@ class CaveArtXposedModule : XposedModule() {
                             setVisibility.invoke(cs, customClockId, 0)
                             setAlpha?.invoke(cs, customClockId, if (isEditModeActive) 0f else 1f)
 
-                            val showExternalDate = clock.activeDatePolicy() == ClockDatePolicy.EXTERNAL_STANDARD
+                            val showExternalDate = clock.activeDatePolicy() == ClockDatePolicy.EXTERNAL_STANDARD &&
+                                clock.clockConfig.atGlanceEnabled
                             constrainWidth?.invoke(cs, customDateId, -2)
                             constrainHeight?.invoke(cs, customDateId, -2)
                             connect.invoke(cs, customDateId, 3, 0, 3, effectiveDateTopMarginPx)
@@ -1038,12 +1243,16 @@ class CaveArtXposedModule : XposedModule() {
                             setAlpha?.invoke(cs, customDateId, if (!isEditModeActive && showExternalDate) 1f else 0f)
 
                             try {
-                                val clockCurrentY = if (hasNotifications) NOTIF_CLOCK_TOP_DP * density else effectiveTopMarginPx.toFloat()
+                                val clockCurrentY = if (hasNotifications) getCompactClockTopPx(context) else effectiveTopMarginPx.toFloat()
                                 val clockHeight = clock.measureHeightForNotificationPush(hasNotifications)
 
                                 val lowestPoint = if (showExternalDate) {
-                                    val dateCurrentY = if (hasNotifications) 56f * density else effectiveDateTopMarginPx.toFloat()
-                                    val dateHeight = (if (hasNotifications) 18f else activeDate?.dynamicDateSizeSp ?: 20f) * density * 1.5f
+                                    val dateCurrentY = if (hasNotifications) COMPACT_DATE_TOP_DP * density else effectiveDateTopMarginPx.toFloat()
+                                    val dateHeight = if (hasNotifications) {
+                                        activeDate?.measureCompactHeightPx() ?: (24f * density)
+                                    } else {
+                                        activeDate?.lastMeasuredH?.takeIf { it > 0f } ?: (24f * density)
+                                    }
                                     max(clockCurrentY + clockHeight, dateCurrentY + dateHeight)
                                 } else {
                                     clockCurrentY + clockHeight
@@ -1090,20 +1299,17 @@ class CaveArtXposedModule : XposedModule() {
         clock.clockConfig = cfg
         clock.userTranslationX = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, cfg.clockX, dm)
 
+        date.clockConfig = cfg
         val dateX = if (cfg.dateAttached) cfg.clockX else cfg.dateX
         date.userTranslationX = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, dateX, dm)
         date.isAttachedToClock = cfg.dateAttached
         date.dateFormatIndex = cfg.dateFormat
         date.setTextColor(cfg.color)
 
-        val dateSp = if (cfg.styleId == "adaptive_vector") {
-            (cfg.getFloat("adaptive_vector", "hour_size", 100f) * 0.24f).coerceIn(14f, 34f)
-        } else {
-            (20f * cfg.scale).coerceIn(14f, 32f)
-        }
+        val dateSp = LockscreenSceneRenderer.computeDateSizeSp(cfg)
         date.updateSizeFromClock(dateSp)
 
-        val showExternalDate = clock.activeDatePolicy() == ClockDatePolicy.EXTERNAL_STANDARD
+        val showExternalDate = clock.activeDatePolicy() == ClockDatePolicy.EXTERNAL_STANDARD && cfg.atGlanceEnabled
         date.visibility = if (showExternalDate) View.VISIBLE else View.GONE
 
         computeEffectiveMargins(context)
@@ -1145,15 +1351,24 @@ class CaveArtXposedModule : XposedModule() {
     }
 }
 
-class IndependentDateView(context: Context) : TextView(context) {
+class IndependentDateView(context: Context) : View(context) {
+    var clockConfig: ClockKitConfig = ClockKitConfig()
     var notificationProgress = 0f
     private var notifAnimator: ValueAnimator? = null
     var userTranslationX = 0f
     var dateFormatIndex = 0
     var isAttachedToClock = true
-    var dynamicDateSizeSp = 22f
-    var compactDateSizeSp = 18f
+    var dynamicDateSizeSp = 17f
+    var compactDateSizeSp = 14.5f
     var overlapShiftY = 0f
+
+    private var currentSizeSp = 17f
+    private var textColor = Color.WHITE
+    private var snapshot = AtAGlanceSnapshot(dateText = "")
+    var lastMeasuredW = 0f
+    var lastMeasuredH = 0f
+
+    private var torchCallback: CameraManager.TorchCallback? = null
 
     private val overlapSpring = SpringFloat(
         value = 0f,
@@ -1167,19 +1382,29 @@ class IndependentDateView(context: Context) : TextView(context) {
     }
 
     init {
-        setTextColor(Color.WHITE)
-        gravity = Gravity.CENTER
-        typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-        setShadowLayer(10f, 0f, 3f, Color.argb(160, 0, 0, 0))
-        isSingleLine = true
-        includeFontPadding = false
-        setPadding(0, 0, 0, 0)
         isClickable = false
         isFocusable = false
         isLongClickable = false
     }
 
     override fun onTouchEvent(event: MotionEvent?): Boolean = false
+
+    fun measureCompactHeightPx(): Float {
+        val density = resources.displayMetrics.density
+        val snap = if (snapshot.dateText.isNotEmpty()) snapshot else AtAGlanceDataCollector.collect(context, clockConfig)
+        return AtAGlanceRenderer.measure(clockConfig, snap, density, compactDateSizeSp, CaveArtXposedModule.screenW).heightPx
+    }
+
+    fun setTextColor(color: Int) {
+        textColor = color
+        invalidate()
+    }
+
+    fun setTextSize(unit: Int, sizeSp: Float) {
+        currentSizeSp = sizeSp
+        requestLayout()
+        invalidate()
+    }
 
     fun updateSizeFromClock(sizeSp: Float) {
         dynamicDateSizeSp = sizeSp
@@ -1190,8 +1415,8 @@ class IndependentDateView(context: Context) : TextView(context) {
     }
 
     fun applyCurrentTextSize() {
-        val currentSizeSp = dynamicDateSizeSp + (compactDateSizeSp - dynamicDateSizeSp) * notificationProgress
-        setTextSize(TypedValue.COMPLEX_UNIT_SP, currentSizeSp)
+        currentSizeSp = dynamicDateSizeSp + (compactDateSizeSp - dynamicDateSizeSp) * notificationProgress
+        requestLayout()
     }
 
     fun setDateState(hasNotifications: Boolean) {
@@ -1213,11 +1438,11 @@ class IndependentDateView(context: Context) : TextView(context) {
 
     fun updatePosition() {
         val density = resources.displayMetrics.density
-        val targetYPx = 56f * density
+        val targetYPx = CaveArtXposedModule.COMPACT_DATE_TOP_DP * density
         val userY = CaveArtXposedModule.effectiveDateTopMarginPx.toFloat()
         val notifTargetTranslationY = targetYPx - userY
-        val textWidth = paint.measureText(text.toString())
-        val halfWidth = textWidth / 2f
+        val contentW = lastMeasuredW.coerceAtLeast(measuredWidth.toFloat())
+        val halfWidth = contentW / 2f
         val screenW = CaveArtXposedModule.screenW
         val sideSafeMargin = 18f * density
         val minAllowedTransX = (-(screenW / 2f) + halfWidth + sideSafeMargin).coerceAtMost(0f)
@@ -1228,7 +1453,7 @@ class IndependentDateView(context: Context) : TextView(context) {
         if (isAttachedToClock && notificationProgress < 0.05f) {
             val clock = CaveArtXposedModule.activeClock
             val clockY = CaveArtXposedModule.effectiveTopMarginPx.toFloat()
-            val dateH = measuredHeight.toFloat().coerceAtLeast(textSize * 1.4f)
+            val dateH = lastMeasuredH.coerceAtLeast(measuredHeight.toFloat()).coerceAtLeast(currentSizeSp * density * 1.2f)
             val gap = 12f * density
             val minSafeTop = 38f * density
             val needsCollision = clock?.let { it.activeStyle().needsCollisionMap(it.clockConfig) } == true
@@ -1250,7 +1475,7 @@ class IndependentDateView(context: Context) : TextView(context) {
 
     fun checkAndResolveOverlap(animated: Boolean = true) {
         val clock = CaveArtXposedModule.activeClock ?: return
-        if (clock.activeDatePolicy() != ClockDatePolicy.EXTERNAL_STANDARD || isAttachedToClock || notificationProgress > 0.5f) {
+        if (clock.activeDatePolicy() != ClockDatePolicy.EXTERNAL_STANDARD || !clockConfig.atGlanceEnabled || isAttachedToClock || notificationProgress > 0.5f) {
             if (overlapSpring.targetValue != 0f) {
                 if (animated) overlapSpring.animateTo(0f) else { overlapSpring.stop(); overlapShiftY = 0f; updatePosition() }
             }
@@ -1259,8 +1484,8 @@ class IndependentDateView(context: Context) : TextView(context) {
 
         val density = resources.displayMetrics.density
         val dateY = CaveArtXposedModule.effectiveDateTopMarginPx.toFloat()
-        val dateH = measuredHeight.toFloat().coerceAtLeast(textSize * 1.4f)
-        val dateW = measuredWidth.toFloat().coerceAtLeast(paint.measureText(text.toString()))
+        val dateH = lastMeasuredH.coerceAtLeast(measuredHeight.toFloat()).coerceAtLeast(currentSizeSp * density * 1.2f)
+        val dateW = lastMeasuredW.coerceAtLeast(measuredWidth.toFloat())
         val dateCenterX = (CaveArtXposedModule.screenW / 2f) + userTranslationX
 
         val clockY = CaveArtXposedModule.effectiveTopMarginPx.toFloat()
@@ -1306,26 +1531,37 @@ class IndependentDateView(context: Context) : TextView(context) {
 
     fun updateTimeDirectly() {
         try {
-            text = ClockTypefaceResolver.formatDate(System.currentTimeMillis(), dateFormatIndex)
+            val prevW = lastMeasuredW
+            val prevH = lastMeasuredH
+            snapshot = AtAGlanceDataCollector.collect(context, clockConfig)
+            val m = AtAGlanceRenderer.measure(
+                clockConfig, snapshot, resources.displayMetrics.density, currentSizeSp, CaveArtXposedModule.screenW
+            )
+            lastMeasuredW = m.widthPx
+            lastMeasuredH = m.heightPx
+            if (abs(prevW - m.widthPx) > 1f || abs(prevH - m.heightPx) > 1f) {
+                requestLayout()
+                updatePosition()
+                CaveArtXposedModule.activeClock?.updateInterpolatedPositions()
+                CaveArtXposedModule.activeClock?.invalidate()
+            }
+            invalidate()
         } catch (_: Exception) {}
     }
 
     fun refreshSettings() {
         val cfg = loadClockKitConfigFromProvider(context)
-        val dateSp = if (cfg.styleId == "adaptive_vector") {
-            (cfg.getFloat("adaptive_vector", "hour_size", 100f) * 0.24f).coerceIn(14f, 34f)
-        } else {
-            (20f * cfg.scale).coerceIn(14f, 32f)
-        }
+        clockConfig = cfg
+        val dateSp = LockscreenSceneRenderer.computeDateSizeSp(cfg)
         dynamicDateSizeSp = dateSp
-        compactDateSizeSp = 18f
+        compactDateSizeSp = 14.5f
         applyCurrentTextSize()
 
         setTextColor(cfg.color)
         dateFormatIndex = cfg.dateFormat
         isAttachedToClock = cfg.dateAttached
 
-        val showExternal = ClockKitEngine.getStyle(cfg.styleId).datePolicy(cfg) == ClockDatePolicy.EXTERNAL_STANDARD
+        val showExternal = ClockKitEngine.getStyle(cfg.styleId).datePolicy(cfg) == ClockDatePolicy.EXTERNAL_STANDARD && cfg.atGlanceEnabled
         visibility = if (showExternal) View.VISIBLE else View.GONE
 
         updateTimeDirectly()
@@ -1338,6 +1574,28 @@ class IndependentDateView(context: Context) : TextView(context) {
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         refreshSettings()
+        if (torchCallback == null) {
+            try {
+                val cm = context.getSystemService(Context.CAMERA_SERVICE) as? CameraManager
+                val cb = object : CameraManager.TorchCallback() {
+                    override fun onTorchModeChanged(cameraId: String, enabled: Boolean) {
+                        post { updateTimeDirectly() }
+                    }
+                }
+                torchCallback = cb
+                cm?.registerTorchCallback(cb, Handler(Looper.getMainLooper()))
+            } catch (_: Throwable) {}
+        }
+    }
+
+    override fun onDetachedFromWindow() {
+        torchCallback?.let { cb ->
+            try {
+                (context.getSystemService(Context.CAMERA_SERVICE) as? CameraManager)?.unregisterTorchCallback(cb)
+            } catch (_: Throwable) {}
+        }
+        torchCallback = null
+        super.onDetachedFromWindow()
     }
 
     override fun onWindowVisibilityChanged(visibility: Int) {
@@ -1349,12 +1607,33 @@ class IndependentDateView(context: Context) : TextView(context) {
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        super.onMeasure(widthMeasureSpec, heightMeasureSpec)
-        if (measuredWidth == 0 || measuredHeight == 0) {
-            val fallbackW = View.MeasureSpec.makeMeasureSpec(800, View.MeasureSpec.AT_MOST)
-            val fallbackH = View.MeasureSpec.makeMeasureSpec(200, View.MeasureSpec.AT_MOST)
-            super.onMeasure(fallbackW, fallbackH)
+        val density = resources.displayMetrics.density
+        if (snapshot.dateText.isEmpty()) {
+            snapshot = AtAGlanceDataCollector.collect(context, clockConfig)
         }
+        val m = AtAGlanceRenderer.measure(clockConfig, snapshot, density, currentSizeSp, CaveArtXposedModule.screenW)
+        lastMeasuredW = m.widthPx
+        lastMeasuredH = m.heightPx
+        setMeasuredDimension(
+            m.widthPx.roundToInt().coerceAtLeast(1),
+            m.heightPx.roundToInt().coerceAtLeast(1)
+        )
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        if (!clockConfig.atGlanceEnabled || width <= 0 || height <= 0) return
+        val density = resources.displayMetrics.density
+        AtAGlanceRenderer.draw(
+            canvas = canvas,
+            centerX = width / 2f,
+            topY = 0f,
+            config = clockConfig,
+            snapshot = snapshot,
+            density = density,
+            textColor = textColor,
+            dateSizeSp = currentSizeSp,
+            maxScreenWidthPx = CaveArtXposedModule.screenW
+        )
     }
 }
 
@@ -1617,9 +1896,8 @@ class VectorTextClock(context: Context) : TextClock(context) {
             translationY = 0f
             return
         }
-        val density = resources.displayMetrics.density
         val userTopY = CaveArtXposedModule.effectiveTopMarginPx.toFloat()
-        val notifTopY = CaveArtXposedModule.NOTIF_CLOCK_TOP_DP * density
+        val notifTopY = CaveArtXposedModule.getCompactClockTopPx(context)
         val currentVisualTopMargin = (userTopY - lastTopPadPx).coerceAtLeast(0f)
         val targetNotifVisualTopMargin = (notifTopY - lastTopPadPx).coerceAtLeast(0f)
         translationY = (targetNotifVisualTopMargin - currentVisualTopMargin) * notificationProgress
@@ -1673,7 +1951,7 @@ class VectorTextClock(context: Context) : TextClock(context) {
 
         val currentCenterX = (CaveArtXposedModule.screenW / 2f) + (safeUserX * (1f - notificationProgress))
         val userTopY = CaveArtXposedModule.effectiveTopMarginPx.toFloat()
-        val notifTopY = CaveArtXposedModule.NOTIF_CLOCK_TOP_DP * density
+        val notifTopY = CaveArtXposedModule.getCompactClockTopPx(context)
         val currentClockTopY = userTopY + (notifTopY - userTopY) * notificationProgress
 
         getLocationOnScreen(screenPos)

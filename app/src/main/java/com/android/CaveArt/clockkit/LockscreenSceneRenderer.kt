@@ -7,6 +7,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.roundToInt
 
 data class LockscreenSceneParams(
@@ -26,10 +27,19 @@ data class LockscreenSceneParams(
     val showUdfps: Boolean = false,
     val udfpsX: Float = -1f,
     val udfpsY: Float = -1f,
-    val udfpsRadius: Float = 0f
+    val udfpsRadius: Float = 0f,
+    val atGlanceSnapshot: AtAGlanceSnapshot? = null
 )
 
 object LockscreenSceneRenderer {
+
+    fun computeDateSizeSp(cfg: ClockKitConfig): Float {
+        return if (cfg.styleId == "adaptive_vector") {
+            (cfg.getFloat("adaptive_vector", "hour_size", 100f) * 0.17f).coerceIn(14f, 20f)
+        } else {
+            (16.5f * cfg.scale).coerceIn(14f, 20f)
+        }
+    }
 
     fun clampConfigToScreen(
         context: Context,
@@ -68,27 +78,20 @@ object LockscreenSceneRenderer {
         val minSafeYDp = statusBarDp + (statusBarDp * 0.12f)
         val maxClockSafeYDp = ((screenH / density) - navBarDp - (clockHeightDp * 0.55f)).coerceAtLeast(minSafeYDp)
 
-        val dateSp = if (cfg.styleId == "adaptive_vector") {
-            (cfg.getFloat("adaptive_vector", "hour_size", 100f) * 0.24f).coerceIn(14f, 34f)
-        } else {
-            (20f * cfg.scale).coerceIn(14f, 32f)
-        }
-        val datePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            textSize = dateSp * density
-            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-        }
-        val fm = datePaint.fontMetrics
-        val dateLineHeightDp = (fm.descent - fm.ascent) / density
-        val dateWidthDp = datePaint.measureText(dateStr) / density
+        val dateSp = computeDateSizeSp(cfg)
+        val snapshot = AtAGlanceDataCollector.collect(context, cfg, now)
+        val glanceMeasured = AtAGlanceRenderer.measure(cfg, snapshot, density, dateSp, screenW)
+        val dateLineHeightDp = glanceMeasured.heightPx / density
+        val dateWidthDp = glanceMeasured.widthPx / density
         val halfDateWDp = dateWidthDp / 2f
         val minSafeDateX = (-halfScreenDp + halfDateWDp + sideSafeMarginDp).coerceAtMost(0f)
         val maxSafeDateX = (halfScreenDp - halfDateWDp - sideSafeMarginDp).coerceAtLeast(0f)
 
         val strokeW = cfg.getFloat("adaptive_vector", "stroke_width", 8f)
-        val dynamicGapDp = (strokeW * 0.4f) + (dateLineHeightDp * 0.35f)
+        val dynamicGapDp = (strokeW * 0.4f) + (dateSp * 0.35f)
         val compoundDateOffsetDp = dateLineHeightDp + dynamicGapDp
 
-        val isExternalDate = clockStyle.datePolicy(cfg) == ClockDatePolicy.EXTERNAL_STANDARD
+        val isExternalDate = clockStyle.datePolicy(cfg) == ClockDatePolicy.EXTERNAL_STANDARD && cfg.atGlanceEnabled
         val effectiveMinClockYDp = if (isExternalDate && cfg.dateAttached && clockStyle.needsCollisionMap(cfg)) {
             minSafeYDp + compoundDateOffsetDp
         } else {
@@ -111,9 +114,28 @@ object LockscreenSceneRenderer {
             } else {
                 max(minSafeYDp, idealAboveYDp)
             }
-        } else {
-            val maxDateSafeYDp = ((screenH / density) - navBarDp - (dateSp * 1.5f)).coerceAtLeast(minSafeYDp)
+        } else if (isExternalDate) {
+            val maxDateSafeYDp = ((screenH / density) - navBarDp - dateLineHeightDp - 8f).coerceAtLeast(minSafeYDp)
             finalDateY = cfg.dateY.coerceIn(minSafeYDp, maxDateSafeYDp)
+            val clockLeft = halfScreenDp + clampedClockX - halfClockWDp
+            val clockRight = halfScreenDp + clampedClockX + halfClockWDp
+            val dateLeft = halfScreenDp + finalDateX - halfDateWDp
+            val dateRight = halfScreenDp + finalDateX + halfDateWDp
+            val marginDp = 16f
+            val xOverlap = max(dateLeft, clockLeft) < min(dateRight, clockRight)
+            val yOverlap = (finalDateY + dateLineHeightDp + marginDp > clampedClockY) &&
+                (finalDateY < clampedClockY + clockHeightDp + marginDp)
+            if (xOverlap && yOverlap) {
+                val clockCenterY = clampedClockY + clockHeightDp / 2f
+                val dateCenterY = finalDateY + dateLineHeightDp / 2f
+                finalDateY = if (dateCenterY < clockCenterY) {
+                    val above = clampedClockY - dateLineHeightDp - marginDp
+                    if (above >= minSafeYDp) above else (clampedClockY + clockHeightDp + marginDp).coerceAtMost(maxDateSafeYDp)
+                } else {
+                    val below = clampedClockY + clockHeightDp + marginDp
+                    if (below <= maxDateSafeYDp) below else (clampedClockY - dateLineHeightDp - marginDp).coerceAtLeast(minSafeYDp)
+                }
+            }
         }
 
         return cfg.copy(
@@ -204,22 +226,22 @@ object LockscreenSceneRenderer {
             zoomFactor = params.wallpaperZoom
         )
 
-        if (clockStyle.datePolicy(cfg) == ClockDatePolicy.EXTERNAL_STANDARD && dateStr.isNotEmpty()) {
-            val dateSp = if (cfg.styleId == "adaptive_vector") {
-                (cfg.getFloat("adaptive_vector", "hour_size", 100f) * 0.24f).coerceIn(14f, 34f)
-            } else {
-                (20f * cfg.scale).coerceIn(14f, 32f)
-            }
-            val datePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                textAlign = Paint.Align.CENTER
-                color = cfg.color
-                textSize = dateSp * params.density
-                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-                setShadowLayer(10f, 0f, 3f, Color.argb(160, 0, 0, 0))
-            }
+        if (clockStyle.datePolicy(cfg) == ClockDatePolicy.EXTERNAL_STANDARD && cfg.atGlanceEnabled) {
+            val dateSp = computeDateSizeSp(cfg)
+            val snapshot = params.atGlanceSnapshot ?: AtAGlanceDataCollector.collect(context, cfg, frameNow)
             val nativeDateX = (realW / 2f) + (cfg.dateX * params.density)
             val nativeDateY = cfg.dateY * params.density
-            canvas.drawText(dateStr, nativeDateX, nativeDateY - datePaint.fontMetrics.top, datePaint)
+            AtAGlanceRenderer.draw(
+                canvas = canvas,
+                centerX = nativeDateX,
+                topY = nativeDateY,
+                config = cfg,
+                snapshot = snapshot,
+                density = params.density,
+                textColor = cfg.color,
+                dateSizeSp = dateSp,
+                maxScreenWidthPx = realW
+            )
         }
 
         val (renderRes, elevateAboveSubject) = ClockKitEngine.renderForPreview(canvas, clockStyle, frameCtx, cfg)

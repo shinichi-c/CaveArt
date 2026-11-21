@@ -23,6 +23,14 @@ object ClockKitConfigStore {
             put("dateY", config.dateY.toDouble())
             put("dateAttached", config.dateAttached)
             put("dateFormat", config.dateFormat)
+            put("atGlanceEnabled", config.atGlanceEnabled)
+            put("atGlanceStyle", config.atGlanceStyle)
+            put("atGlanceWeather", config.atGlanceWeather)
+            put("atGlanceFahrenheit", config.atGlanceFahrenheit)
+            put("atGlanceAlarm", config.atGlanceAlarm)
+            put("atGlanceBattery", config.atGlanceBattery)
+            put("atGlanceMedia", config.atGlanceMedia)
+            put("atGlanceStatus", config.atGlanceStatus)
             put("color", config.color)
             put("secondaryColor", config.secondaryColor)
             put("font", config.font)
@@ -95,6 +103,14 @@ object ClockKitConfigStore {
                 dateY = root.optDouble("dateY", 75.0).toFloat(),
                 dateAttached = root.optBoolean("dateAttached", true),
                 dateFormat = root.optInt("dateFormat", 0),
+                atGlanceEnabled = root.optBoolean("atGlanceEnabled", true),
+                atGlanceStyle = root.optInt("atGlanceStyle", 0),
+                atGlanceWeather = root.optBoolean("atGlanceWeather", true),
+                atGlanceFahrenheit = root.optBoolean("atGlanceFahrenheit", false),
+                atGlanceAlarm = root.optBoolean("atGlanceAlarm", true),
+                atGlanceBattery = root.optBoolean("atGlanceBattery", true),
+                atGlanceMedia = root.optBoolean("atGlanceMedia", true),
+                atGlanceStatus = root.optBoolean("atGlanceStatus", true),
                 color = root.optInt("color", Color.WHITE),
                 secondaryColor = root.optInt("secondaryColor", Color.WHITE),
                 font = root.optString("font", "default"),

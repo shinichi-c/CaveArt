@@ -3,6 +3,7 @@ package com.android.CaveArt
 import android.content.ContentProvider
 import android.content.ContentValues
 import android.content.Context
+import android.content.Intent
 import android.database.Cursor
 import android.database.MatrixCursor
 import android.net.Uri
@@ -81,6 +82,30 @@ class CaveArtSettingsProvider : ContentProvider() {
             val collisionMap = extras.getString("collision_map")
 
             ClockKitConfigStore.saveAndBroadcast(baseContext, parsed, collisionMap)
+            return Bundle().apply { putBoolean("success", true) }
+        }
+
+        if (method == "saveLocalWeather" && extras != null) {
+            if (!isTrustedCaller(baseContext)) {
+                return Bundle().apply { putBoolean("success", false) }
+            }
+            val tempC = extras.getFloat("temp_c", 0f)
+            val code = extras.getInt("weather_code", 0)
+            val isDay = extras.getBoolean("is_day", true)
+            val summary = extras.getString("summary", "Clear") ?: "Clear"
+            val source = extras.getString("source", "System Smartspace") ?: "System Smartspace"
+            val updated = extras.getLong("updated_at", System.currentTimeMillis())
+
+            prefs.edit()
+                .putFloat("glance_weather_temp", tempC)
+                .putInt("glance_weather_code", code)
+                .putBoolean("glance_weather_is_day", isDay)
+                .putString("glance_weather_summary", summary)
+                .putString("glance_weather_source", source)
+                .putLong("glance_weather_updated", updated)
+                .apply()
+
+            baseContext.sendBroadcast(Intent("com.android.CaveArt.UPDATE_AT_A_GLANCE"))
             return Bundle().apply { putBoolean("success", true) }
         }
 
@@ -190,6 +215,13 @@ class CaveArtSettingsProvider : ContentProvider() {
             "palette_colors" -> cursor.addRow(arrayOf(prefs.getString("palette_colors", "")))
             "lock_edit_enabled" -> cursor.addRow(arrayOf(if (prefs.getBoolean("lock_edit_enabled", true)) 1 else 0))
             "lock_edit_require_unlock" -> cursor.addRow(arrayOf(if (prefs.getBoolean("lock_edit_require_unlock", true)) 1 else 0))
+
+            "glance_weather_temp" -> cursor.addRow(arrayOf(prefs.getFloat("glance_weather_temp", 0f)))
+            "glance_weather_code" -> cursor.addRow(arrayOf(prefs.getInt("glance_weather_code", 0)))
+            "glance_weather_is_day" -> cursor.addRow(arrayOf(if (prefs.getBoolean("glance_weather_is_day", true)) 1 else 0))
+            "glance_weather_summary" -> cursor.addRow(arrayOf(prefs.getString("glance_weather_summary", "Clear")))
+            "glance_weather_source" -> cursor.addRow(arrayOf(prefs.getString("glance_weather_source", "System")))
+            "glance_weather_updated" -> cursor.addRow(arrayOf(prefs.getLong("glance_weather_updated", 0L).toString()))
         }
         return cursor
     }

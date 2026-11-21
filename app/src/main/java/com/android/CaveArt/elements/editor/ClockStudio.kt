@@ -73,6 +73,7 @@ fun ClockStudio(
     var isStyleBrowseMode by remember { mutableStateOf(true) }
     var showLayersSheet by remember { mutableStateOf(false) }
     var showApplyOptions by remember { mutableStateOf(false) }
+    var atGlanceRefreshTick by remember { mutableIntStateOf(0) }
 
     var activeLayerTab by remember { mutableStateOf(ActiveLayerTab.CLOCK) }
     var activeActionIndex by remember { mutableIntStateOf(0) }
@@ -290,12 +291,8 @@ fun ClockStudio(
     val availableFonts = remember { viewModel.getAvailableFonts(context) }
 
     val activeHourSize = state.clockKitConfig.getFloat("adaptive_vector", "hour_size", 100f)
-    LaunchedEffect(activeHourSize, state.clockKitConfig.styleId) {
-        state.dateSize.floatValue = if (state.clockKitConfig.styleId == "adaptive_vector") {
-            (activeHourSize * 0.24f).coerceIn(14f, 34f)
-        } else {
-            (20f * state.clockKitConfig.scale).coerceIn(14f, 32f)
-        }
+    LaunchedEffect(activeHourSize, state.clockKitConfig.styleId, state.clockKitConfig.scale) {
+        state.dateSize.floatValue = LockscreenSceneRenderer.computeDateSizeSp(state.clockKitConfig)
     }
 
     LaunchedEffect(Unit) {
@@ -335,10 +332,15 @@ fun ClockStudio(
         val filter = IntentFilter().apply {
             addAction("com.android.CaveArt.UPDATE_TELEMETRY")
             addAction("com.android.CaveArt.UPDATE_UDFPS_LOCATION")
+            addAction("com.android.CaveArt.UPDATE_AT_A_GLANCE")
         }
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(ctx: Context?, intent: Intent?) {
                 if (intent == null) return
+                if (intent.action == "com.android.CaveArt.UPDATE_AT_A_GLANCE") {
+                    atGlanceRefreshTick++
+                    return
+                }
                 if (intent.hasExtra("telemetry_zoom")) {
                     state.liveWallpaperZoom.floatValue = intent.getFloatExtra("telemetry_zoom", displayGeometry.wallpaperMaxScale)
                 }
@@ -677,6 +679,7 @@ fun ClockStudio(
                                 collisionMapArray = collisionMapArray,
                                 focusedLayerType = focusedLayerType,
                                 sharedElementModifier = sharedElementModifier,
+                                atGlanceRefreshTick = atGlanceRefreshTick,
                                 onDateClick = { showDateCustomizeSheet = true },
                                 onClockClick = { activeLayerTab = ActiveLayerTab.CLOCK }
                             )

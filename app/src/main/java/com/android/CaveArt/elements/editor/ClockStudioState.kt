@@ -9,6 +9,7 @@ import com.android.CaveArt.clockkit.ClockControl
 import com.android.CaveArt.clockkit.ClockKitConfig
 import com.android.CaveArt.clockkit.ClockKitConfigStore
 import com.android.CaveArt.clockkit.ClockKitEngine
+import com.android.CaveArt.clockkit.LockscreenSceneRenderer
 import com.android.CaveArt.layer.LockscreenLayerStack
 
 enum class ActiveLayerTab(val label: String) {
@@ -66,7 +67,7 @@ class ClockStudioState(viewModel: WallpaperViewModel) {
     }
 
     val dateSize: MutableFloatState = mutableFloatStateOf(
-        (viewModel.clockKitConfig.getFloat("adaptive_vector", "hour_size", 100f) * 0.24f).coerceIn(14f, 34f)
+        LockscreenSceneRenderer.computeDateSizeSp(viewModel.clockKitConfig)
     )
 
     val collisionMap: MutableState<String> = mutableStateOf(viewModel.clockCollisionMap)
