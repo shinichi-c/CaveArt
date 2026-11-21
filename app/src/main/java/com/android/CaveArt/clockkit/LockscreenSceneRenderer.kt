@@ -48,7 +48,8 @@ object LockscreenSceneRenderer {
         screenH: Float,
         density: Float,
         statusBarPadPx: Int,
-        navBarPadPx: Int
+        navBarPadPx: Int,
+        resolveDetachedOverlap: Boolean = true
     ): ClockKitConfig {
         if (screenW <= 0f || screenH <= 0f || density <= 0f) return cfg
         val clockStyle = ClockKitEngine.getStyle(cfg.styleId)
@@ -117,23 +118,25 @@ object LockscreenSceneRenderer {
         } else if (isExternalDate) {
             val maxDateSafeYDp = ((screenH / density) - navBarDp - dateLineHeightDp - 8f).coerceAtLeast(minSafeYDp)
             finalDateY = cfg.dateY.coerceIn(minSafeYDp, maxDateSafeYDp)
-            val clockLeft = halfScreenDp + clampedClockX - halfClockWDp
-            val clockRight = halfScreenDp + clampedClockX + halfClockWDp
-            val dateLeft = halfScreenDp + finalDateX - halfDateWDp
-            val dateRight = halfScreenDp + finalDateX + halfDateWDp
-            val marginDp = 16f
-            val xOverlap = max(dateLeft, clockLeft) < min(dateRight, clockRight)
-            val yOverlap = (finalDateY + dateLineHeightDp + marginDp > clampedClockY) &&
-                (finalDateY < clampedClockY + clockHeightDp + marginDp)
-            if (xOverlap && yOverlap) {
-                val clockCenterY = clampedClockY + clockHeightDp / 2f
-                val dateCenterY = finalDateY + dateLineHeightDp / 2f
-                finalDateY = if (dateCenterY < clockCenterY) {
-                    val above = clampedClockY - dateLineHeightDp - marginDp
-                    if (above >= minSafeYDp) above else (clampedClockY + clockHeightDp + marginDp).coerceAtMost(maxDateSafeYDp)
-                } else {
-                    val below = clampedClockY + clockHeightDp + marginDp
-                    if (below <= maxDateSafeYDp) below else (clampedClockY - dateLineHeightDp - marginDp).coerceAtLeast(minSafeYDp)
+            if (resolveDetachedOverlap) {
+                val clockLeft = halfScreenDp + clampedClockX - halfClockWDp
+                val clockRight = halfScreenDp + clampedClockX + halfClockWDp
+                val dateLeft = halfScreenDp + finalDateX - halfDateWDp
+                val dateRight = halfScreenDp + finalDateX + halfDateWDp
+                val marginDp = 16f
+                val xOverlap = max(dateLeft, clockLeft) < min(dateRight, clockRight)
+                val yOverlap = (finalDateY + dateLineHeightDp + marginDp > clampedClockY) &&
+                    (finalDateY < clampedClockY + clockHeightDp + marginDp)
+                if (xOverlap && yOverlap) {
+                    val clockCenterY = clampedClockY + clockHeightDp / 2f
+                    val dateCenterY = finalDateY + dateLineHeightDp / 2f
+                    finalDateY = if (dateCenterY < clockCenterY) {
+                        val above = clampedClockY - dateLineHeightDp - marginDp
+                        if (above >= minSafeYDp) above else (clampedClockY + clockHeightDp + marginDp).coerceAtMost(maxDateSafeYDp)
+                    } else {
+                        val below = clampedClockY + clockHeightDp + marginDp
+                        if (below <= maxDateSafeYDp) below else (clampedClockY - dateLineHeightDp - marginDp).coerceAtLeast(minSafeYDp)
+                    }
                 }
             }
         }
@@ -154,7 +157,7 @@ object LockscreenSceneRenderer {
         screenW: Float,
         screenH: Float,
         navBarPadPx: Int = 0
-    ): ClockKitConfig = clampConfigToScreen(context, cfg, screenW, screenH, density, statusBarPadPx, navBarPadPx)
+    ): ClockKitConfig = clampConfigToScreen(context, cfg, screenW, screenH, density, statusBarPadPx, navBarPadPx, true)
 
     fun drawScene(
         context: Context,

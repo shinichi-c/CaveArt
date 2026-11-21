@@ -39,6 +39,7 @@ import java.util.WeakHashMap
 import kotlin.math.abs
 import kotlin.math.hypot
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
@@ -59,7 +60,7 @@ fun getSettingInt(ctx: Context, path: String, default: Int): Int {
     try {
         val cursor: Cursor? = ctx.contentResolver.query(
             Uri.parse("content://com.android.CaveArt.settings/$path"),
-            null, null, null, null
+            null, null, null
         )
         cursor?.use { if (it.moveToFirst()) res = it.getInt(0) }
     } catch (_: Exception) {}
@@ -90,6 +91,8 @@ fun loadClockKitConfigFromProvider(ctx: Context): ClockKitConfig {
         dateY = getSettingFloat(ctx, "date_y", 75f),
         dateAttached = getSettingInt(ctx, "date_attached", 1) == 1,
         dateFormat = getSettingInt(ctx, "date_format", 0),
+        atGlanceEnabled = getSettingInt(ctx, "at_glance_enabled", 1) == 1,
+        atGlanceStyle = getSettingInt(ctx, "at_glance_style", 0),
         color = getSettingInt(ctx, "clock_color", Color.WHITE),
         font = getSettingString(ctx, "clock_font", "default"),
         isDepthEnabled = getSettingInt(ctx, "clock_depth_enabled", 1) == 1,
@@ -240,7 +243,12 @@ class CaveArtXposedModule : XposedModule() {
 
         fun publishLocalWeather(ctx: Context, data: AtAGlanceWeatherData) {
             AtAGlanceDataCollector.updateCachedWeather(data)
-            activeDate?.post { activeDate?.updateTimeDirectly() }
+            activeDate?.post {
+                activeDate?.updateTimeDirectly()
+                computeEffectiveMargins(ctx)
+                activeClock?.updateInterpolatedPositions()
+                activeClock?.invalidate()
+            }
 
             val now = System.currentTimeMillis()
             val unchanged = !lastWeatherSyncTemp.isNaN() &&
@@ -555,6 +563,7 @@ class CaveArtXposedModule : XposedModule() {
                 date.updatePosition()
                 date.requestLayout()
                 date.invalidate()
+                date.checkAndResolveOverlap(animated = false)
             }
         }
 
@@ -570,29 +579,47 @@ class CaveArtXposedModule : XposedModule() {
             val clock = activeClock
             val date = activeDate
             val style = clock?.activeStyle()
-            val cfg = clock?.clockConfig
+            val cfg = clock?.clockConfig ?: return
 
-            val needsCollision = style != null && cfg != null && style.needsCollisionMap(cfg)
-            val isAttached = cfg?.dateAttached == true && cfg.atGlanceEnabled &&
-                style?.datePolicy(cfg) == ClockDatePolicy.EXTERNAL_STANDARD
+            val isExt = style?.datePolicy(cfg) == ClockDatePolicy.EXTERNAL_STANDARD && cfg.atGlanceEnabled
+            val isAttached = cfg.dateAttached && isExt
 
-            val dateH = (date?.lastMeasuredH?.takeIf { it > 0f }
-                ?: date?.measuredHeight?.toFloat()?.takeIf { it > 0f }
-                ?: (22f * density))
-            val gapPx = 12f * density
-            val minSafeTopPx = 38f * density
-            val compoundOffsetPx = dateH + gapPx
-
-            effectiveTopMarginPx = if (isAttached && needsCollision) {
-                max(topMarginPx.toFloat(), minSafeTopPx + compoundOffsetPx).toInt()
+            val dateH = if (date != null && date.lastMeasuredH > 0f) {
+                date.lastMeasuredH
             } else {
-                topMarginPx
+                val snapshot = AtAGlanceDataCollector.collect(context, cfg)
+                val dateSp = LockscreenSceneRenderer.computeDateSizeSp(cfg)
+                AtAGlanceRenderer.measure(cfg, snapshot, density, dateSp, screenW).heightPx
             }
 
-            effectiveDateTopMarginPx = if (isAttached && needsCollision) {
-                (effectiveTopMarginPx - compoundOffsetPx).toInt()
+            val strokeW = cfg.getFloat("adaptive_vector", "stroke_width", 8f)
+            val dateSp = LockscreenSceneRenderer.computeDateSizeSp(cfg)
+            val dynamicGapPx = ((strokeW * 0.4f) + (dateSp * 0.35f)) * density
+            val compoundOffsetPx = dateH + dynamicGapPx
+            val minSafeTopPx = 38f * density
+
+            if (isAttached) {
+                val needsCollision = style != null && style.needsCollisionMap(cfg)
+                effectiveTopMarginPx = if (needsCollision) {
+                    max(topMarginPx.toFloat(), minSafeTopPx + compoundOffsetPx).toInt()
+                } else {
+                    val idealAbovePx = topMarginPx - compoundOffsetPx
+                    if (idealAbovePx < minSafeTopPx) {
+                        topMarginPx
+                    } else {
+                        topMarginPx
+                    }
+                }
+                val idealAbovePx = effectiveTopMarginPx - compoundOffsetPx
+                effectiveDateTopMarginPx = if (idealAbovePx < minSafeTopPx && !needsCollision) {
+                    val clockH = clock?.lastContentHeightPx ?: (100f * density)
+                    (effectiveTopMarginPx + clockH + dynamicGapPx).toInt()
+                } else {
+                    max(minSafeTopPx, idealAbovePx).toInt()
+                }
             } else {
-                dateTopMarginPx
+                effectiveTopMarginPx = topMarginPx
+                effectiveDateTopMarginPx = dateTopMarginPx
             }
         }
 
@@ -1475,7 +1502,8 @@ class IndependentDateView(context: Context) : View(context) {
 
     fun checkAndResolveOverlap(animated: Boolean = true) {
         val clock = CaveArtXposedModule.activeClock ?: return
-        if (clock.activeDatePolicy() != ClockDatePolicy.EXTERNAL_STANDARD || !clockConfig.atGlanceEnabled || isAttachedToClock || notificationProgress > 0.5f) {
+        val showExt = clock.activeDatePolicy() == ClockDatePolicy.EXTERNAL_STANDARD && clockConfig.atGlanceEnabled
+        if (!showExt || isAttachedToClock || notificationProgress > 0.05f) {
             if (overlapSpring.targetValue != 0f) {
                 if (animated) overlapSpring.animateTo(0f) else { overlapSpring.stop(); overlapShiftY = 0f; updatePosition() }
             }
@@ -1487,27 +1515,41 @@ class IndependentDateView(context: Context) : View(context) {
         val dateH = lastMeasuredH.coerceAtLeast(measuredHeight.toFloat()).coerceAtLeast(currentSizeSp * density * 1.2f)
         val dateW = lastMeasuredW.coerceAtLeast(measuredWidth.toFloat())
         val dateCenterX = (CaveArtXposedModule.screenW / 2f) + userTranslationX
+        val dateLeft = dateCenterX - dateW / 2f
+        val dateRight = dateCenterX + dateW / 2f
+        val dateTop = dateY
+        val dateBottom = dateTop + dateH
 
+        val clockM = clock.measureForCurrentState(0f)
         val clockY = CaveArtXposedModule.effectiveTopMarginPx.toFloat()
-        val clockH = clock.lastContentHeightPx.coerceAtLeast(40f * density)
-        val clockW = clock.lastContentWidthPx.coerceAtLeast(CaveArtXposedModule.screenW * 0.45f)
         val clockCenterX = (CaveArtXposedModule.screenW / 2f) + clock.userTranslationX
+        val fallbackLeft = clockCenterX - (clockM.contentWidthPx / 2f)
+        val fallbackRight = clockCenterX + (clockM.contentWidthPx / 2f)
+        val fallbackTop = clockY
+        val fallbackBottom = clockY + clockM.contentHeightPx
 
-        val xOverlap = abs(dateCenterX - clockCenterX) < ((dateW + clockW) / 2f)
+        val hasDrawn = clock.lastRenderedBounds.width() > 0f && clock.lastRenderedBounds.height() > 0f
+        val clockLeft = if (hasDrawn) min(clock.lastRenderedBounds.left, fallbackLeft) else fallbackLeft
+        val clockRight = if (hasDrawn) max(clock.lastRenderedBounds.right, fallbackRight) else fallbackRight
+        val clockTop = if (hasDrawn) min(clock.lastRenderedBounds.top, fallbackTop) else fallbackTop
+        val clockBottom = if (hasDrawn) max(clock.lastRenderedBounds.bottom, fallbackBottom) else fallbackBottom
+
         val margin = 16f * density
-        val yOverlap = (dateY + dateH + margin > clockY) && (dateY < clockY + clockH + margin)
+        val xOverlap = max(dateLeft, clockLeft) < min(dateRight, clockRight)
+        val yOverlap = (dateBottom + margin > clockTop) && (dateTop < clockBottom + margin)
 
         if (xOverlap && yOverlap) {
-            val clockCenterY = clockY + clockH / 2f
-            val dateCenterY = dateY + dateH / 2f
+            val clockCenterY = (clockTop + clockBottom) / 2f
+            val dateCenterY = (dateTop + dateBottom) / 2f
+            val minSafeTop = 38f * density
+            val maxSafe = CaveArtXposedModule.screenH - (120f * density)
 
             val targetY = if (dateCenterY < clockCenterY) {
-                val candidateAbove = clockY - dateH - margin
-                if (candidateAbove >= 36f * density) candidateAbove else clockY + clockH + margin
+                val candidateAbove = clockTop - dateH - margin
+                if (candidateAbove >= minSafeTop) candidateAbove else clockBottom + margin
             } else {
-                val candidateBelow = clockY + clockH + margin
-                val maxSafe = CaveArtXposedModule.screenH - (120f * density)
-                if (candidateBelow <= maxSafe) candidateBelow else clockY - dateH - margin
+                val candidateBelow = clockBottom + margin
+                if (candidateBelow <= maxSafe) candidateBelow else clockTop - dateH - margin
             }
 
             val shiftNeeded = targetY - dateY
@@ -1546,6 +1588,7 @@ class IndependentDateView(context: Context) : View(context) {
                 CaveArtXposedModule.activeClock?.invalidate()
             }
             invalidate()
+            checkAndResolveOverlap(animated = true)
         } catch (_: Exception) {}
     }
 
@@ -1779,8 +1822,8 @@ class VectorTextClock(context: Context) : TextClock(context) {
                 val file = File(path)
                 if (file.exists() && file.length() > 0) {
                     try {
-                        decoded = BitmapFactory.decodeFile(file.absolutePath)
-                        if (decoded != null) break
+                        depthMaskBitmap = BitmapFactory.decodeFile(file.absolutePath)
+                        if (depthMaskBitmap != null) break
                     } catch (_: Exception) {}
                 }
             }

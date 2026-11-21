@@ -330,7 +330,7 @@ internal class LockscreenPreviewCanvasView(ctx: Context) : View(ctx) {
         strokeWidth = dpf(1.5f)
     }
 
-    private fun clamp(cfg: ClockKitConfig): ClockKitConfig =
+    private fun clamp(cfg: ClockKitConfig, resolveOverlap: Boolean): ClockKitConfig =
         LockscreenSceneRenderer.clampConfigToScreen(
             context = context,
             cfg = cfg,
@@ -338,7 +338,8 @@ internal class LockscreenPreviewCanvasView(ctx: Context) : View(ctx) {
             screenH = CaveArtXposedModule.screenH,
             density = density,
             statusBarPadPx = getStatusBarPadPx(),
-            navBarPadPx = getNavBarPadPx()
+            navBarPadPx = getNavBarPadPx(),
+            resolveDetachedOverlap = resolveOverlap
         )
 
     private val pinchDetector = ScaleGestureDetector(
@@ -348,7 +349,7 @@ internal class LockscreenPreviewCanvasView(ctx: Context) : View(ctx) {
                 val cfg = getConfig()
                 val clockStyle = ClockKitEngine.getStyle(cfg.styleId)
                 val zoomed = clockStyle.onPinchZoom(cfg, detector.scaleFactor)
-                onConfigChanged(clamp(zoomed))
+                onConfigChanged(clamp(zoomed, true))
                 return true
             }
         }
@@ -393,13 +394,21 @@ internal class LockscreenPreviewCanvasView(ctx: Context) : View(ctx) {
                 isCardDragging = false
 
                 val clockStyle = ClockKitEngine.getStyle(cfg.styleId)
-                val extDate = clockStyle.datePolicy(cfg) == ClockDatePolicy.EXTERNAL_STANDARD
-                val scaledDateY = (cfg.dateY * density) * previewScale
-                val scaledClockY = (cfg.clockY * density) * previewScale
-                dragMode = if (extDate && !cfg.dateAttached &&
-                    abs(event.y - scaledDateY) < abs(event.y - scaledClockY) &&
-                    abs(event.y - scaledDateY) < dpf(24f)
-                ) "DATE" else "CLOCK"
+                val extDate = clockStyle.datePolicy(cfg) == ClockDatePolicy.EXTERNAL_STANDARD && cfg.atGlanceEnabled
+                val dateSp = LockscreenSceneRenderer.computeDateSizeSp(cfg)
+                val snap = AtAGlanceDataCollector.collect(context, cfg)
+                val glanceM = AtAGlanceRenderer.measure(cfg, snap, density, dateSp, CaveArtXposedModule.screenW)
+
+                val scaledDateTop = (cfg.dateY * density) * previewScale
+                val scaledDateBottom = ((cfg.dateY * density) + glanceM.heightPx) * previewScale
+                val scaledDateCenterX = ((CaveArtXposedModule.screenW / 2f) + cfg.dateX * density) * previewScale
+                val scaledDateHalfW = (glanceM.widthPx / 2f) * previewScale
+                val hitPad = dpf(14f) * previewScale
+
+                val hitDate = extDate && !cfg.dateAttached &&
+                    event.y in (scaledDateTop - hitPad)..(scaledDateBottom + hitPad) &&
+                    event.x in (scaledDateCenterX - scaledDateHalfW - hitPad)..(scaledDateCenterX + scaledDateHalfW + hitPad)
+                dragMode = if (hitDate) "DATE" else "CLOCK"
                 return true
             }
             MotionEvent.ACTION_MOVE -> {
@@ -415,14 +424,14 @@ internal class LockscreenPreviewCanvasView(ctx: Context) : View(ctx) {
                     if (dragMode == "DATE") {
                         rawDateX += dxDp
                         rawDateY += dyDp
-                        val clamped = clamp(cfg.copy(dateX = rawDateX, dateY = rawDateY))
+                        val clamped = clamp(cfg.copy(dateX = rawDateX, dateY = rawDateY), resolveOverlap = false)
                         rawDateX = clamped.dateX
                         rawDateY = clamped.dateY
                         onConfigChanged(clamped)
                     } else {
                         rawClockX += dxDp
                         rawClockY += dyDp
-                        val clamped = clamp(cfg.copy(clockX = rawClockX, clockY = rawClockY))
+                        val clamped = clamp(cfg.copy(clockX = rawClockX, clockY = rawClockY), resolveOverlap = false)
                         rawClockX = clamped.clockX
                         rawClockY = clamped.clockY
                         val snapThresholdDp = (CaveArtXposedModule.screenW * 0.025f) / density
@@ -441,7 +450,7 @@ internal class LockscreenPreviewCanvasView(ctx: Context) : View(ctx) {
                     val snapThresholdDp = (CaveArtXposedModule.screenW * 0.025f) / density
                     val snapClockX = if (abs(cfg.clockX) < snapThresholdDp) 0f else cfg.clockX
                     val snapDateX = if (!cfg.dateAttached && abs(cfg.dateX) < snapThresholdDp) 0f else cfg.dateX
-                    onConfigChanged(clamp(cfg.copy(clockX = snapClockX, dateX = snapDateX)))
+                    onConfigChanged(clamp(cfg.copy(clockX = snapClockX, dateX = snapDateX), resolveOverlap = true))
                 } else if (!isClockFocused()) {
                     onTapClockFocus()
                 }

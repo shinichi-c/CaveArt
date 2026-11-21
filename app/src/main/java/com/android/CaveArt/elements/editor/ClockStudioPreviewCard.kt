@@ -141,8 +141,22 @@ fun ClockStudioPreviewCard(
             dateString = dateText.ifEmpty { "Wednesday, 14 October" }
         )
     }
-
-    LaunchedEffect(state.clockKitConfig, state.dateSize.floatValue, glanceSnapshot, timeString, customTypeface) {
+    
+    LaunchedEffect(
+        state.clockKitConfig.clockX,
+        state.clockKitConfig.clockY,
+        state.clockKitConfig.dateAttached,
+        state.clockKitConfig.atGlanceEnabled,
+        state.clockKitConfig.atGlanceStyle,
+        state.clockKitConfig.styleId,
+        state.clockKitConfig.scale,
+        state.clockKitConfig.styleFloats,
+        state.clockKitConfig.styleStrings,
+        state.dateSize.floatValue,
+        glanceSnapshot,
+        timeString,
+        customTypeface
+    ) {
         val cfg = state.clockKitConfig
         val sideSafeMarginDp = 18f
         val halfScreenDp = realW / densityVal / 2f
@@ -157,7 +171,7 @@ fun ClockStudioPreviewCard(
         var newDateX = cfg.dateX
         var newDateY = cfg.dateY
 
-        if (activeStyle.datePolicy(cfg) == ClockDatePolicy.EXTERNAL_STANDARD && cfg.atGlanceEnabled && cfg.dateAttached) {
+        if (activeStyle.datePolicy(cfg) == ClockDatePolicy.EXTERNAL_STANDARD && cfg.atGlanceEnabled) {
             val glanceM = AtAGlanceRenderer.measure(cfg, glanceSnapshot, densityVal, state.dateSize.floatValue, realW)
             val dateWidthDp = glanceM.widthPx / densityVal
             val dateLineHeightDp = glanceM.heightPx / densityVal
@@ -165,21 +179,27 @@ fun ClockStudioPreviewCard(
             val minSafeDateX = (-halfScreenDp + halfDateWDp + sideSafeMarginDp).coerceAtMost(0f)
             val maxSafeDateX = (halfScreenDp - halfDateWDp - sideSafeMarginDp).coerceAtLeast(0f)
 
-            newDateX = clampedClockX.coerceIn(minSafeDateX, maxSafeDateX)
+            if (cfg.dateAttached) {
+                newDateX = clampedClockX.coerceIn(minSafeDateX, maxSafeDateX)
 
-            val strokeW = cfg.getFloat("adaptive_vector", "stroke_width", 8f)
-            val dynamicGapDp = (strokeW * 0.4f) + (state.dateSize.floatValue * 0.35f)
-            val compoundDateOffsetDp = dateLineHeightDp + dynamicGapDp
-            val idealAboveYDp = cfg.clockY - compoundDateOffsetDp
-            val touchesTopBorder = idealAboveYDp < minSafeYDp
+                val strokeW = cfg.getFloat("adaptive_vector", "stroke_width", 8f)
+                val dynamicGapDp = (strokeW * 0.4f) + (state.dateSize.floatValue * 0.35f)
+                val compoundDateOffsetDp = dateLineHeightDp + dynamicGapDp
+                val idealAboveYDp = cfg.clockY - compoundDateOffsetDp
+                val touchesTopBorder = idealAboveYDp < minSafeYDp
 
-            newDateY = if (activeStyle.needsCollisionMap(cfg)) {
-                max(minSafeYDp, idealAboveYDp)
-            } else if (touchesTopBorder) {
-                val clockEstimatedHDp = measured.contentHeightPx / densityVal
-                cfg.clockY + clockEstimatedHDp + dynamicGapDp
+                newDateY = if (activeStyle.needsCollisionMap(cfg)) {
+                    max(minSafeYDp, idealAboveYDp)
+                } else if (touchesTopBorder) {
+                    val clockEstimatedHDp = measured.contentHeightPx / densityVal
+                    cfg.clockY + clockEstimatedHDp + dynamicGapDp
+                } else {
+                    max(minSafeYDp, idealAboveYDp)
+                }
             } else {
-                max(minSafeYDp, idealAboveYDp)
+                val maxDateSafeYDp = ((realH / densityVal) - navBarDp - dateLineHeightDp - 8f).coerceAtLeast(minSafeYDp)
+                newDateX = cfg.dateX.coerceIn(minSafeDateX, maxSafeDateX)
+                newDateY = cfg.dateY.coerceIn(minSafeYDp, maxDateSafeYDp)
             }
         }
 
@@ -192,11 +212,27 @@ fun ClockStudioPreviewCard(
             }
         }
     }
-
+    
     val datePhysicsSpringY = remember { Animatable(state.clockKitConfig.dateY) }
+    val latestDateX by rememberUpdatedState(state.clockKitConfig.dateX)
+    val latestDateY by rememberUpdatedState(state.clockKitConfig.dateY)
+
     LaunchedEffect(
-        isDraggingDate, isDraggingClock,
-        state.clockKitConfig, state.dateSize.floatValue, glanceSnapshot, customTypeface, timeString
+        isDraggingDate,
+        isDraggingClock,
+        state.clockKitConfig.dateAttached,
+        state.clockKitConfig.atGlanceEnabled,
+        state.clockKitConfig.atGlanceStyle,
+        state.clockKitConfig.clockX,
+        state.clockKitConfig.clockY,
+        state.clockKitConfig.styleId,
+        state.clockKitConfig.scale,
+        state.clockKitConfig.styleFloats,
+        state.clockKitConfig.styleStrings,
+        state.dateSize.floatValue,
+        glanceSnapshot,
+        customTypeface,
+        timeString
     ) {
         val cfg = state.clockKitConfig
         if (activeStyle.datePolicy(cfg) == ClockDatePolicy.EXTERNAL_STANDARD &&
@@ -205,11 +241,14 @@ fun ClockStudioPreviewCard(
             val glanceM = AtAGlanceRenderer.measure(cfg, glanceSnapshot, densityVal, state.dateSize.floatValue, realW)
             val dateWDp = glanceM.widthPx / densityVal
             val dateHDp = glanceM.heightPx / densityVal
-            val nativeDateCenterX = (realW / densityVal / 2f) + cfg.dateX
+            val curDateX = latestDateX
+            val curDateY = latestDateY
+            val nativeDateCenterX = (realW / densityVal / 2f) + curDateX
             val dateLeft = nativeDateCenterX - (dateWDp / 2f)
             val dateRight = nativeDateCenterX + (dateWDp / 2f)
-            val dateTop = cfg.dateY
+            val dateTop = curDateY
             val dateBottom = dateTop + dateHDp
+
             val measured = activeStyle.measure(measureContext, cfg)
             val clockWDp = measured.contentWidthPx / densityVal
             val clockHDp = measured.contentHeightPx / densityVal
@@ -219,10 +258,10 @@ fun ClockStudioPreviewCard(
             val fallbackBottom = fallbackTop + clockHDp
 
             val hasDrawnBounds = sharedPathBounds.width() > 0f && sharedPathBounds.height() > 0f
-            val clockLeft = if (hasDrawnBounds) sharedPathBounds.left / densityVal else fallbackLeft
-            val clockRight = if (hasDrawnBounds) sharedPathBounds.right / densityVal else fallbackRight
-            val clockTop = if (hasDrawnBounds) sharedPathBounds.top / densityVal else fallbackTop
-            val clockBottom = if (hasDrawnBounds) sharedPathBounds.bottom / densityVal else fallbackBottom
+            val clockLeft = if (hasDrawnBounds) min(sharedPathBounds.left / densityVal, fallbackLeft) else fallbackLeft
+            val clockRight = if (hasDrawnBounds) max(sharedPathBounds.right / densityVal, fallbackRight) else fallbackRight
+            val clockTop = if (hasDrawnBounds) min(sharedPathBounds.top / densityVal, fallbackTop) else fallbackTop
+            val clockBottom = if (hasDrawnBounds) max(sharedPathBounds.bottom / densityVal, fallbackBottom) else fallbackBottom
 
             val marginDp = 16f
             val xOverlap = max(dateLeft, clockLeft) < min(dateRight, clockRight)
@@ -231,7 +270,7 @@ fun ClockStudioPreviewCard(
             if (xOverlap && yOverlap) {
                 val clockCenterY = (clockTop + clockBottom) / 2f
                 val dateCenterY = (dateTop + dateBottom) / 2f
-                val maxDateSafeYDp = (realH / densityVal) - navBarDp - dateHDp - 8f
+                val maxDateSafeYDp = ((realH / densityVal) - navBarDp - dateHDp - 8f).coerceAtLeast(minSafeYDp)
 
                 val targetY = if (dateCenterY < clockCenterY) {
                     val candidateAbove = clockTop - dateHDp - marginDp
@@ -241,9 +280,9 @@ fun ClockStudioPreviewCard(
                     if (candidateBelow <= maxDateSafeYDp) candidateBelow else clockTop - dateHDp - marginDp
                 }
 
-                val safeClampedY = targetY.coerceIn(minSafeYDp, maxDateSafeYDp.coerceAtLeast(minSafeYDp))
-                if (abs(datePhysicsSpringY.targetValue - safeClampedY) > 1.5f) {
-                    datePhysicsSpringY.snapTo(cfg.dateY)
+                val safeClampedY = targetY.coerceIn(minSafeYDp, maxDateSafeYDp)
+                if (abs(curDateY - safeClampedY) > 1.0f) {
+                    datePhysicsSpringY.snapTo(curDateY)
                     datePhysicsSpringY.animateTo(
                         targetValue = safeClampedY,
                         animationSpec = spring(
