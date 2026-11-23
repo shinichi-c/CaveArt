@@ -25,10 +25,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
@@ -444,21 +442,7 @@ fun ClockStudio(
     }
 
     Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
-        if (viewModel.isAmbientBlurEnabled) {
-            AsyncWallpaperImage(
-                wallpaper = wallpaper,
-                contentDescription = null,
-                viewModel = viewModel,
-                modifier = Modifier.fillMaxSize().blur(85.dp),
-                contentScale = ContentScale.Crop,
-                allowMagic = false
-            )
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.58f))
-            )
-        }
+        ExpressiveWallpaperBackdrop(wallpaper = wallpaper, viewModel = viewModel)
 
         Scaffold(
             containerColor = Color.Transparent,

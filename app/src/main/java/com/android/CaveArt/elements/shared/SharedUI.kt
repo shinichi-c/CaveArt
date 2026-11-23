@@ -17,6 +17,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -33,12 +34,16 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.asComposePath
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
@@ -56,6 +61,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.rememberAsyncImagePainter
+import com.android.CaveArt.clockkit.BackdropSpec
+import com.android.CaveArt.clockkit.BackdropStyle
 import kotlin.random.Random
 
 data class Particle(
@@ -73,10 +80,10 @@ fun safeColor(colorInt: Int): Color {
 }
 
 fun isDefaultColor(colorInt: Int): Boolean {
-    return colorInt == 0xFF1A1C1E.toInt() || 
-           colorInt == 0xFF1E2022.toInt() || 
-           colorInt == 0xFF4CAF50.toInt() || 
-           colorInt == 0
+    return colorInt == 0xFF1A1C1E.toInt() ||
+        colorInt == 0xFF1E2022.toInt() ||
+        colorInt == 0xFF4CAF50.toInt() ||
+        colorInt == 0
 }
 
 @Composable
@@ -86,7 +93,8 @@ fun AsyncWallpaperImage(
     viewModel: WallpaperViewModel,
     modifier: Modifier = Modifier,
     contentScale: ContentScale = ContentScale.Crop,
-    allowMagic: Boolean = true
+    allowMagic: Boolean = true,
+    colorFilter: ColorFilter? = null
 ) {
     if (!allowMagic) {
         val model = wallpaper.uri ?: wallpaper.resourceId
@@ -94,6 +102,7 @@ fun AsyncWallpaperImage(
             painter = rememberAsyncImagePainter(model),
             contentDescription = contentDescription,
             contentScale = contentScale,
+            colorFilter = colorFilter,
             modifier = modifier
         )
     } else {
@@ -108,10 +117,114 @@ fun AsyncWallpaperImage(
                 bitmap = bitmap!!.asImageBitmap(),
                 contentDescription = contentDescription,
                 contentScale = contentScale,
+                colorFilter = colorFilter,
                 modifier = modifier
             )
         } else {
             Box(modifier = modifier.background(MaterialTheme.colorScheme.surfaceVariant))
+        }
+    }
+}
+
+@Composable
+fun ExpressiveWallpaperBackdrop(
+    wallpaper: Wallpaper?,
+    viewModel: WallpaperViewModel,
+    backdropStyle: BackdropStyle = viewModel.backdropStyle,
+    animateWallpaperChange: Boolean = false
+) {
+    val isDark = isSystemInDarkTheme()
+    val surfaceColor = MaterialTheme.colorScheme.surface
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(surfaceColor)
+            .clipToBounds()
+    ) {
+        if (backdropStyle != BackdropStyle.OFF && wallpaper != null) {
+            val blurDp = if (backdropStyle == BackdropStyle.BLUR_BACKGROUND) {
+                BackdropSpec.BLUR_BG_DP.dp
+            } else {
+                BackdropSpec.AMBIENT_BLUR_DP.dp
+            }
+            val scale = if (backdropStyle == BackdropStyle.BLUR_BACKGROUND) {
+                BackdropSpec.BLUR_BG_PREVIEW_SCALE
+            } else {
+                1f
+            }
+            val satFilter = remember(backdropStyle) {
+                if (backdropStyle == BackdropStyle.BLUR_BACKGROUND && BackdropSpec.BLUR_BG_SATURATION != 1f) {
+                    ColorFilter.colorMatrix(
+                        ColorMatrix().apply { setToSaturation(BackdropSpec.BLUR_BG_SATURATION) }
+                    )
+                } else null
+            }
+
+            val renderBlurred: @Composable (Wallpaper) -> Unit = { wp ->
+                AsyncWallpaperImage(
+                    wallpaper = wp,
+                    contentDescription = null,
+                    viewModel = viewModel,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            scaleX = scale
+                            scaleY = scale
+                        }
+                        .blur(blurDp, edgeTreatment = BlurredEdgeTreatment.Rectangle),
+                    contentScale = ContentScale.Crop,
+                    allowMagic = false,
+                    colorFilter = satFilter
+                )
+            }
+
+            if (animateWallpaperChange) {
+                AnimatedContent(
+                    targetState = wallpaper,
+                    transitionSpec = { fadeIn(tween(800)) togetherWith fadeOut(tween(800)) },
+                    label = "wallpaper_backdrop"
+                ) { wp ->
+                    renderBlurred(wp)
+                }
+            } else {
+                renderBlurred(wallpaper)
+            }
+
+            if (backdropStyle == BackdropStyle.BLUR_BACKGROUND) {
+                val topScrim = if (isDark) {
+                    Color.Black.copy(alpha = BackdropSpec.BLUR_BG_SCRIM_ALPHA_DARK)
+                } else {
+                    surfaceColor.copy(alpha = BackdropSpec.BLUR_BG_SCRIM_ALPHA_LIGHT)
+                }
+                val bottomScrim = if (isDark) {
+                    Color.Black.copy(alpha = BackdropSpec.BLUR_BG_BOTTOM_SCRIM_DARK)
+                } else {
+                    surfaceColor.copy(alpha = BackdropSpec.BLUR_BG_BOTTOM_SCRIM_LIGHT)
+                }
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                0.0f to topScrim,
+                                0.65f to topScrim,
+                                1.0f to bottomScrim
+                            )
+                        )
+                )
+            } else {
+                val ambientAlpha = if (isDark) {
+                    BackdropSpec.AMBIENT_SCRIM_ALPHA_DARK
+                } else {
+                    BackdropSpec.AMBIENT_SCRIM_ALPHA_LIGHT
+                }
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(surfaceColor.copy(alpha = ambientAlpha))
+                )
+            }
         }
     }
 }
@@ -635,9 +748,6 @@ fun AmbientBottomSheet(
     }
 }
 
-/**
- * Upgraded Material 3 Expressive Loading Overlay using Morphing Shapes
- */
 @Composable
 fun LoadingOverlay(title: String) {
     Box(
@@ -679,9 +789,6 @@ fun LoadingOverlay(title: String) {
     }
 }
 
-/**
- * Material 3 Expressive Shape-Morphing Loading Animation
- */
 @Composable
 fun M3ExpressiveMorphLoadingIndicator(
     modifier: Modifier = Modifier,

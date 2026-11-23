@@ -12,6 +12,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.ParcelFileDescriptor
 import android.os.Process
+import com.android.CaveArt.clockkit.BackdropStyle
 import com.android.CaveArt.clockkit.ClockKitConfigStore
 import java.io.File
 import java.io.FileNotFoundException
@@ -186,6 +187,7 @@ class CaveArtSettingsProvider : ContentProvider() {
             "date_format" -> cursor.addRow(arrayOf(prefs.getInt("date_format", 0)))
             "date_attached" -> cursor.addRow(arrayOf(if (prefs.getBoolean("date_attached", true)) 1 else 0))
             "scroll_style" -> cursor.addRow(arrayOf(prefs.getInt("scroll_style", 0)))
+            "backdrop_style" -> cursor.addRow(arrayOf(prefs.getInt("backdrop_style", BackdropStyle.BLUR_BACKGROUND.id)))
             "clock_hour_size" -> cursor.addRow(arrayOf(prefs.getFloat("clock_hour_size", 100f)))
             "clock_minute_size" -> cursor.addRow(arrayOf(prefs.getFloat("clock_minute_size", 75f)))
             "clock_stroke_width" -> cursor.addRow(arrayOf(prefs.getFloat("clock_stroke_width", 8f)))

@@ -29,7 +29,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -43,6 +42,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.android.CaveArt.clockkit.BackdropStyle
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -54,21 +54,7 @@ fun SettingsScreen(
     val context = LocalContext.current
 
     Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
-        if (viewModel.isAmbientBlurEnabled && currentWallpaper != null) {
-            AsyncWallpaperImage(
-                wallpaper = currentWallpaper,
-                contentDescription = null,
-                viewModel = viewModel,
-                modifier = Modifier.fillMaxSize().blur(90.dp),
-                contentScale = ContentScale.Crop,
-                allowMagic = false
-            )
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.78f))
-            )
-        }
+        ExpressiveWallpaperBackdrop(wallpaper = currentWallpaper, viewModel = viewModel)
 
         Scaffold(
             containerColor = Color.Transparent,
@@ -258,17 +244,62 @@ fun SettingsScreen(
                         onCheckedChange = { viewModel.setHapticsEnabled(it) }
                     )
 
-                    Spacer(Modifier.height(12.dp))
+                    Spacer(Modifier.height(14.dp))
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f))
+                    Spacer(Modifier.height(14.dp))
+
+                    SectionHeader(
+                        icon = Icons.Rounded.BlurOn,
+                        title = "Wallpaper Backdrop",
+                        subtitle = when (viewModel.backdropStyle) {
+                            BackdropStyle.OFF -> "Solid system surface"
+                            BackdropStyle.AMBIENT_GLOW -> "Ultra-soft diffused color glow"
+                            BackdropStyle.BLUR_BACKGROUND -> "Rich blurred wallpaper behind preview"
+                        }
+                    )
                     Spacer(Modifier.height(12.dp))
 
-                    ExpressiveToggleRow(
-                        icon = Icons.Rounded.BlurOn,
-                        title = "Ambient Glow",
-                        description = if (viewModel.isAmbientBlurEnabled) "Dynamic wallpaper backlighting" else "Solid system surface",
-                        checked = viewModel.isAmbientBlurEnabled,
-                        onCheckedChange = { viewModel.setAmbientBlurEnabled(it) }
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        BackdropStyle.values().forEach { style ->
+                            val isSelected = viewModel.backdropStyle == style
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Card(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(76.dp)
+                                        .clip(RoundedCornerShape(22.dp))
+                                        .border(
+                                            width = if (isSelected) 2.5.dp else 1.dp,
+                                            color = if (isSelected) MaterialTheme.colorScheme.primary
+                                            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                                            shape = RoundedCornerShape(22.dp)
+                                        )
+                                        .clickable { viewModel.updateBackdropStyle(style) },
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f)
+                                    )
+                                ) {
+                                    LiveBackdropTile(
+                                        style = style,
+                                        wallpaper = currentWallpaper,
+                                        viewModel = viewModel
+                                    )
+                                }
+                                Spacer(Modifier.height(6.dp))
+                                Text(
+                                    text = style.label,
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 11.sp),
+                                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
                 }
 
                 ExpressiveSectionCard {
@@ -394,6 +425,69 @@ private fun ExpressiveToggleRow(
                 checkedTrackColor = MaterialTheme.colorScheme.primary
             )
         )
+    }
+}
+
+@Composable
+fun LiveBackdropTile(
+    style: BackdropStyle,
+    wallpaper: Wallpaper?,
+    viewModel: WallpaperViewModel
+) {
+    val primary = MaterialTheme.colorScheme.primary
+    val tertiary = MaterialTheme.colorScheme.tertiary
+    val surface = MaterialTheme.colorScheme.surfaceContainerHighest
+
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        when (style) {
+            BackdropStyle.OFF -> {
+                Box(modifier = Modifier.fillMaxSize().background(surface))
+            }
+            BackdropStyle.AMBIENT_GLOW -> {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Brush.radialGradient(listOf(primary.copy(alpha = 0.35f), surface)))
+                )
+            }
+            BackdropStyle.BLUR_BACKGROUND -> {
+                if (wallpaper != null) {
+                    AsyncWallpaperImage(
+                        wallpaper = wallpaper,
+                        contentDescription = null,
+                        viewModel = viewModel,
+                        modifier = Modifier.fillMaxSize().blur(10.dp),
+                        contentScale = ContentScale.Crop,
+                        allowMagic = false
+                    )
+                    Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.25f)))
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Brush.linearGradient(listOf(primary.copy(alpha = 0.65f), tertiary.copy(alpha = 0.55f))))
+                    )
+                }
+            }
+        }
+
+        Surface(
+            modifier = Modifier.size(width = 26.dp, height = 48.dp),
+            shape = RoundedCornerShape(7.dp),
+            color = Color.Black.copy(alpha = 0.65f),
+            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.45f))
+        ) {
+            if (wallpaper != null) {
+                AsyncWallpaperImage(
+                    wallpaper = wallpaper,
+                    contentDescription = null,
+                    viewModel = viewModel,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop,
+                    allowMagic = false
+                )
+            }
+        }
     }
 }
 

@@ -33,6 +33,7 @@ class LockscreenEditorOverlay(context: Context) : FrameLayout(context) {
     private var activeActionIndex = 0
     private var isLayersSheetVisible = false
     private var fastScrollStyle = 0
+    private var backdropStyle = BackdropStyle.BLUR_BACKGROUND
 
     private var isDepthEnabled = true
     private var depthOcclusionLimit = 0.45f
@@ -273,15 +274,19 @@ class LockscreenEditorOverlay(context: Context) : FrameLayout(context) {
         subjectOpacity = getSettingFloat(context, "layer_subject_opacity", 1f)
         wallpaperZoom = clock.telemetryZoom
         fastScrollStyle = getSettingInt(context, "scroll_style", 0)
+        backdropStyle = BackdropStyle.fromId(
+            getSettingInt(context, "backdrop_style", BackdropStyle.BLUR_BACKGROUND.id)
+        )
 
         activeLayerScope = EditorLayerScope.CLOCK; isStyleBrowseMode = false; activeActionIndex = 0
         isLayersSheetVisible = false; layersScrim.visibility = View.GONE; unlockPromptPill.visibility = View.GONE
-        backdropImageView.visibility = View.VISIBLE; backdropTintView.visibility = View.VISIBLE
+        backdropImageView.visibility = if (backdropStyle == BackdropStyle.OFF) View.GONE else View.VISIBLE
+        backdropTintView.visibility = View.VISIBLE
         rootColumn.visibility = View.VISIBLE; visibility = View.VISIBLE
 
-        val (resolvedTheme, resolvedPalette) = LockscreenOverlayPanels.resolveTheme(context, paletteColors)
+        val (resolvedTheme, resolvedPalette) = LockscreenOverlayPanels.resolveTheme(context, paletteColors, backdropStyle)
         theme = resolvedTheme; paletteColors = resolvedPalette
-        backdropTintView.setBackgroundColor(theme.surfaceOverlayColor)
+        backdropTintView.background = LockscreenOverlayPanels.buildBackdropOverlayDrawable(theme, backdropStyle)
 
         loadAssetsAsync()
         rebuildActionsList()
@@ -329,11 +334,14 @@ class LockscreenEditorOverlay(context: Context) : FrameLayout(context) {
 
     private fun loadAssetsAsync() {
         val clock = CaveArtXposedModule.activeClock
+        val styleNow = backdropStyle
         depthMaskBitmap = clock?.depthMaskBitmap; rawDepthBitmap = clock?.rawDepthBitmap
         Thread {
             val latestScroll = getSettingInt(context, "scroll_style", fastScrollStyle)
             val wp = LockscreenOverlayPanels.loadLockWallpaperBitmap(context)
-            val blurred = wp?.let { LockscreenSceneRenderer.createBlurredBackdrop(it) }
+            val blurred = if (styleNow != BackdropStyle.OFF) {
+                wp?.let { LockscreenSceneRenderer.createBlurredBackdrop(it, styleNow) }
+            } else null
             val mask = depthMaskBitmap ?: LockscreenOverlayPanels.decodeStreamBitmap(context, "content://com.android.CaveArt.settings/depth_mask")
             val raw = rawDepthBitmap ?: LockscreenOverlayPanels.decodeStreamBitmap(context, "content://com.android.CaveArt.settings/raw_depth")
             val extracted = if (paletteColors.isEmpty() && wp != null) MonetEngine.extractPaletteFromBitmap(wp, theme.isNight).allColors else null
@@ -343,7 +351,7 @@ class LockscreenEditorOverlay(context: Context) : FrameLayout(context) {
                 fastScrollStyle = latestScroll
                 fastScrollView.setScrollStyle(latestScroll)
                 if (wp != null) wallpaperBitmap = wp
-                if (blurred != null) {
+                if (blurred != null && styleNow != BackdropStyle.OFF) {
                     blurredBackdrop = blurred; backdropImageView.setImageBitmap(blurred)
                     backdropImageView.alpha = 0f; backdropImageView.animate().alpha(1f).setDuration(240L).start()
                 }

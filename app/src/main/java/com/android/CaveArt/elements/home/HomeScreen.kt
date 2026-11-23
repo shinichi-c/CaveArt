@@ -29,16 +29,12 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.lerp
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -47,14 +43,14 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.absoluteValue
 
-enum class EditorMode { 
-    NONE, 
-    CLOCK, 
-    MAGIC_SHAPE, 
-    ANIMATION, 
-    FILAMENT_3D, 
-    IMMERSIVE, 
-    SETTINGS 
+enum class EditorMode {
+    NONE,
+    CLOCK,
+    MAGIC_SHAPE,
+    ANIMATION,
+    FILAMENT_3D,
+    IMMERSIVE,
+    SETTINGS
 }
 
 enum class TopScreenTab(val label: String) {
@@ -167,7 +163,7 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
             }
         }
     }
-    
+
     val expressiveBoundsSpring = spring<androidx.compose.ui.geometry.Rect>(
         dampingRatio = 0.78f,
         stiffness = 380f
@@ -253,23 +249,11 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                 EditorMode.NONE -> {
                     Scaffold(containerColor = Color.Transparent, contentWindowInsets = WindowInsets(0, 0, 0, 0)) { paddingValues ->
                         Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
-                            if (viewModel.isAmbientBlurEnabled && currentWallpaper != null) {
-                                AnimatedContent(
-                                    targetState = currentWallpaper,
-                                    transitionSpec = { fadeIn(tween(800)) togetherWith fadeOut(tween(800)) },
-                                    label = "ambient_background"
-                                ) { wp ->
-                                    AsyncWallpaperImage(
-                                        wallpaper = wp,
-                                        contentDescription = null,
-                                        viewModel = viewModel,
-                                        modifier = Modifier.fillMaxSize().blur(80.dp),
-                                        contentScale = ContentScale.Crop,
-                                        allowMagic = false
-                                    )
-                                }
-                                Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface.copy(alpha = 0.7f)))
-                            }
+                            ExpressiveWallpaperBackdrop(
+                                wallpaper = currentWallpaper,
+                                viewModel = viewModel,
+                                animateWallpaperChange = true
+                            )
 
                             Column(modifier = Modifier.fillMaxSize().padding(paddingValues).statusBarsPadding()) {
                                 Box(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), contentAlignment = Alignment.Center) {
@@ -360,7 +344,7 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                                         }
                                     }
                                 }
-                                
+
                                 Box(contentAlignment = Alignment.BottomCenter) {
                                     Column(
                                         horizontalAlignment = Alignment.CenterHorizontally,
@@ -398,15 +382,15 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
                                                     showDestinationSheet = true
                                                 }
                                             },
-                                            onMagicClick = { 
+                                            onMagicClick = {
                                                 viewModel.setMagicShapeEnabled(true)
-                                                currentEditorMode = EditorMode.MAGIC_SHAPE 
+                                                currentEditorMode = EditorMode.MAGIC_SHAPE
                                             },
-                                            onAnimationClick = { 
+                                            onAnimationClick = {
                                                 viewModel.setAnimationEnabled(true)
-                                                currentEditorMode = EditorMode.ANIMATION 
+                                                currentEditorMode = EditorMode.ANIMATION
                                             },
-                                            onFilamentClick = { 
+                                            onFilamentClick = {
                                                 currentEditorMode = EditorMode.FILAMENT_3D
                                             },
                                             onAddClick = { galleryLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
@@ -482,7 +466,7 @@ fun SwipableWallpaperScreen(viewModel: WallpaperViewModel = viewModel()) {
             }
         }
     }
-    
+
     AnimatedVisibility(
         visible = isSettingWallpaper,
         enter = fadeIn(tween(180)) + scaleIn(initialScale = 0.88f, animationSpec = spring(dampingRatio = 0.78f, stiffness = 380f)),

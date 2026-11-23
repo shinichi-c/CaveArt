@@ -11,10 +11,6 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 
-/**
- * Single Source of Truth for all lockscreen layout constants across
- * App Preview, Style Carousel, Xposed Lockscreen Editor, and SystemUI.
- */
 object LockscreenLayoutSpec {
     const val DEFAULT_WALLPAPER_ZOOM = 1.10f
     const val SIDE_SAFE_MARGIN_DP = 18f
@@ -32,10 +28,6 @@ object LockscreenLayoutSpec {
     const val EDITOR_BOTTOM_SAFE_DP = 8f
 }
 
-/**
- * Single Source of Truth for layer control ranges & formatters shared
- * between ClockStudio and LockscreenOverlayPanels.
- */
 object LockscreenControlSpec {
     val OCCLUSION_RANGE = 0.10f..0.85f
     val ZOOM_RANGE = 1.0f..1.35f
@@ -50,6 +42,37 @@ object LockscreenControlSpec {
         return if (n > 0) "+$n" else "$n"
     }
     fun formatGravity(v: Float): String = String.format("%.1fx", v)
+}
+
+enum class BackdropStyle(val id: Int, val label: String) {
+    OFF(0, "Solid"),
+    AMBIENT_GLOW(1, "Ambient Glow"),
+    BLUR_BACKGROUND(2, "Blur Background");
+
+    companion object {
+        fun fromId(id: Int): BackdropStyle = values().firstOrNull { it.id == id } ?: BLUR_BACKGROUND
+    }
+}
+
+object BackdropSpec {
+    const val AMBIENT_BLUR_DP = 85f
+    const val BLUR_BG_DP = 28f
+
+    const val AMBIENT_SCRIM_ALPHA_DARK = 0.68f
+    const val AMBIENT_SCRIM_ALPHA_LIGHT = 0.72f
+
+    const val BLUR_BG_SCRIM_ALPHA_DARK = 0.34f
+    const val BLUR_BG_SCRIM_ALPHA_LIGHT = 0.38f
+    const val BLUR_BG_BOTTOM_SCRIM_DARK = 0.50f
+    const val BLUR_BG_BOTTOM_SCRIM_LIGHT = 0.56f
+
+    const val BLUR_BG_SATURATION = 1.15f
+    const val BLUR_BG_PREVIEW_SCALE = 1.08f
+
+    const val XPOSED_AMBIENT_WIDTH = 96
+    const val XPOSED_AMBIENT_RADIUS = 14
+    const val XPOSED_BLUR_WIDTH = 180
+    const val XPOSED_BLUR_RADIUS = 10
 }
 
 data class LockscreenSceneParams(
@@ -513,12 +536,40 @@ object LockscreenSceneRenderer {
         )
     }
 
-    fun createBlurredBackdrop(src: Bitmap): Bitmap {
-        val targetW = 96
+    fun createBlurredBackdrop(
+        src: Bitmap,
+        style: BackdropStyle = BackdropStyle.BLUR_BACKGROUND
+    ): Bitmap {
+        if (style == BackdropStyle.OFF) {
+            return Bitmap.createBitmap(4, 4, Bitmap.Config.ARGB_8888)
+        }
+        val targetW = if (style == BackdropStyle.BLUR_BACKGROUND) {
+            BackdropSpec.XPOSED_BLUR_WIDTH
+        } else {
+            BackdropSpec.XPOSED_AMBIENT_WIDTH
+        }
+        val radius = if (style == BackdropStyle.BLUR_BACKGROUND) {
+            BackdropSpec.XPOSED_BLUR_RADIUS
+        } else {
+            BackdropSpec.XPOSED_AMBIENT_RADIUS
+        }
         val targetH = ((src.height.toFloat() / src.width.coerceAtLeast(1)) * targetW)
-            .roundToInt().coerceIn(96, 220)
+            .roundToInt().coerceIn(96, 420)
         val small = Bitmap.createScaledBitmap(src, targetW, targetH, true)
-        fastBoxBlurInPlace(small, radius = 14, passes = 3)
+        fastBoxBlurInPlace(small, radius = radius, passes = 3)
+
+        if (style == BackdropStyle.BLUR_BACKGROUND && BackdropSpec.BLUR_BG_SATURATION != 1f) {
+            val saturated = Bitmap.createBitmap(small.width, small.height, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(saturated)
+            val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                colorFilter = ColorMatrixColorFilter(
+                    ColorMatrix().apply { setSaturation(BackdropSpec.BLUR_BG_SATURATION) }
+                )
+            }
+            canvas.drawBitmap(small, 0f, 0f, paint)
+            small.recycle()
+            return saturated
+        }
         return small
     }
 

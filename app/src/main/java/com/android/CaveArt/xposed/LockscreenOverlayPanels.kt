@@ -25,7 +25,11 @@ internal object LockscreenOverlayPanels {
     private fun dp(d: Float, v: Float): Int = (v * d).roundToInt()
     private fun dpf(d: Float, v: Float): Float = v * d
 
-    fun resolveTheme(context: Context, currentPalette: List<Int>): Pair<OverlayTheme, List<Int>> {
+    fun resolveTheme(
+        context: Context,
+        currentPalette: List<Int>,
+        backdropStyle: BackdropStyle = BackdropStyle.BLUR_BACKGROUND
+    ): Pair<OverlayTheme, List<Int>> {
         val isNight = (context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
             Configuration.UI_MODE_NIGHT_YES
 
@@ -52,29 +56,64 @@ internal object LockscreenOverlayPanels {
         val accent = dynamicTheme.tonalSpot.firstOrNull() ?: seed
 
         val theme = if (isNight) {
+            val overlayAlpha = when (backdropStyle) {
+                BackdropStyle.OFF -> 255
+                BackdropStyle.AMBIENT_GLOW -> (BackdropSpec.AMBIENT_SCRIM_ALPHA_DARK * 255).roundToInt()
+                BackdropStyle.BLUR_BACKGROUND -> (BackdropSpec.BLUR_BG_SCRIM_ALPHA_DARK * 255).roundToInt()
+            }
+            val overlayRgb = if (backdropStyle == BackdropStyle.OFF) Triple(29, 31, 36)
+            else if (backdropStyle == BackdropStyle.BLUR_BACKGROUND) Triple(0, 0, 0)
+            else Triple(18, 20, 24)
+
             OverlayTheme(
                 isNight = true,
                 accentColor = accent,
-                surfaceOverlayColor = Color.argb(170, 18, 20, 24),
+                surfaceOverlayColor = Color.argb(overlayAlpha, overlayRgb.first, overlayRgb.second, overlayRgb.third),
                 onSurfaceColor = Color.parseColor("#F1F3F5"),
-                onSurfaceMuted = Color.argb(160, 241, 243, 245),
-                activePillBg = Color.argb(38, 255, 255, 255),
+                onSurfaceMuted = Color.argb(165, 241, 243, 245),
+                activePillBg = Color.argb(44, 255, 255, 255),
                 sheetBgColor = Color.parseColor("#1D1F24"),
                 chipBgColor = Color.argb(36, 255, 255, 255)
             )
         } else {
+            val overlayAlpha = when (backdropStyle) {
+                BackdropStyle.OFF -> 255
+                BackdropStyle.AMBIENT_GLOW -> (BackdropSpec.AMBIENT_SCRIM_ALPHA_LIGHT * 255).roundToInt()
+                BackdropStyle.BLUR_BACKGROUND -> (BackdropSpec.BLUR_BG_SCRIM_ALPHA_LIGHT * 255).roundToInt()
+            }
+            val overlayRgb = if (backdropStyle == BackdropStyle.OFF) Triple(242, 245, 248)
+            else Triple(232, 238, 242)
+
             OverlayTheme(
                 isNight = false,
                 accentColor = accent,
-                surfaceOverlayColor = Color.argb(160, 232, 238, 242),
+                surfaceOverlayColor = Color.argb(overlayAlpha, overlayRgb.first, overlayRgb.second, overlayRgb.third),
                 onSurfaceColor = Color.parseColor("#191C1E"),
-                onSurfaceMuted = Color.argb(165, 25, 28, 30),
-                activePillBg = Color.argb(32, 25, 28, 30),
+                onSurfaceMuted = Color.argb(175, 25, 28, 30),
+                activePillBg = Color.argb(34, 25, 28, 30),
                 sheetBgColor = Color.parseColor("#F2F5F8"),
                 chipBgColor = Color.argb(26, 25, 28, 30)
             )
         }
         return theme to palette
+    }
+
+    fun buildBackdropOverlayDrawable(theme: OverlayTheme, backdropStyle: BackdropStyle): GradientDrawable {
+        if (backdropStyle != BackdropStyle.BLUR_BACKGROUND) {
+            return GradientDrawable().apply { setColor(theme.surfaceOverlayColor) }
+        }
+        val top = theme.surfaceOverlayColor
+        val bottomAlpha = if (theme.isNight) {
+            (BackdropSpec.BLUR_BG_BOTTOM_SCRIM_DARK * 255).roundToInt()
+        } else {
+            (BackdropSpec.BLUR_BG_BOTTOM_SCRIM_LIGHT * 255).roundToInt()
+        }
+        val bottom = if (theme.isNight) {
+            Color.argb(bottomAlpha, 0, 0, 0)
+        } else {
+            Color.argb(bottomAlpha, 242, 245, 248)
+        }
+        return GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(top, top, bottom))
     }
 
     fun decodeStreamBitmap(context: Context, uriStr: String): Bitmap? = try {

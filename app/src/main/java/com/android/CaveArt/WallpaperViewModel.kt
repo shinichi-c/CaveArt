@@ -19,6 +19,7 @@ import androidx.lifecycle.viewModelScope
 import com.android.CaveArt.animations.AnimationFactory
 import com.android.CaveArt.animations.AnimationStyle
 import com.android.CaveArt.animations.AnimSetting
+import com.android.CaveArt.clockkit.BackdropStyle
 import com.android.CaveArt.clockkit.ClockKitConfig
 import com.android.CaveArt.clockkit.ClockKitConfigStore
 import com.android.CaveArt.layer.LockscreenLayerStack
@@ -86,11 +87,27 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         prefs.edit().putBoolean("fixed_alignment", enabled).apply()
     }
 
-    private val _isAmbientBlurEnabled = mutableStateOf(prefs.getBoolean("ambient_blur", true))
-    val isAmbientBlurEnabled: Boolean by _isAmbientBlurEnabled
+    private val _backdropStyle = mutableStateOf(
+        if (clockPrefs.contains("backdrop_style")) {
+            BackdropStyle.fromId(clockPrefs.getInt("backdrop_style", BackdropStyle.BLUR_BACKGROUND.id))
+        } else if (!prefs.getBoolean("ambient_blur", true)) {
+            BackdropStyle.OFF
+        } else {
+            BackdropStyle.BLUR_BACKGROUND
+        }
+    )
+    val backdropStyle: BackdropStyle by _backdropStyle
+    val isAmbientBlurEnabled: Boolean
+        get() = _backdropStyle.value != BackdropStyle.OFF
+
+    fun updateBackdropStyle(style: BackdropStyle) {
+        _backdropStyle.value = style
+        clockPrefs.edit().putInt("backdrop_style", style.id).apply()
+        prefs.edit().putBoolean("ambient_blur", style != BackdropStyle.OFF).apply()
+    }
+
     fun setAmbientBlurEnabled(enabled: Boolean) {
-        _isAmbientBlurEnabled.value = enabled
-        prefs.edit().putBoolean("ambient_blur", enabled).apply()
+        updateBackdropStyle(if (enabled) BackdropStyle.AMBIENT_GLOW else BackdropStyle.OFF)
     }
 
     private val _isFloatingDockEnabled = mutableStateOf(prefs.getBoolean("floating_dock", true))

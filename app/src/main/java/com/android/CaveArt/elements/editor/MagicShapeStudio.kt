@@ -34,7 +34,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
@@ -43,7 +42,6 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
@@ -164,17 +162,10 @@ fun MagicShapeStudio(
     }
 
     Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
-        if (viewModel.isAmbientBlurEnabled && previewOriginal != null) {
-            AsyncWallpaperImage(
-                wallpaper = wallpaper,
-                contentDescription = null,
-                viewModel = viewModel,
-                modifier = Modifier.fillMaxSize().blur(90.dp),
-                contentScale = ContentScale.Crop,
-                allowMagic = false
-            )
-            Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface.copy(alpha = 0.75f)))
-        }
+        ExpressiveWallpaperBackdrop(
+            wallpaper = if (previewOriginal != null) wallpaper else null,
+            viewModel = viewModel
+        )
 
         Scaffold(
             containerColor = Color.Transparent,
@@ -312,7 +303,7 @@ fun MagicShapeStudio(
                                             nc.save()
                                             val breakoutCutoffY = screenShapeRect.top + (screenShapeRect.height() * 0.30f)
                                             nc.clipRect(0f, 0f, size.width, breakoutCutoffY)
-                                            
+
                                             val maskMatrix = if (previewCutout!!.width != previewOriginal!!.width || previewCutout!!.height != previewOriginal!!.height) {
                                                 Matrix(bodyMatrix).apply {
                                                     preScale(
