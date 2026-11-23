@@ -2,6 +2,7 @@ package com.android.CaveArt.clockkit
 
 import android.app.AlarmManager
 import android.app.NotificationManager
+import android.app.WallpaperColors
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -375,6 +376,120 @@ object AtAGlanceDataCollector {
     }
 }
 
+/**
+ * Single Source of Truth for At a Glance colors, thresholds, and pill styling.
+ * Edit these constants here and all previews, carousels, and SystemUI views update together.
+ */
+object AtAGlanceColorResolver {
+    const val DEFAULT_INK_COLOR: Int = Color.WHITE
+    const val DARK_INK_COLOR: Int = 0xFF14161A.toInt()
+    const val ADAPT_TO_LIGHT_WALLPAPER: Boolean = true
+    const val LIGHT_WALLPAPER_LUM_THRESHOLD: Float = 0.72f
+
+    const val PILL_DARK_FILL_ALPHA: Float = 0.42f
+    const val PILL_LIGHT_FILL_ALPHA: Float = 0.72f
+    const val PILL_LIGHT_INK_BORDER_ALPHA: Float = 0.28f
+    const val PILL_DARK_INK_BORDER_ALPHA: Float = 0.24f
+
+    fun colorLuminance(colorInt: Int): Float {
+        val r = Color.red(colorInt) / 255f
+        val g = Color.green(colorInt) / 255f
+        val b = Color.blue(colorInt) / 255f
+        return 0.2126f * r + 0.7152f * g + 0.0722f * b
+    }
+
+    fun isDarkInkFromWallpaperColors(colors: WallpaperColors?): Boolean {
+        if (!ADAPT_TO_LIGHT_WALLPAPER || colors == null) return false
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if ((colors.colorHints and WallpaperColors.HINT_SUPPORTS_DARK_TEXT) != 0) {
+                return true
+            }
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            try {
+                val hints = colors.javaClass.getMethod("getColorHints").invoke(colors) as? Int ?: 0
+                val darkTextFlag = WallpaperColors::class.java.getField("HINT_SUPPORTS_DARK_TEXT").getInt(null)
+                if ((hints and darkTextFlag) != 0) return true
+            } catch (_: Throwable) {}
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            if (colorLuminance(colors.primaryColor.toArgb()) >= LIGHT_WALLPAPER_LUM_THRESHOLD) {
+                return true
+            }
+        }
+        return false
+    }
+
+    fun resolveForWallpaper(
+        wallpaperBitmap: Bitmap?,
+        screenW: Float,
+        screenH: Float,
+        zoom: Float,
+        centerX: Float,
+        topY: Float,
+        widthPx: Float,
+        heightPx: Float,
+        bgOpacity: Float = 1f,
+        fallbackColors: WallpaperColors? = null
+    ): Int {
+        if (!ADAPT_TO_LIGHT_WALLPAPER) return DEFAULT_INK_COLOR
+
+        if (wallpaperBitmap == null || wallpaperBitmap.isRecycled || screenW <= 0f || screenH <= 0f) {
+            return if (isDarkInkFromWallpaperColors(fallbackColors)) DARK_INK_COLOR else DEFAULT_INK_COLOR
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && wallpaperBitmap.config == Bitmap.Config.HARDWARE) {
+            return if (isDarkInkFromWallpaperColors(fallbackColors)) DARK_INK_COLOR else DEFAULT_INK_COLOR
+        }
+
+        val bw = wallpaperBitmap.width.toFloat()
+        val bh = wallpaperBitmap.height.toFloat()
+        if (bw <= 0f || bh <= 0f) return DEFAULT_INK_COLOR
+
+        val baseScale = max(screenW / bw, screenH / bh) * zoom.coerceAtLeast(0.5f)
+        val destW = bw * baseScale
+        val destH = bh * baseScale
+        val tx = (screenW - destW) / 2f
+        val ty = (screenH - destH) / 2f
+
+        val safeW = widthPx.coerceAtLeast(48f)
+        val safeH = heightPx.coerceAtLeast(24f)
+        val left = (centerX - safeW / 2f).coerceIn(0f, screenW)
+        val right = (centerX + safeW / 2f).coerceIn(0f, screenW)
+        val top = topY.coerceIn(0f, screenH)
+        val bottom = (topY + safeH).coerceIn(0f, screenH)
+
+        if (right <= left || bottom <= top) {
+            return if (isDarkInkFromWallpaperColors(fallbackColors)) DARK_INK_COLOR else DEFAULT_INK_COLOR
+        }
+
+        val cols = 12
+        val rows = 5
+        var lumSum = 0f
+        var count = 0
+        val effBgAlpha = bgOpacity.coerceIn(0f, 1f)
+        val maxBx = wallpaperBitmap.width - 1
+        val maxBy = wallpaperBitmap.height - 1
+
+        for (ix in 0 until cols) {
+            val sx = left + ((ix + 0.5f) / cols) * (right - left)
+            val bx = ((sx - tx) / baseScale).toInt().coerceIn(0, maxBx)
+            for (iy in 0 until rows) {
+                val sy = top + ((iy + 0.5f) / rows) * (bottom - top)
+                val by = ((sy - ty) / baseScale).toInt().coerceIn(0, maxBy)
+                val px = wallpaperBitmap.getPixel(bx, by)
+                val alpha = (((px ushr 24) and 0xFF) / 255f) * effBgAlpha
+                val r = ((px ushr 16) and 0xFF) / 255f * alpha
+                val g = ((px ushr 8) and 0xFF) / 255f * alpha
+                val b = (px and 0xFF) / 255f * alpha
+                lumSum += (0.2126f * r + 0.7152f * g + 0.0722f * b)
+                count++
+            }
+        }
+
+        val avgLum = if (count > 0) lumSum / count else 0f
+        return if (avgLum >= LIGHT_WALLPAPER_LUM_THRESHOLD) DARK_INK_COLOR else DEFAULT_INK_COLOR
+    }
+}
+
 object AtAGlanceRenderer {
 
     private val primaryPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -497,7 +612,7 @@ object AtAGlanceRenderer {
                 weatherPillIcon = weatherIcon
             )
         }
-        
+
         val primaryRaw: String
         val primaryIcon: GlanceIconKind
         val secRaw: String?
@@ -505,7 +620,6 @@ object AtAGlanceRenderer {
 
         when (style) {
             AtAGlanceStyle.MINIMAL, AtAGlanceStyle.FROSTED_PILL -> {
-                
                 primaryRaw = if (tempStr != null) "$tempStr  •  ${snapshot.dateText}" else snapshot.dateText
                 primaryIcon = weatherIcon
                 secRaw = contextText
@@ -514,10 +628,17 @@ object AtAGlanceRenderer {
             AtAGlanceStyle.TWO_LINE -> {
                 primaryRaw = snapshot.dateText
                 primaryIcon = GlanceIconKind.NONE
+                val summary = weather?.summary?.trim().orEmpty()
+                val weatherDesc = when {
+                    tempStr != null && summary.isNotEmpty() -> "$tempStr $summary"
+                    tempStr != null -> tempStr
+                    else -> null
+                }
                 secRaw = when {
-                    contextText != null && tempStr != null -> "$tempStr ${weather.summary}  •  $contextText"
+                    contextText != null && weatherDesc != null -> "$weatherDesc  •  $contextText"
                     contextText != null -> contextText
-                    tempStr != null -> "$tempStr  •  ${weather.summary}"
+                    tempStr != null && summary.isNotEmpty() -> "$tempStr  •  $summary"
+                    tempStr != null -> tempStr
                     else -> null
                 }
                 secIcon = if (weatherIcon != GlanceIconKind.NONE) weatherIcon else contextIcon
@@ -540,7 +661,7 @@ object AtAGlanceRenderer {
         var iconGap1 = if (primaryIcon != GlanceIconKind.NONE) 6f * density else 0f
         val rawTextW = primaryPaint.measureText(primaryRaw)
         val availTextW = (maxContentW - iconSize1 - iconGap1).coerceAtLeast(80f * density)
-        
+
         if (rawTextW > availTextW && rawTextW > 1f) {
             fittedSp = (fittedSp * (availTextW / rawTextW)).coerceAtLeast(11.5f)
             primaryPaint.textSize = fittedSp * density
@@ -581,6 +702,54 @@ object AtAGlanceRenderer {
         )
     }
 
+    /**
+     * Single entry point used by App Preview, Carousel, Xposed Editor, and Live SystemUI.
+     * Automatically resolves pure white vs dark ink from the wallpaper behind the widget.
+     */
+    fun drawAuto(
+        canvas: Canvas,
+        centerX: Float,
+        topY: Float,
+        config: ClockKitConfig,
+        snapshot: AtAGlanceSnapshot,
+        density: Float,
+        dateSizeSp: Float,
+        maxScreenWidthPx: Float = 1080f,
+        wallpaperBitmap: Bitmap? = null,
+        screenW: Float = maxScreenWidthPx,
+        screenH: Float = 0f,
+        wallpaperZoom: Float = 1.10f,
+        bgOpacity: Float = 1f,
+        fallbackColors: WallpaperColors? = null,
+        sampleCenterX: Float = centerX,
+        sampleTopY: Float = topY,
+        alphaScale: Float = 1f
+    ): AtAGlanceMeasureResult {
+        val m = measure(config, snapshot, density, dateSizeSp, maxScreenWidthPx)
+        val resolvedColor = AtAGlanceColorResolver.resolveForWallpaper(
+            wallpaperBitmap = wallpaperBitmap,
+            screenW = screenW,
+            screenH = screenH,
+            zoom = wallpaperZoom,
+            centerX = sampleCenterX,
+            topY = sampleTopY,
+            widthPx = m.widthPx,
+            heightPx = m.heightPx,
+            bgOpacity = bgOpacity,
+            fallbackColors = fallbackColors
+        )
+        return drawMeasured(
+            canvas = canvas,
+            m = m,
+            centerX = centerX,
+            topY = topY,
+            config = config,
+            density = density,
+            textColor = resolvedColor,
+            alphaScale = alphaScale
+        )
+    }
+
     fun draw(
         canvas: Canvas,
         centerX: Float,
@@ -594,6 +763,19 @@ object AtAGlanceRenderer {
         alphaScale: Float = 1f
     ): AtAGlanceMeasureResult {
         val m = measure(config, snapshot, density, dateSizeSp, maxScreenWidthPx)
+        return drawMeasured(canvas, m, centerX, topY, config, density, textColor, alphaScale)
+    }
+
+    private fun drawMeasured(
+        canvas: Canvas,
+        m: AtAGlanceMeasureResult,
+        centerX: Float,
+        topY: Float,
+        config: ClockKitConfig,
+        density: Float,
+        textColor: Int,
+        alphaScale: Float
+    ): AtAGlanceMeasureResult {
         val style = AtAGlanceStyle.fromId(config.atGlanceStyle)
         val alphaInt = (alphaScale.coerceIn(0f, 1f) * 255).roundToInt().coerceIn(0, 255)
         if (alphaInt <= 2) return m
@@ -628,11 +810,19 @@ object AtAGlanceRenderer {
             val row1W = datePillW + (if (weatherPillW > 0f) pillGap + weatherPillW else 0f)
             val row1StartX = centerX - (row1W / 2f)
 
-            val pillFill = if (isLightInk) Color.argb((alphaInt * 0.42f).roundToInt(), 14, 16, 22)
-            else Color.argb((alphaInt * 0.58f).roundToInt(), 245, 247, 250)
-            val pillStroke = Color.argb((alphaInt * 0.28f).roundToInt(), Color.red(textColor), Color.green(textColor), Color.blue(textColor))
+            val pillFill = if (isLightInk) {
+                Color.argb((alphaInt * AtAGlanceColorResolver.PILL_DARK_FILL_ALPHA).roundToInt(), 14, 16, 22)
+            } else {
+                Color.argb((alphaInt * AtAGlanceColorResolver.PILL_LIGHT_FILL_ALPHA).roundToInt(), 236, 239, 244)
+            }
+            val borderAlpha = if (isLightInk) {
+                AtAGlanceColorResolver.PILL_LIGHT_INK_BORDER_ALPHA
+            } else {
+                AtAGlanceColorResolver.PILL_DARK_INK_BORDER_ALPHA
+            }
+            val pillStroke = Color.argb((alphaInt * borderAlpha).roundToInt(), Color.red(textColor), Color.green(textColor), Color.blue(textColor))
             borderPaint.strokeWidth = 1.1f * density
-            
+
             val dateRect = RectF(row1StartX, topY, row1StartX + datePillW, topY + pHeight)
             pillPaint.color = pillFill
             borderPaint.color = pillStroke
@@ -640,7 +830,7 @@ object AtAGlanceRenderer {
             canvas.drawRoundRect(dateRect, pHeight / 2f, pHeight / 2f, borderPaint)
             val pBaseline = topY + padV - primaryPaint.fontMetrics.ascent
             canvas.drawText(m.primaryLine, row1StartX + padH, pBaseline, primaryPaint)
-            
+
             if (weatherText != null) {
                 val wLeft = row1StartX + datePillW + pillGap
                 val wRect = RectF(wLeft, topY, wLeft + weatherPillW, topY + pHeight)
@@ -653,7 +843,7 @@ object AtAGlanceRenderer {
                 }
                 canvas.drawText(weatherText, wLeft + padH + wIconSz + wIconGap, pBaseline, primaryPaint)
             }
-            
+
             val secText = m.secondaryLine
             if (!secText.isNullOrBlank()) {
                 secondaryPaint.textSize = secondarySp * density
@@ -682,7 +872,7 @@ object AtAGlanceRenderer {
 
             return m
         }
-        
+
         val primarySp = m.fittedPrimarySp
         val secondarySp = (primarySp * 0.76f).coerceIn(10.5f, 15.5f)
         val padV = if (style == AtAGlanceStyle.FROSTED_PILL) 7f * density else 2f * density
@@ -696,14 +886,19 @@ object AtAGlanceRenderer {
             )
             val corner = m.heightPx / 2f
             pillPaint.color = if (isLightInk) {
-                Color.argb((alphaInt * 0.42f).roundToInt(), 14, 16, 22)
+                Color.argb((alphaInt * AtAGlanceColorResolver.PILL_DARK_FILL_ALPHA).roundToInt(), 14, 16, 22)
             } else {
-                Color.argb((alphaInt * 0.58f).roundToInt(), 245, 247, 250)
+                Color.argb((alphaInt * AtAGlanceColorResolver.PILL_LIGHT_FILL_ALPHA).roundToInt(), 236, 239, 244)
             }
             canvas.drawRoundRect(rect, corner, corner, pillPaint)
 
             borderPaint.strokeWidth = 1.1f * density
-            borderPaint.color = Color.argb((alphaInt * 0.28f).roundToInt(), Color.red(textColor), Color.green(textColor), Color.blue(textColor))
+            val borderAlpha = if (isLightInk) {
+                AtAGlanceColorResolver.PILL_LIGHT_INK_BORDER_ALPHA
+            } else {
+                AtAGlanceColorResolver.PILL_DARK_INK_BORDER_ALPHA
+            }
+            borderPaint.color = Color.argb((alphaInt * borderAlpha).roundToInt(), Color.red(textColor), Color.green(textColor), Color.blue(textColor))
             canvas.drawRoundRect(rect, corner, corner, borderPaint)
         }
 

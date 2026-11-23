@@ -4,6 +4,8 @@ import android.animation.ValueAnimator
 import android.app.AlarmManager
 import android.app.KeyguardManager
 import android.app.NotificationManager
+import android.app.WallpaperColors
+import android.app.WallpaperManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -60,7 +62,7 @@ fun getSettingInt(ctx: Context, path: String, default: Int): Int {
     try {
         val cursor: Cursor? = ctx.contentResolver.query(
             Uri.parse("content://com.android.CaveArt.settings/$path"),
-            null, null, null
+            null, null, null, null
         )
         cursor?.use { if (it.moveToFirst()) res = it.getInt(0) }
     } catch (_: Exception) {}
@@ -170,9 +172,6 @@ class SpringFloat(
 class CaveArtXposedModule : XposedModule() {
 
     companion object {
-        const val NOTIF_CLOCK_TOP_DP = 84f
-        const val COMPACT_DATE_TOP_DP = 46f
-
         val customClockId = View.generateViewId()
         val customDateId = View.generateViewId()
         var topMarginPx = 300
@@ -216,12 +215,8 @@ class CaveArtXposedModule : XposedModule() {
             val showExternalDate = clock?.activeDatePolicy() == ClockDatePolicy.EXTERNAL_STANDARD &&
                 clock.clockConfig.atGlanceEnabled &&
                 date?.visibility == View.VISIBLE
-            if (!showExternalDate) return NOTIF_CLOCK_TOP_DP * density
-
-            val dateTop = COMPACT_DATE_TOP_DP * density
             val dateH = date?.measureCompactHeightPx() ?: (20f * density)
-            val gap = 10f * density
-            return max(NOTIF_CLOCK_TOP_DP * density, dateTop + dateH + gap)
+            return LockscreenSceneRenderer.computeCompactClockTopPx(showExternalDate, dateH, density)
         }
 
         fun refreshCachedLockEditSettings(ctx: Context) {
@@ -545,7 +540,6 @@ class CaveArtXposedModule : XposedModule() {
                 date.userTranslationX = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, dateX, dm)
                 date.isAttachedToClock = cfg.dateAttached
                 date.dateFormatIndex = cfg.dateFormat
-                date.setTextColor(cfg.color)
 
                 val dateSp = LockscreenSceneRenderer.computeDateSizeSp(cfg)
                 date.updateSizeFromClock(dateSp)
@@ -582,8 +576,6 @@ class CaveArtXposedModule : XposedModule() {
             val cfg = clock?.clockConfig ?: return
 
             val isExt = style?.datePolicy(cfg) == ClockDatePolicy.EXTERNAL_STANDARD && cfg.atGlanceEnabled
-            val isAttached = cfg.dateAttached && isExt
-
             val dateH = if (date != null && date.lastMeasuredH > 0f) {
                 date.lastMeasuredH
             } else {
@@ -591,36 +583,21 @@ class CaveArtXposedModule : XposedModule() {
                 val dateSp = LockscreenSceneRenderer.computeDateSizeSp(cfg)
                 AtAGlanceRenderer.measure(cfg, snapshot, density, dateSp, screenW).heightPx
             }
+            val clockH = clock?.lastContentHeightPx?.takeIf { it > 0f } ?: (100f * density)
+            val needsCollision = style != null && style.needsCollisionMap(cfg)
 
-            val strokeW = cfg.getFloat("adaptive_vector", "stroke_width", 8f)
-            val dateSp = LockscreenSceneRenderer.computeDateSizeSp(cfg)
-            val dynamicGapPx = ((strokeW * 0.4f) + (dateSp * 0.35f)) * density
-            val compoundOffsetPx = dateH + dynamicGapPx
-            val minSafeTopPx = 38f * density
-
-            if (isAttached) {
-                val needsCollision = style != null && style.needsCollisionMap(cfg)
-                effectiveTopMarginPx = if (needsCollision) {
-                    max(topMarginPx.toFloat(), minSafeTopPx + compoundOffsetPx).toInt()
-                } else {
-                    val idealAbovePx = topMarginPx - compoundOffsetPx
-                    if (idealAbovePx < minSafeTopPx) {
-                        topMarginPx
-                    } else {
-                        topMarginPx
-                    }
-                }
-                val idealAbovePx = effectiveTopMarginPx - compoundOffsetPx
-                effectiveDateTopMarginPx = if (idealAbovePx < minSafeTopPx && !needsCollision) {
-                    val clockH = clock?.lastContentHeightPx ?: (100f * density)
-                    (effectiveTopMarginPx + clockH + dynamicGapPx).toInt()
-                } else {
-                    max(minSafeTopPx, idealAbovePx).toInt()
-                }
-            } else {
-                effectiveTopMarginPx = topMarginPx
-                effectiveDateTopMarginPx = dateTopMarginPx
-            }
+            val (effClockTop, effDateTop) = LockscreenSceneRenderer.computeEffectiveMarginsPx(
+                clockTopMarginPx = topMarginPx,
+                dateTopMarginPx = dateTopMarginPx,
+                cfg = cfg,
+                isExternalDate = isExt,
+                needsCollisionMap = needsCollision,
+                dateHeightPx = dateH,
+                clockHeightPx = clockH,
+                density = density
+            )
+            effectiveTopMarginPx = effClockTop
+            effectiveDateTopMarginPx = effDateTop
         }
 
         fun sendUdfpsCoordinates(ctx: Context, centerX: Float, centerY: Float, radius: Float) {
@@ -1009,7 +986,7 @@ class CaveArtXposedModule : XposedModule() {
                                 format12Hour = "hh:mm"
                                 format24Hour = "HH:mm"
                                 clockConfig = initialConfig
-                                telemetryZoom = getSettingFloat(context, "telemetry_zoom", 1.10f)
+                                telemetryZoom = getSettingFloat(context, "telemetry_zoom", LockscreenLayoutSpec.DEFAULT_WALLPAPER_ZOOM)
                                 collisionMap = if (collMap.isNotEmpty()) collMap.split(",").mapNotNull { it.toFloatOrNull() }.toFloatArray() else null
                                 userTranslationX = initialXPx
                                 translationX = 0f
@@ -1029,7 +1006,6 @@ class CaveArtXposedModule : XposedModule() {
                                 isAttachedToClock = initialConfig.dateAttached
                                 dynamicDateSizeSp = dateSize
                                 setTextSize(TypedValue.COMPLEX_UNIT_SP, dateSize)
-                                setTextColor(initialConfig.color)
                                 userTranslationX = dateXPx
                                 translationX = dateXPx
                                 translationY = currentShiftY
@@ -1094,6 +1070,7 @@ class CaveArtXposedModule : XposedModule() {
                                 addAction("com.android.CaveArt.UPDATE_CLOCK_DEPTH")
                                 addAction("com.android.CaveArt.UPDATE_LAYER_STACK")
                                 addAction("com.android.CaveArt.UPDATE_CLOCK_GRAVITY")
+                                addAction(Intent.ACTION_WALLPAPER_CHANGED)
                                 addAction(AlarmManager.ACTION_NEXT_ALARM_CLOCK_CHANGED)
                                 addAction(NotificationManager.ACTION_INTERRUPTION_FILTER_CHANGED)
                                 addAction(Intent.ACTION_BATTERY_CHANGED)
@@ -1122,6 +1099,9 @@ class CaveArtXposedModule : XposedModule() {
                                                 cachedUdfpsRadius = r
                                             }
                                         }
+                                        Intent.ACTION_WALLPAPER_CHANGED -> {
+                                            myCustomDate.reloadWallpaperAppearanceAsync()
+                                        }
                                         "com.android.CaveArt.UPDATE_AT_A_GLANCE",
                                         AlarmManager.ACTION_NEXT_ALARM_CLOCK_CHANGED,
                                         NotificationManager.ACTION_INTERRUPTION_FILTER_CHANGED,
@@ -1148,13 +1128,17 @@ class CaveArtXposedModule : XposedModule() {
                                                     mapStr.split(",").mapNotNull { it.toFloatOrNull() }.toFloatArray()
                                                 } else null
                                             }
-                                            myCustomClock.telemetryZoom = getSettingFloat(context, "telemetry_zoom", 1.10f)
+                                            myCustomClock.telemetryZoom = getSettingFloat(
+                                                context, "telemetry_zoom", LockscreenLayoutSpec.DEFAULT_WALLPAPER_ZOOM
+                                            )
+                                            myCustomDate.reloadWallpaperAppearanceAsync()
                                             applyFullConfigToViews(context, rootLayout, classLoader, myCustomClock, myCustomDate, newCfg)
                                         }
                                         "com.android.CaveArt.UPDATE_TELEMETRY" -> {
                                             if (intent.hasExtra("telemetry_zoom")) {
                                                 myCustomClock.telemetryZoom = intent.getFloatExtra("telemetry_zoom", myCustomClock.telemetryZoom)
                                                 myCustomClock.invalidate()
+                                                myCustomDate.invalidate()
                                             }
                                         }
                                         "com.android.CaveArt.UPDATE_COLLISION_MAP" -> {
@@ -1184,9 +1168,12 @@ class CaveArtXposedModule : XposedModule() {
                                             if (intent.action == Intent.ACTION_SCREEN_ON) {
                                                 refreshCachedLockEditSettings(context)
                                                 scanHiddenSmartspaceOrOmniJaws(context, rootLayout)
+                                                myCustomDate.reloadWallpaperAppearanceAsync()
                                             }
                                             if (isEditModeActive) return
-                                            myCustomClock.telemetryZoom = getSettingFloat(context, "telemetry_zoom", 1.10f)
+                                            myCustomClock.telemetryZoom = getSettingFloat(
+                                                context, "telemetry_zoom", LockscreenLayoutSpec.DEFAULT_WALLPAPER_ZOOM
+                                            )
                                             val refreshed = loadClockKitConfigFromProvider(context)
                                             applyFullConfigToViews(context, rootLayout, classLoader, myCustomClock, myCustomDate, refreshed)
                                         }
@@ -1274,7 +1261,7 @@ class CaveArtXposedModule : XposedModule() {
                                 val clockHeight = clock.measureHeightForNotificationPush(hasNotifications)
 
                                 val lowestPoint = if (showExternalDate) {
-                                    val dateCurrentY = if (hasNotifications) COMPACT_DATE_TOP_DP * density else effectiveDateTopMarginPx.toFloat()
+                                    val dateCurrentY = if (hasNotifications) LockscreenLayoutSpec.COMPACT_DATE_TOP_DP * density else effectiveDateTopMarginPx.toFloat()
                                     val dateHeight = if (hasNotifications) {
                                         activeDate?.measureCompactHeightPx() ?: (24f * density)
                                     } else {
@@ -1285,7 +1272,7 @@ class CaveArtXposedModule : XposedModule() {
                                     clockCurrentY + clockHeight
                                 }.toInt()
 
-                                val targetMargin = lowestPoint + (26f * density).toInt()
+                                val targetMargin = lowestPoint + (LockscreenLayoutSpec.NOTIF_PUSH_MARGIN_DP * density).toInt()
 
                                 val idsToPush = listOf(
                                     OverlapPreventionHelper.nsslId,
@@ -1331,7 +1318,6 @@ class CaveArtXposedModule : XposedModule() {
         date.userTranslationX = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, dateX, dm)
         date.isAttachedToClock = cfg.dateAttached
         date.dateFormatIndex = cfg.dateFormat
-        date.setTextColor(cfg.color)
 
         val dateSp = LockscreenSceneRenderer.computeDateSizeSp(cfg)
         date.updateSizeFromClock(dateSp)
@@ -1386,16 +1372,19 @@ class IndependentDateView(context: Context) : View(context) {
     var dateFormatIndex = 0
     var isAttachedToClock = true
     var dynamicDateSizeSp = 17f
-    var compactDateSizeSp = 14.5f
+    var compactDateSizeSp = LockscreenLayoutSpec.COMPACT_DATE_SIZE_SP
     var overlapShiftY = 0f
 
     private var currentSizeSp = 17f
-    private var textColor = Color.WHITE
     private var snapshot = AtAGlanceSnapshot(dateText = "")
     var lastMeasuredW = 0f
     var lastMeasuredH = 0f
 
     private var torchCallback: CameraManager.TorchCallback? = null
+    private var colorsChangedListener: Any? = null
+    private var cachedWallpaperThumb: Bitmap? = null
+    private var cachedWallpaperColors: WallpaperColors? = null
+    private val screenLocBuf = IntArray(2)
 
     private val overlapSpring = SpringFloat(
         value = 0f,
@@ -1423,7 +1412,6 @@ class IndependentDateView(context: Context) : View(context) {
     }
 
     fun setTextColor(color: Int) {
-        textColor = color
         invalidate()
     }
 
@@ -1446,6 +1434,65 @@ class IndependentDateView(context: Context) : View(context) {
         requestLayout()
     }
 
+    private fun decodeSampledFd(fd: java.io.FileDescriptor, maxDim: Int): Bitmap? {
+        val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFileDescriptor(fd, null, opts)
+        if (opts.outWidth <= 0 || opts.outHeight <= 0) return null
+        var sample = 1
+        while ((opts.outWidth / sample) > maxDim && (opts.outHeight / sample) > maxDim) sample *= 2
+        opts.inSampleSize = sample
+        opts.inJustDecodeBounds = false
+        opts.inPreferredConfig = Bitmap.Config.ARGB_8888
+        return BitmapFactory.decodeFileDescriptor(fd, null, opts)
+    }
+
+    fun reloadWallpaperAppearanceAsync() {
+        Thread {
+            var thumb: Bitmap? = null
+            var wmColors: WallpaperColors? = null
+            try {
+                val wm = WallpaperManager.getInstance(context)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+                    wmColors = wm.getWallpaperColors(WallpaperManager.FLAG_LOCK)
+                        ?: wm.getWallpaperColors(WallpaperManager.FLAG_SYSTEM)
+                }
+
+                val isLive = wm.wallpaperInfo != null
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    val lockFd = try { wm.getWallpaperFile(WallpaperManager.FLAG_LOCK) } catch (_: Throwable) { null }
+                    if (lockFd != null) {
+                        lockFd.use { thumb = decodeSampledFd(it.fileDescriptor, 256) }
+                    } else if (!isLive) {
+                        val sysFd = try { wm.getWallpaperFile(WallpaperManager.FLAG_SYSTEM) } catch (_: Throwable) { null }
+                        sysFd?.use { thumb = decodeSampledFd(it.fileDescriptor, 256) }
+                    }
+                }
+
+                if (thumb == null && !isLive) {
+                    try {
+                        context.contentResolver.openFileDescriptor(
+                            Uri.parse("content://com.android.CaveArt.settings/lock_wallpaper"), "r"
+                        )?.use { pfd -> thumb = decodeSampledFd(pfd.fileDescriptor, 256) }
+                    } catch (_: Exception) {}
+                }
+            } catch (_: Throwable) {}
+
+            post {
+                if (!isAttachedToWindow) {
+                    thumb?.takeIf { !it.isRecycled }?.recycle()
+                    return@post
+                }
+                val old = cachedWallpaperThumb
+                cachedWallpaperThumb = thumb
+                cachedWallpaperColors = wmColors
+                if (old != null && old !== thumb && !old.isRecycled) {
+                    old.recycle()
+                }
+                invalidate()
+            }
+        }.start()
+    }
+
     fun setDateState(hasNotifications: Boolean) {
         val targetProgress = if (hasNotifications) 1f else 0f
         if (targetProgress == notificationProgress && notifAnimator?.isRunning != true) return
@@ -1465,13 +1512,13 @@ class IndependentDateView(context: Context) : View(context) {
 
     fun updatePosition() {
         val density = resources.displayMetrics.density
-        val targetYPx = CaveArtXposedModule.COMPACT_DATE_TOP_DP * density
+        val targetYPx = LockscreenLayoutSpec.COMPACT_DATE_TOP_DP * density
         val userY = CaveArtXposedModule.effectiveDateTopMarginPx.toFloat()
         val notifTargetTranslationY = targetYPx - userY
         val contentW = lastMeasuredW.coerceAtLeast(measuredWidth.toFloat())
         val halfWidth = contentW / 2f
         val screenW = CaveArtXposedModule.screenW
-        val sideSafeMargin = 18f * density
+        val sideSafeMargin = LockscreenLayoutSpec.SIDE_SAFE_MARGIN_DP * density
         val minAllowedTransX = (-(screenW / 2f) + halfWidth + sideSafeMargin).coerceAtMost(0f)
         val maxAllowedTransX = ((screenW / 2f) - halfWidth - sideSafeMargin).coerceAtLeast(0f)
 
@@ -1481,8 +1528,8 @@ class IndependentDateView(context: Context) : View(context) {
             val clock = CaveArtXposedModule.activeClock
             val clockY = CaveArtXposedModule.effectiveTopMarginPx.toFloat()
             val dateH = lastMeasuredH.coerceAtLeast(measuredHeight.toFloat()).coerceAtLeast(currentSizeSp * density * 1.2f)
-            val gap = 12f * density
-            val minSafeTop = 38f * density
+            val gap = LockscreenSceneRenderer.computeAttachedDateGapDp(clockConfig, currentSizeSp) * density
+            val minSafeTop = LockscreenLayoutSpec.MIN_SAFE_TOP_FALLBACK_DP * density
             val needsCollision = clock?.let { it.activeStyle().needsCollisionMap(it.clockConfig) } == true
 
             val idealAboveY = clockY - dateH - gap
@@ -1516,9 +1563,6 @@ class IndependentDateView(context: Context) : View(context) {
         val dateW = lastMeasuredW.coerceAtLeast(measuredWidth.toFloat())
         val dateCenterX = (CaveArtXposedModule.screenW / 2f) + userTranslationX
         val dateLeft = dateCenterX - dateW / 2f
-        val dateRight = dateCenterX + dateW / 2f
-        val dateTop = dateY
-        val dateBottom = dateTop + dateH
 
         val clockM = clock.measureForCurrentState(0f)
         val clockY = CaveArtXposedModule.effectiveTopMarginPx.toFloat()
@@ -1534,25 +1578,21 @@ class IndependentDateView(context: Context) : View(context) {
         val clockTop = if (hasDrawn) min(clock.lastRenderedBounds.top, fallbackTop) else fallbackTop
         val clockBottom = if (hasDrawn) max(clock.lastRenderedBounds.bottom, fallbackBottom) else fallbackBottom
 
-        val margin = 16f * density
-        val xOverlap = max(dateLeft, clockLeft) < min(dateRight, clockRight)
-        val yOverlap = (dateBottom + margin > clockTop) && (dateTop < clockBottom + margin)
+        val resolvedYDp = LockscreenSceneRenderer.resolveDetachedOverlapTargetYDp(
+            dateLeftDp = dateLeft / density,
+            dateTopDp = dateY / density,
+            dateWidthDp = dateW / density,
+            dateHeightDp = dateH / density,
+            clockLeftDp = clockLeft / density,
+            clockTopDp = clockTop / density,
+            clockWidthDp = (clockRight - clockLeft) / density,
+            clockHeightDp = (clockBottom - clockTop) / density,
+            minSafeTopDp = LockscreenLayoutSpec.MIN_SAFE_TOP_FALLBACK_DP,
+            maxSafeDateYDp = (CaveArtXposedModule.screenH / density) - LockscreenLayoutSpec.SYSTEMUI_BOTTOM_SAFE_DP
+        )
 
-        if (xOverlap && yOverlap) {
-            val clockCenterY = (clockTop + clockBottom) / 2f
-            val dateCenterY = (dateTop + dateBottom) / 2f
-            val minSafeTop = 38f * density
-            val maxSafe = CaveArtXposedModule.screenH - (120f * density)
-
-            val targetY = if (dateCenterY < clockCenterY) {
-                val candidateAbove = clockTop - dateH - margin
-                if (candidateAbove >= minSafeTop) candidateAbove else clockBottom + margin
-            } else {
-                val candidateBelow = clockBottom + margin
-                if (candidateBelow <= maxSafe) candidateBelow else clockTop - dateH - margin
-            }
-
-            val shiftNeeded = targetY - dateY
+        if (resolvedYDp != null) {
+            val shiftNeeded = (resolvedYDp * density) - dateY
             if (animated) {
                 overlapSpring.animateTo(shiftNeeded)
             } else {
@@ -1597,10 +1637,9 @@ class IndependentDateView(context: Context) : View(context) {
         clockConfig = cfg
         val dateSp = LockscreenSceneRenderer.computeDateSizeSp(cfg)
         dynamicDateSizeSp = dateSp
-        compactDateSizeSp = 14.5f
+        compactDateSizeSp = LockscreenLayoutSpec.COMPACT_DATE_SIZE_SP
         applyCurrentTextSize()
 
-        setTextColor(cfg.color)
         dateFormatIndex = cfg.dateFormat
         isAttachedToClock = cfg.dateAttached
 
@@ -1617,6 +1656,21 @@ class IndependentDateView(context: Context) : View(context) {
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         refreshSettings()
+        reloadWallpaperAppearanceAsync()
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1 && colorsChangedListener == null) {
+            try {
+                val wm = WallpaperManager.getInstance(context)
+                val listener = WallpaperManager.OnColorsChangedListener { _, which ->
+                    if ((which and (WallpaperManager.FLAG_LOCK or WallpaperManager.FLAG_SYSTEM)) != 0) {
+                        reloadWallpaperAppearanceAsync()
+                    }
+                }
+                colorsChangedListener = listener
+                wm.addOnColorsChangedListener(listener, Handler(Looper.getMainLooper()))
+            } catch (_: Throwable) {}
+        }
+
         if (torchCallback == null) {
             try {
                 val cm = context.getSystemService(Context.CAMERA_SERVICE) as? CameraManager
@@ -1638,6 +1692,20 @@ class IndependentDateView(context: Context) : View(context) {
             } catch (_: Throwable) {}
         }
         torchCallback = null
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            (colorsChangedListener as? WallpaperManager.OnColorsChangedListener)?.let { listener ->
+                try {
+                    WallpaperManager.getInstance(context).removeOnColorsChangedListener(listener)
+                } catch (_: Throwable) {}
+            }
+        }
+        colorsChangedListener = null
+
+        val oldThumb = cachedWallpaperThumb
+        cachedWallpaperThumb = null
+        oldThumb?.takeIf { !it.isRecycled }?.recycle()
+
         super.onDetachedFromWindow()
     }
 
@@ -1646,6 +1714,9 @@ class IndependentDateView(context: Context) : View(context) {
         if (visibility == View.VISIBLE) {
             updateTimeDirectly()
             checkAndResolveOverlap(animated = false)
+            if (cachedWallpaperThumb == null) {
+                reloadWallpaperAppearanceAsync()
+            }
         }
     }
 
@@ -1666,16 +1737,37 @@ class IndependentDateView(context: Context) : View(context) {
     override fun onDraw(canvas: Canvas) {
         if (!clockConfig.atGlanceEnabled || width <= 0 || height <= 0) return
         val density = resources.displayMetrics.density
-        AtAGlanceRenderer.draw(
+        val sw = CaveArtXposedModule.screenW
+        val sh = CaveArtXposedModule.screenH
+        val zoom = CaveArtXposedModule.activeClock?.telemetryZoom ?: LockscreenLayoutSpec.DEFAULT_WALLPAPER_ZOOM
+
+        val sampleCX: Float
+        val sampleTopY: Float
+        if (isLaidOut && width > 0 && height > 0) {
+            getLocationOnScreen(screenLocBuf)
+            sampleCX = screenLocBuf[0] + (width / 2f)
+            sampleTopY = screenLocBuf[1].toFloat()
+        } else {
+            sampleCX = (sw / 2f) + translationX
+            sampleTopY = CaveArtXposedModule.effectiveDateTopMarginPx + translationY
+        }
+
+        AtAGlanceRenderer.drawAuto(
             canvas = canvas,
             centerX = width / 2f,
             topY = 0f,
             config = clockConfig,
             snapshot = snapshot,
             density = density,
-            textColor = textColor,
             dateSizeSp = currentSizeSp,
-            maxScreenWidthPx = CaveArtXposedModule.screenW
+            maxScreenWidthPx = sw,
+            wallpaperBitmap = cachedWallpaperThumb,
+            screenW = sw,
+            screenH = sh,
+            wallpaperZoom = zoom,
+            fallbackColors = cachedWallpaperColors,
+            sampleCenterX = sampleCX,
+            sampleTopY = sampleTopY
         )
     }
 }
@@ -1684,7 +1776,7 @@ class VectorTextClock(context: Context) : TextClock(context) {
     var clockConfig: ClockKitConfig = ClockKitConfig()
     var collisionMap: FloatArray? = null
     var userTranslationX = 0f
-    var telemetryZoom = 1.10f
+    var telemetryZoom = LockscreenLayoutSpec.DEFAULT_WALLPAPER_ZOOM
 
     var notificationProgress = 0f
     private var notificationAnimator: ValueAnimator? = null
@@ -1822,8 +1914,8 @@ class VectorTextClock(context: Context) : TextClock(context) {
                 val file = File(path)
                 if (file.exists() && file.length() > 0) {
                     try {
-                        depthMaskBitmap = BitmapFactory.decodeFile(file.absolutePath)
-                        if (depthMaskBitmap != null) break
+                        decoded = BitmapFactory.decodeFile(file.absolutePath)
+                        if (decoded != null) break
                     } catch (_: Exception) {}
                 }
             }
@@ -1867,7 +1959,7 @@ class VectorTextClock(context: Context) : TextClock(context) {
 
     fun refreshSettings() {
         clockConfig = loadClockKitConfigFromProvider(context)
-        telemetryZoom = getSettingFloat(context, "telemetry_zoom", 1.10f)
+        telemetryZoom = getSettingFloat(context, "telemetry_zoom", LockscreenLayoutSpec.DEFAULT_WALLPAPER_ZOOM)
 
         val mapStr = getSettingString(context, "clock_collision_map", "")
         collisionMap = if (mapStr.isNotEmpty()) {
@@ -1987,7 +2079,7 @@ class VectorTextClock(context: Context) : TextClock(context) {
         )
 
         val halfClockW = measureResult.contentWidthPx / 2f
-        val sideMargin = 18f * density
+        val sideMargin = LockscreenLayoutSpec.SIDE_SAFE_MARGIN_DP * density
         val minAllowedTransX = (-(CaveArtXposedModule.screenW / 2f) + halfClockW + sideMargin).coerceAtMost(0f)
         val maxAllowedTransX = ((CaveArtXposedModule.screenW / 2f) - halfClockW - sideMargin).coerceAtLeast(0f)
         val safeUserX = userTranslationX.coerceIn(minAllowedTransX, maxAllowedTransX)

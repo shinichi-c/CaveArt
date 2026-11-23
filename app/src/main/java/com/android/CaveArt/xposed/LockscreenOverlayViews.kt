@@ -339,7 +339,8 @@ internal class LockscreenPreviewCanvasView(ctx: Context) : View(ctx) {
             density = density,
             statusBarPadPx = getStatusBarPadPx(),
             navBarPadPx = getNavBarPadPx(),
-            resolveDetachedOverlap = resolveOverlap
+            resolveDetachedOverlap = resolveOverlap,
+            drawnClockBoundsPx = if (resolveOverlap) clockBounds else null
         )
 
     private val pinchDetector = ScaleGestureDetector(
@@ -403,7 +404,7 @@ internal class LockscreenPreviewCanvasView(ctx: Context) : View(ctx) {
                 val scaledDateBottom = ((cfg.dateY * density) + glanceM.heightPx) * previewScale
                 val scaledDateCenterX = ((CaveArtXposedModule.screenW / 2f) + cfg.dateX * density) * previewScale
                 val scaledDateHalfW = (glanceM.widthPx / 2f) * previewScale
-                val hitPad = dpf(14f) * previewScale
+                val hitPad = dpf(LockscreenLayoutSpec.DATE_HIT_PAD_DP) * previewScale
 
                 val hitDate = extDate && !cfg.dateAttached &&
                     event.y in (scaledDateTop - hitPad)..(scaledDateBottom + hitPad) &&
@@ -434,7 +435,7 @@ internal class LockscreenPreviewCanvasView(ctx: Context) : View(ctx) {
                         val clamped = clamp(cfg.copy(clockX = rawClockX, clockY = rawClockY), resolveOverlap = false)
                         rawClockX = clamped.clockX
                         rawClockY = clamped.clockY
-                        val snapThresholdDp = (CaveArtXposedModule.screenW * 0.025f) / density
+                        val snapThresholdDp = (CaveArtXposedModule.screenW * LockscreenLayoutSpec.MAGNETIC_SNAP_WIDTH_RATIO) / density
                         val snapped = abs(clamped.clockX) < snapThresholdDp
                         if (snapped && !isSnappedCenter) performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
                         isSnappedCenter = snapped
@@ -447,7 +448,7 @@ internal class LockscreenPreviewCanvasView(ctx: Context) : View(ctx) {
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 if (isCardDragging) {
-                    val snapThresholdDp = (CaveArtXposedModule.screenW * 0.025f) / density
+                    val snapThresholdDp = (CaveArtXposedModule.screenW * LockscreenLayoutSpec.MAGNETIC_SNAP_WIDTH_RATIO) / density
                     val snapClockX = if (abs(cfg.clockX) < snapThresholdDp) 0f else cfg.clockX
                     val snapDateX = if (!cfg.dateAttached && abs(cfg.dateX) < snapThresholdDp) 0f else cfg.dateX
                     onConfigChanged(clamp(cfg.copy(clockX = snapClockX, dateX = snapDateX), resolveOverlap = true))

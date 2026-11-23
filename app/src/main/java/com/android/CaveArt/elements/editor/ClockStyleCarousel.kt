@@ -25,11 +25,8 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.lerp
 import com.android.CaveArt.clockkit.*
-import com.android.CaveArt.layer.LayerCompositor
-import com.android.CaveArt.layer.LockscreenLayerStack
 import kotlinx.coroutines.launch
 import kotlin.math.absoluteValue
-import kotlin.math.max
 
 @Composable
 fun ClockStyleCarousel(
@@ -66,8 +63,8 @@ fun ClockStyleCarousel(
     val realW = displayGeometry.widthPx
     val realH = displayGeometry.heightPx
     val densityVal = displayGeometry.density
-    val statusBarDp = displayGeometry.statusBarHeightPx / densityVal
-    val minSafeYDp = statusBarDp + (displayGeometry.statusBarHeightPx * 0.12f / densityVal)
+    val statusBarPxInt = displayGeometry.statusBarHeightPx.toInt()
+    val navBarPxInt = displayGeometry.navBarHeightPx.toInt()
     val cardCornerRadiusDp = (displayGeometry.physicalCornerRadiusPx / densityVal * 0.90f).coerceAtLeast(22f)
 
     BoxWithConstraints(
@@ -95,19 +92,19 @@ fun ClockStyleCarousel(
             val isCentered = pageIndex == pagerState.currentPage
             val cardShape = RoundedCornerShape(cardCornerRadiusDp.dp)
 
-            val cardConfig = remember(currentConfig, style.id) {
-                currentConfig.copy(styleId = style.id)
+            val cardConfig = remember(currentConfig, style.id, realW, realH, densityVal) {
+                LockscreenSceneRenderer.syncAttachedDatePosition(
+                    context = context,
+                    cfg = currentConfig.copy(styleId = style.id),
+                    statusBarPadPx = statusBarPxInt,
+                    density = densityVal,
+                    screenW = realW,
+                    screenH = realH,
+                    navBarPadPx = navBarPxInt
+                )
             }
             val glanceSnapshot = remember(cardConfig, dateText, timeString) {
                 AtAGlanceDataCollector.collect(context, cardConfig)
-            }
-            val cardLayerStack = remember(style.id, cardConfig.isDepthEnabled, cardConfig.depthOcclusionLimit) {
-                LockscreenLayerStack().apply {
-                    setDepthClockActive(cardConfig.isDepthEnabled)
-                    depthOcclusionLimit = cardConfig.depthOcclusionLimit
-                    backgroundLayer.isVisible = true
-                    subjectLayer.isVisible = true
-                }
             }
 
             val needsContinuous = style.needsContinuousFrames(cardConfig, 0f) && isCentered
@@ -153,113 +150,30 @@ fun ClockStyleCarousel(
                 colors = CardDefaults.cardColors(containerColor = Color.Black)
             ) {
                 Canvas(modifier = Modifier.fillMaxSize()) {
-                    val previewScale = size.width / realW
                     val frameNow = if (needsContinuous) liveMillis else System.currentTimeMillis()
-
                     drawIntoCanvas { canvas ->
-                        val nc = canvas.nativeCanvas
-                        nc.save()
-                        nc.scale(previewScale, previewScale)
-
-                        var capturedFrame: ClockFrameContext? = null
-
-                        previewOriginal?.let { bmp ->
-                            LayerCompositor.composite(
-                                canvas = nc,
+                        LockscreenSceneRenderer.drawScene(
+                            context = context,
+                            canvas = canvas.nativeCanvas,
+                            viewW = size.width,
+                            params = LockscreenSceneParams(
                                 screenW = realW,
                                 screenH = realH,
-                                originalBmp = bmp,
-                                maskBmp = previewMask,
-                                zoom = liveWallpaperZoom,
-                                stack = cardLayerStack,
-                                focusedLayerType = null
-                            ) { targetCanvas ->
-                                val showExternalDate = style.datePolicy(cardConfig) == ClockDatePolicy.EXTERNAL_STANDARD && cardConfig.atGlanceEnabled
-                                if (showExternalDate) {
-                                    val safeDateYDp = if (cardConfig.dateAttached) {
-                                        val mCtx = ClockMeasureContext(
-                                            context = context,
-                                            screenW = realW,
-                                            screenH = realH,
-                                            density = densityVal,
-                                            typeface = customTypeface,
-                                            timeString = timeString.ifEmpty { "00:00" },
-                                            dateString = dateText
-                                        )
-                                        val measured = style.measure(mCtx, cardConfig)
-                                        val glanceM = AtAGlanceRenderer.measure(cardConfig, glanceSnapshot, densityVal, dateSizeDp, realW)
-                                        val dateLineHDp = glanceM.heightPx / densityVal
-                                        val strokeW = cardConfig.getFloat("adaptive_vector", "stroke_width", 8f)
-                                        val gapDp = (strokeW * 0.4f) + (dateSizeDp * 0.35f)
-                                        val idealAboveDp = cardConfig.clockY - dateLineHDp - gapDp
-                                        if (idealAboveDp < minSafeYDp && !style.needsCollisionMap(cardConfig)) {
-                                            cardConfig.clockY + (measured.contentHeightPx / densityVal) + gapDp
-                                        } else {
-                                            max(minSafeYDp, idealAboveDp)
-                                        }
-                                    } else {
-                                        cardConfig.dateY
-                                    }
-
-                                    val nativeDateX = (realW / 2f) + ((if (cardConfig.dateAttached) cardConfig.clockX else cardConfig.dateX) * densityVal)
-                                    val nativeDateY = safeDateYDp * densityVal
-                                    AtAGlanceRenderer.draw(
-                                        canvas = targetCanvas,
-                                        centerX = nativeDateX,
-                                        topY = nativeDateY,
-                                        config = cardConfig,
-                                        snapshot = glanceSnapshot,
-                                        density = densityVal,
-                                        textColor = cardConfig.color,
-                                        dateSizeSp = dateSizeDp,
-                                        maxScreenWidthPx = realW
-                                    )
-                                }
-
-                                if (timeString.isNotEmpty()) {
-                                    val fCtx = ClockFrameContext(
-                                        context = context,
-                                        screenW = realW,
-                                        screenH = realH,
-                                        density = densityVal,
-                                        clockCenterX = (realW / 2f) + (cardConfig.clockX * densityVal),
-                                        clockTopY = cardConfig.clockY * densityVal,
-                                        timeMillis = frameNow,
-                                        timeString = timeString,
-                                        dateString = dateText,
-                                        is24Hour = android.text.format.DateFormat.is24HourFormat(context),
-                                        typeface = customTypeface,
-                                        notificationProgress = 0f,
-                                        collisionMap = collisionMapArray,
-                                        depthMask = previewMask,
-                                        rawDepthMap = rawDepthMap,
-                                        zoomFactor = liveWallpaperZoom
-                                    )
-                                    capturedFrame = fCtx
-
-                                    val (_, elevate) = ClockKitEngine.renderForPreview(
-                                        canvas = targetCanvas,
-                                        style = style,
-                                        frame = fCtx,
-                                        config = cardConfig
-                                    )
-                                    if (cardLayerStack.isDepthEnabled && previewMask != null) {
-                                        cardLayerStack.clockLayer.zIndex = if (elevate) 4 else 2
-                                    }
-                                }
-                            }
-
-                            capturedFrame?.let { fCtx ->
-                                ClockKitEngine.renderPreviewOverlay(
-                                    canvas = nc,
-                                    style = style,
-                                    frame = fCtx,
-                                    config = cardConfig
-                                )
-                            }
-                        }
-
-                        nc.restore()
+                                density = densityVal,
+                                wallpaperBitmap = previewOriginal,
+                                depthMaskBitmap = previewMask,
+                                rawDepthBitmap = rawDepthMap,
+                                collisionMap = collisionMapArray,
+                                config = cardConfig,
+                                isDepthEnabled = cardConfig.isDepthEnabled,
+                                wallpaperZoom = liveWallpaperZoom,
+                                showClock = timeString.isNotEmpty(),
+                                timeMillis = frameNow,
+                                is24Hour = android.text.format.DateFormat.is24HourFormat(context),
+                                customTypeface = customTypeface,
+                                atGlanceSnapshot = glanceSnapshot
+                            )
+                        )
                     }
                 }
             }

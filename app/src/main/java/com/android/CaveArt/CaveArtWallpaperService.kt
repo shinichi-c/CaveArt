@@ -17,6 +17,7 @@ import androidx.dynamicanimation.animation.SpringForce
 import com.android.CaveArt.animations.AnimationFactory
 import com.android.CaveArt.animations.AnimationStyle
 import com.android.CaveArt.animations.WallpaperAnimation
+import com.android.CaveArt.clockkit.AtAGlanceColorResolver
 import kotlinx.coroutines.*
 import kotlin.math.max
 import kotlin.math.sin
@@ -27,13 +28,13 @@ class CaveArtWallpaperService : WallpaperService() {
     inner class CaveArtEngine : Engine(), Choreographer.FrameCallback {
         private val scope = CoroutineScope(Dispatchers.IO + Job())
         private var config = LiveWallpaperConfig()
-        
+
         private var originalBitmap: Bitmap? = null
-        private var maskBitmap: Bitmap? = null 
-        
+        private var maskBitmap: Bitmap? = null
+
         private var currentAnimation: WallpaperAnimation = AnimationFactory.getAnimation(AnimationStyle.NANO_ASSEMBLY)
         private var currentAnimationStyle: String? = null
-        
+
         private val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
         private val maskXferPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_IN)
@@ -41,13 +42,13 @@ class CaveArtWallpaperService : WallpaperService() {
         private val clipPath = Path()
         private val screenShapeRect = RectF()
         private var cachedGeometry: UnifiedGeometry? = null
-        
+
         private val _bodyMatrix = Matrix()
 
         private var isVisible = false
         private var lastFrameTimeNanos = 0L
         private val choreographer = Choreographer.getInstance()
-        
+
         private var unlockProgress = 0.0f
         private val unlockValueHolder = FloatValueHolder(0.0f)
         private var unlockSpring: SpringAnimation? = null
@@ -56,7 +57,6 @@ class CaveArtWallpaperService : WallpaperService() {
             override fun onReceive(context: Context?, intent: Intent?) {
                 when (intent?.action) {
                     Intent.ACTION_USER_PRESENT -> {
-                        
                         startUnlockAnimation()
                         currentAnimation.onUnlock()
                         if (originalBitmap == null) reloadConfig()
@@ -94,7 +94,7 @@ class CaveArtWallpaperService : WallpaperService() {
 
         private fun updateSpringParameters() {
             val s = unlockSpring?.spring ?: return
-            
+
             val durationRatio = ((config.transitionDurationMs - 400f) / 800f).coerceIn(0f, 1f)
             val targetStiffness = 380f - (durationRatio * 240f)
 
@@ -128,7 +128,14 @@ class CaveArtWallpaperService : WallpaperService() {
                     val tertiary = Color.valueOf(themePalette.tonalSpot.getOrElse(2) { config.backgroundColor })
 
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                        WallpaperColors(primary, secondary, tertiary)
+                        val bgLum = AtAGlanceColorResolver.colorLuminance(config.backgroundColor)
+                        val hints = when {
+                            bgLum >= AtAGlanceColorResolver.LIGHT_WALLPAPER_LUM_THRESHOLD ->
+                                WallpaperColors.HINT_SUPPORTS_DARK_TEXT
+                            bgLum <= 0.25f -> WallpaperColors.HINT_SUPPORTS_DARK_THEME
+                            else -> 0
+                        }
+                        WallpaperColors(primary, secondary, tertiary, hints)
                     } else {
                         WallpaperColors(primary, secondary, null)
                     }
@@ -152,7 +159,7 @@ class CaveArtWallpaperService : WallpaperService() {
                 addAction(Intent.ACTION_SCREEN_OFF)
                 addAction(Intent.ACTION_SCREEN_ON)
             }
-            
+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)
             } else {
@@ -169,7 +176,6 @@ class CaveArtWallpaperService : WallpaperService() {
                     resetToLockState()
                     currentAnimation.onLock()
                 } else {
-                    
                     unlockSpring?.cancel()
                     unlockValueHolder.value = 1.0f
                     unlockProgress = 1.0f
@@ -198,7 +204,7 @@ class CaveArtWallpaperService : WallpaperService() {
 
         override fun doFrame(frameTimeNanos: Long) {
             if (!isVisible) return
-            
+
             val dt = ((frameTimeNanos - lastFrameTimeNanos) / 1_000_000_000f).coerceIn(0.001f, 0.05f)
             lastFrameTimeNanos = frameTimeNanos
 
@@ -240,7 +246,7 @@ class CaveArtWallpaperService : WallpaperService() {
                         } else {
                             val timeSeconds = System.nanoTime() / 1_000_000_000f
                             val breathY = sin(timeSeconds * 1.2f) * 6f * (1f - t)
-                            
+
                             geo.setupTransitionMatrices(
                                 imgW = bmp.width,
                                 imgH = bmp.height,
@@ -252,7 +258,7 @@ class CaveArtWallpaperService : WallpaperService() {
                                 outScreenShapeRect = screenShapeRect
                             )
                             _bodyMatrix.postTranslate(0f, breathY)
-                            
+
                             val bgAlpha = ((1f - t) * 255).toInt().coerceIn(0, 255)
                             val dynamicBgColor = (bgAlpha shl 24) or (config.backgroundColor and 0x00FFFFFF)
                             canvas.drawColor(dynamicBgColor)
@@ -271,12 +277,12 @@ class CaveArtWallpaperService : WallpaperService() {
                             canvas.clipPath(clipPath)
                             canvas.drawBitmap(bmp, _bodyMatrix, bitmapPaint)
                             canvas.restore()
-                            
+
                             if (config.is3DPopEnabled && geo.is3DPopEligible && maskBitmap != null && t < 0.6f) {
                                 val popAlpha = ((1f - (t / 0.6f)) * 255).toInt().coerceIn(0, 255)
                                 bitmapPaint.alpha = popAlpha
                                 val layerId = canvas.saveLayer(0f, 0f, cW, cH, null)
-                                
+
                                 canvas.save()
                                 val breakoutCutoffY = screenShapeRect.top + (screenShapeRect.height() * 0.30f)
                                 canvas.clipRect(0f, 0f, cW, breakoutCutoffY)
@@ -296,8 +302,8 @@ class CaveArtWallpaperService : WallpaperService() {
                         canvas.drawBitmap(bmp, _bodyMatrix, bitmapPaint)
                     }
                 }
-            } catch (e: Exception) { 
-                e.printStackTrace() 
+            } catch (e: Exception) {
+                e.printStackTrace()
             } finally {
                 if (canvas != null) try { holder.unlockCanvasAndPost(canvas) } catch (e: Exception) {}
             }
@@ -307,10 +313,10 @@ class CaveArtWallpaperService : WallpaperService() {
             val bmp = originalBitmap ?: return
             val frame = surfaceHolder?.surfaceFrame ?: return
             if (frame.width() <= 0 || frame.height() <= 0) return
-            
+
             cachedGeometry = ShapeEffectHelper.getUnifiedGeometry(
-                bmp.width, bmp.height, 
-                frame.width().toFloat(), frame.height().toFloat(), 
+                bmp.width, bmp.height,
+                frame.width().toFloat(), frame.height().toFloat(),
                 maskBitmap, config
             )
         }
@@ -318,7 +324,7 @@ class CaveArtWallpaperService : WallpaperService() {
         fun reloadConfig() {
             scope.launch {
                 val newConfig = WallpaperConfigManager.loadConfig(applicationContext)
-                
+
                 withContext(Dispatchers.Main) {
                     if (currentAnimationStyle != newConfig.animationStyle) {
                         currentAnimationStyle = newConfig.animationStyle
@@ -328,32 +334,32 @@ class CaveArtWallpaperService : WallpaperService() {
                     config = newConfig
                     updateSpringParameters()
                 }
-                
+
                 var finalSampleSize = 1
                 val loadedOriginal = try {
                     if (!config.imagePath.isNullOrEmpty()) {
                         val metrics = resources.displayMetrics
                         val maxDim = max(metrics.widthPixels, metrics.heightPixels).coerceAtLeast(1080)
-                        
+
                         val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                         BitmapFactory.decodeFile(config.imagePath, options)
-                        
+
                         val halfH = options.outHeight / 2
                         val halfW = options.outWidth / 2
                         while ((halfH / finalSampleSize) >= maxDim && (halfW / finalSampleSize) >= maxDim) {
                             finalSampleSize *= 2
                         }
-                        
+
                         options.inSampleSize = finalSampleSize
                         options.inJustDecodeBounds = false
                         options.inPreferredConfig = Bitmap.Config.ARGB_8888
-                        
+
                         BitmapFactory.decodeFile(config.imagePath, options)
                     } else if (config.resourceId != 0) {
                         BitmapHelper.decodeSampledBitmapFromResource(resources, config.resourceId, 2500)
                     } else null
-                } catch (e: Exception) { 
-                    null 
+                } catch (e: Exception) {
+                    null
                 }
 
                 var loadedMask = try {
@@ -364,8 +370,8 @@ class CaveArtWallpaperService : WallpaperService() {
                         options.inPreferredConfig = Bitmap.Config.ARGB_8888
                         BitmapFactory.decodeFile(config.cutoutPath, options)
                     } else null
-                } catch (e: Exception) { 
-                    null 
+                } catch (e: Exception) {
+                    null
                 }
 
                 if (loadedMask != null && loadedOriginal != null) {
@@ -383,7 +389,7 @@ class CaveArtWallpaperService : WallpaperService() {
                     maskBitmap?.recycle()
                     originalBitmap = loadedOriginal
                     maskBitmap = loadedMask
-                    
+
                     notifyColorsChanged()
                     updateGeometry()
                     if (isVisible) draw()

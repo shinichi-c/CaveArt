@@ -21,7 +21,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.outlined.*
-import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -143,8 +142,8 @@ fun ClockStudio(
                         state.layerStack.depthOcclusionLimit = it
                         state.updateConfig { cfg -> cfg.copy(depthOcclusionLimit = it) }
                     },
-                    range = 0.10f..0.85f,
-                    formatDisplay = { "${(it * 100).toInt()}%" }
+                    range = LockscreenControlSpec.OCCLUSION_RANGE,
+                    formatDisplay = LockscreenControlSpec::formatPercent
                 ),
                 LayerAction(
                     id = "all_zoom",
@@ -153,8 +152,8 @@ fun ClockStudio(
                     toolType = ContextualToolType.SLIDER,
                     getVal = { state.liveWallpaperZoom.floatValue },
                     setVal = { state.liveWallpaperZoom.floatValue = it },
-                    range = 1.0f..1.35f,
-                    formatDisplay = { String.format("%.2fx", it) }
+                    range = LockscreenControlSpec.ZOOM_RANGE,
+                    formatDisplay = LockscreenControlSpec::formatZoom
                 )
             )
             ActiveLayerTab.BACKGROUND -> listOf(
@@ -165,11 +164,8 @@ fun ClockStudio(
                     toolType = ContextualToolType.SLIDER,
                     getVal = { state.layerStack.backgroundLayer.structure },
                     setVal = { state.layerStack.backgroundLayer.structure = it },
-                    range = -1.0f..1.0f,
-                    formatDisplay = {
-                        val v = (it * 50).toInt()
-                        if (v > 0) "+$v" else "$v"
-                    }
+                    range = LockscreenControlSpec.VIBRANCE_RANGE,
+                    formatDisplay = LockscreenControlSpec::formatVibrance
                 ),
                 LayerAction(
                     id = "bg_opacity",
@@ -178,8 +174,8 @@ fun ClockStudio(
                     toolType = ContextualToolType.SLIDER,
                     getVal = { state.layerStack.backgroundLayer.opacity },
                     setVal = { state.layerStack.backgroundLayer.opacity = it },
-                    range = 0.10f..1.0f,
-                    formatDisplay = { "${(it * 100).toInt()}%" }
+                    range = LockscreenControlSpec.OPACITY_RANGE,
+                    formatDisplay = LockscreenControlSpec::formatPercent
                 )
             )
             ActiveLayerTab.CLOCK -> buildList {
@@ -227,8 +223,8 @@ fun ClockStudio(
                             toolType = ContextualToolType.SLIDER,
                             getVal = { state.clockKitConfig.gravityIntensity },
                             setVal = { v -> state.updateConfig { it.copy(gravityIntensity = v) } },
-                            range = 0.2f..2.5f,
-                            formatDisplay = { String.format("%.1fx", it) }
+                            range = LockscreenControlSpec.GRAVITY_INTENSITY_RANGE,
+                            formatDisplay = LockscreenControlSpec::formatGravity
                         )
                     )
                 }
@@ -241,8 +237,8 @@ fun ClockStudio(
                     toolType = ContextualToolType.SLIDER,
                     getVal = { state.layerStack.subjectLayer.opacity },
                     setVal = { state.layerStack.subjectLayer.opacity = it },
-                    range = 0.10f..1.0f,
-                    formatDisplay = { "${(it * 100).toInt()}%" }
+                    range = LockscreenControlSpec.OPACITY_RANGE,
+                    formatDisplay = LockscreenControlSpec::formatPercent
                 )
             )
             ActiveLayerTab.DEPTH -> listOf(
@@ -257,7 +253,7 @@ fun ClockStudio(
                         state.layerStack.depthVisionLayer.isVisible = it > 0.05f
                     },
                     range = 0.0f..1.0f,
-                    formatDisplay = { "${(it * 100).toInt()}%" }
+                    formatDisplay = LockscreenControlSpec::formatPercent
                 ),
                 LayerAction(
                     id = "depth_occlusion",
@@ -269,8 +265,8 @@ fun ClockStudio(
                         state.layerStack.depthOcclusionLimit = it
                         state.updateConfig { cfg -> cfg.copy(depthOcclusionLimit = it) }
                     },
-                    range = 0.10f..0.85f,
-                    formatDisplay = { "${(it * 100).toInt()}%" }
+                    range = LockscreenControlSpec.OCCLUSION_RANGE,
+                    formatDisplay = LockscreenControlSpec::formatPercent
                 )
             )
         }

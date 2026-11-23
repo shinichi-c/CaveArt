@@ -82,20 +82,26 @@ internal object LockscreenOverlayPanels {
     } catch (_: Exception) { null }
 
     fun loadLockWallpaperBitmap(context: Context): Bitmap? {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            try {
+                val wm = WallpaperManager.getInstance(context)
+                val lockFd = wm.getWallpaperFile(WallpaperManager.FLAG_LOCK)
+                if (lockFd != null) {
+                    lockFd.use { pfd -> decodeSampledFd(pfd.fileDescriptor, 1280)?.let { return it } }
+                } else if (wm.wallpaperInfo == null) {
+                    wm.getWallpaperFile(WallpaperManager.FLAG_SYSTEM)?.use { pfd ->
+                        decodeSampledFd(pfd.fileDescriptor, 1280)?.let { return it }
+                    }
+                }
+            } catch (_: Throwable) {}
+        }
+
         try {
             context.contentResolver.openFileDescriptor(
                 Uri.parse("content://com.android.CaveArt.settings/lock_wallpaper"), "r"
             )?.use { pfd -> decodeSampledFd(pfd.fileDescriptor, 1280)?.let { return it } }
         } catch (_: Exception) {}
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            try {
-                val wm = WallpaperManager.getInstance(context)
-                val fd = wm.getWallpaperFile(WallpaperManager.FLAG_LOCK)
-                    ?: wm.getWallpaperFile(WallpaperManager.FLAG_SYSTEM)
-                fd?.use { pfd -> decodeSampledFd(pfd.fileDescriptor, 1280)?.let { return it } }
-            } catch (_: Throwable) {}
-        }
         return null
     }
 
@@ -135,28 +141,32 @@ internal object LockscreenOverlayPanels {
             EditorLayerScope.ALL -> listOf(
                 OverlayAction(
                     "all_occlusion", "Depth Occlusion", ToolbarIconKind.DEPTH, ActionKind.SLIDER,
-                    getDepthLimit, setDepthLimit, 0.10f..0.85f, { "${(it * 100).toInt()}%" }
+                    getDepthLimit, setDepthLimit,
+                    LockscreenControlSpec.OCCLUSION_RANGE, LockscreenControlSpec::formatPercent
                 ),
                 OverlayAction(
                     "all_zoom", "Wallpaper Zoom", ToolbarIconKind.ZOOM, ActionKind.SLIDER,
-                    getZoom, setZoom, 1.0f..1.35f, { String.format("%.2fx", it) }
+                    getZoom, setZoom,
+                    LockscreenControlSpec.ZOOM_RANGE, LockscreenControlSpec::formatZoom
                 )
             )
             EditorLayerScope.BACKGROUND -> listOf(
                 OverlayAction(
                     "bg_vibrance", "Background Vibrance", ToolbarIconKind.VIBRANCE, ActionKind.SLIDER,
-                    getBgVibrance, setBgVibrance, -1.0f..1.0f,
-                    { val n = (it * 50).toInt(); if (n > 0) "+$n" else "$n" }
+                    getBgVibrance, setBgVibrance,
+                    LockscreenControlSpec.VIBRANCE_RANGE, LockscreenControlSpec::formatVibrance
                 ),
                 OverlayAction(
                     "bg_opacity", "Background Opacity", ToolbarIconKind.OPACITY, ActionKind.SLIDER,
-                    getBgOpacity, setBgOpacity, 0.10f..1.0f, { "${(it * 100).toInt()}%" }
+                    getBgOpacity, setBgOpacity,
+                    LockscreenControlSpec.OPACITY_RANGE, LockscreenControlSpec::formatPercent
                 )
             )
             EditorLayerScope.SUBJECT -> listOf(
                 OverlayAction(
                     "subject_opacity", "Subject Opacity", ToolbarIconKind.OPACITY, ActionKind.SLIDER,
-                    getSubjectOpacity, setSubjectOpacity, 0.10f..1.0f, { "${(it * 100).toInt()}%" }
+                    getSubjectOpacity, setSubjectOpacity,
+                    LockscreenControlSpec.OPACITY_RANGE, LockscreenControlSpec::formatPercent
                 )
             )
             EditorLayerScope.CLOCK -> buildList {
@@ -200,7 +210,7 @@ internal object LockscreenOverlayPanels {
                         "clock_gravity_intensity", "Gravity Slant", ToolbarIconKind.SLANT, ActionKind.SLIDER,
                         { config.gravityIntensity },
                         { v -> onConfigChange(config.copy(gravityIntensity = v)) },
-                        0.2f..2.5f, { String.format("%.1fx", it) }
+                        LockscreenControlSpec.GRAVITY_INTENSITY_RANGE, LockscreenControlSpec::formatGravity
                     ))
                 }
             }
