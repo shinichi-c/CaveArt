@@ -22,7 +22,5 @@ object OverlapPreventionHelper {
         aodIconsId = res.getIdentifier("aod_notification_icon_container", "id", pkg)
     }
     
-    fun forceElementsBelow(rootLayout: ViewGroup, clock: View, date: View) {
-        
-    }
+
 }

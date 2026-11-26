@@ -1,4 +1,4 @@
-package com.android.CaveArt.clockkit
+package com.android.CaveArt.lockscreenkit
 
 import android.content.Context
 import android.graphics.Bitmap
@@ -18,41 +18,41 @@ interface ClockStyle {
     val handlesDepthManually: Boolean get() = false
     val handlesGravityManually: Boolean get() = false
 
-    fun datePolicy(config: ClockKitConfig): ClockDatePolicy = ClockDatePolicy.EXTERNAL_STANDARD
+    fun datePolicy(config: LockscreenConfig): ClockDatePolicy = ClockDatePolicy.EXTERNAL_STANDARD
 
-    fun needsContinuousFrames(config: ClockKitConfig, notificationProgress: Float): Boolean = false
+    fun needsContinuousFrames(config: LockscreenConfig, notificationProgress: Float): Boolean = false
 
-    fun needsCollisionMap(config: ClockKitConfig): Boolean = false
+    fun needsCollisionMap(config: LockscreenConfig): Boolean = false
 
-    fun describeControls(config: ClockKitConfig): List<ClockControl>
+    fun describeControls(config: LockscreenConfig): List<ClockControl>
 
     fun onAction(
         actionId: String,
-        config: ClockKitConfig,
+        config: LockscreenConfig,
         mask: Bitmap?,
         screenW: Float,
         screenH: Float,
         density: Float
-    ): ClockKitConfig = config
+    ): LockscreenConfig = config
 
-    fun onPinchZoom(config: ClockKitConfig, zoomFactor: Float): ClockKitConfig =
+    fun onPinchZoom(config: LockscreenConfig, zoomFactor: Float): LockscreenConfig =
         config.copy(scale = (config.scale * zoomFactor).coerceIn(0.45f, 2.2f))
 
-    fun measure(ctx: ClockMeasureContext, config: ClockKitConfig): ClockMeasureResult
+    fun measure(ctx: ClockMeasureContext, config: LockscreenConfig): ClockMeasureResult
 
-    fun render(canvas: Canvas, frame: ClockFrameContext, config: ClockKitConfig): ClockRenderResult
+    fun render(canvas: Canvas, frame: ClockFrameContext, config: LockscreenConfig): ClockRenderResult
 
     /**
      * Optional foreground overlay pass drawn ABOVE the subject mask when depth is active.
      * Useful for split-depth styles (e.g. solid hours behind subject + hollow minutes in front).
      */
-    fun renderOverlay(canvas: Canvas, frame: ClockFrameContext, config: ClockKitConfig): ClockRenderResult? = null
+    fun renderOverlay(canvas: Canvas, frame: ClockFrameContext, config: LockscreenConfig): ClockRenderResult? = null
 
     fun renderThumbnail(
         context: Context,
         canvas: Canvas,
         bounds: RectF,
-        config: ClockKitConfig,
+        config: LockscreenConfig,
         typeface: Typeface
     )
 }
@@ -63,7 +63,7 @@ abstract class BaseClockStyle : ClockStyle {
         context: Context,
         canvas: Canvas,
         bounds: RectF,
-        config: ClockKitConfig,
+        config: LockscreenConfig,
         typeface: Typeface
     ) {
         val virtualW = 420f

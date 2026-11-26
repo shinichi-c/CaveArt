@@ -1,4 +1,4 @@
-package com.android.CaveArt.clockkit
+package com.android.CaveArt.lockscreenkit
 
 import android.content.Context
 import android.content.Intent
@@ -8,13 +8,13 @@ import android.os.Build
 import com.android.CaveArt.GravityMode
 import org.json.JSONObject
 
-object ClockKitConfigStore {
+object LockscreenConfigStore {
 
     const val PREFS_NAME = "cave_art_clock_prefs"
     const val KEY_JSON = "clockkit_config"
     const val ACTION_CLOCKKIT_UPDATED = "com.android.CaveArt.UPDATE_CLOCKKIT_CONFIG"
 
-    fun toJson(config: ClockKitConfig): String {
+    fun toJson(config: LockscreenConfig): String {
         val root = JSONObject().apply {
             put("styleId", config.styleId)
             put("clockX", config.clockX.toDouble())
@@ -40,6 +40,13 @@ object ClockKitConfigStore {
             put("isGravityEnabled", config.isGravityEnabled)
             put("gravityIntensity", config.gravityIntensity.toDouble())
             put("gravityMode", config.gravityMode.name)
+            put("notificationStyle", config.notificationStyle)
+            put("notificationMaxCards", config.notificationMaxCards)
+            put("notificationSurfaceMode", config.notificationSurfaceMode)
+            put("notificationIconsBackdrop", config.notificationIconsBackdrop)
+            put("notificationShowAvatars", config.notificationShowAvatars)
+            put("notificationShowActions", config.notificationShowActions)
+            put("notificationIncludeSilent", config.notificationIncludeSilent)
         }
 
         val floatsObj = JSONObject()
@@ -61,7 +68,7 @@ object ClockKitConfigStore {
         return root.toString()
     }
 
-    fun fromJson(jsonStr: String?): ClockKitConfig? {
+    fun fromJson(jsonStr: String?): LockscreenConfig? {
         if (jsonStr.isNullOrBlank()) return null
         return try {
             val root = JSONObject(jsonStr)
@@ -95,7 +102,7 @@ object ClockKitConfigStore {
                 GravityMode.SURFACE_PLANE
             }
 
-            ClockKitConfig(
+            LockscreenConfig(
                 styleId = root.optString("styleId", "adaptive_vector"),
                 clockX = root.optDouble("clockX", 0.0).toFloat(),
                 clockY = root.optDouble("clockY", 110.0).toFloat(),
@@ -121,17 +128,24 @@ object ClockKitConfigStore {
                 gravityIntensity = root.optDouble("gravityIntensity", 1.0).toFloat(),
                 gravityMode = gravMode,
                 styleFloats = floatsMap,
-                styleStrings = stringsMap
+                styleStrings = stringsMap,
+                notificationStyle = root.optInt("notificationStyle", NotificationStyle.GROUPED_CARDS.id),
+                notificationMaxCards = root.optInt("notificationMaxCards", 3),
+                notificationSurfaceMode = root.optInt("notificationSurfaceMode", NotificationSurfaceMode.FROSTED_GLASS.id),
+                notificationIconsBackdrop = root.optBoolean("notificationIconsBackdrop", true),
+                notificationShowAvatars = root.optBoolean("notificationShowAvatars", true),
+                notificationShowActions = root.optBoolean("notificationShowActions", true),
+                notificationIncludeSilent = root.optBoolean("notificationIncludeSilent", true)
             )
         } catch (_: Exception) {
             null
         }
     }
 
-    fun loadFromPrefs(prefs: SharedPreferences): ClockKitConfig {
+    fun loadFromPrefs(prefs: SharedPreferences): LockscreenConfig {
         fromJson(prefs.getString(KEY_JSON, null))?.let { return it }
 
-        val base = ClockKitConfig(
+        val base = LockscreenConfig(
             styleId = "adaptive_vector",
             clockX = prefs.getFloat("clock_x", 0f),
             clockY = prefs.getFloat("clock_y", 110f),
@@ -162,7 +176,7 @@ object ClockKitConfigStore {
 
     fun saveAndBroadcast(
         context: Context,
-        config: ClockKitConfig,
+        config: LockscreenConfig,
         collisionMap: String? = null
     ) {
         val safeCtx = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {

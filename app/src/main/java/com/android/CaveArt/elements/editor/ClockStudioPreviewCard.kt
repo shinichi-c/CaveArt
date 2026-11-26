@@ -10,6 +10,7 @@ import android.view.HapticFeedbackConstants
 import androidx.compose.animation.*
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
@@ -39,7 +40,7 @@ import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
-import com.android.CaveArt.clockkit.*
+import com.android.CaveArt.lockscreenkit.*
 import com.android.CaveArt.layer.DepthBlendStyle
 import com.android.CaveArt.layer.LayerType
 import kotlin.math.abs
@@ -62,8 +63,10 @@ fun ClockStudioPreviewCard(
     focusedLayerType: LayerType?,
     sharedElementModifier: Modifier = Modifier,
     atGlanceRefreshTick: Int = 0,
+    showNotificationPreview: Boolean = false,
     onDateClick: () -> Unit,
-    onClockClick: () -> Unit
+    onClockClick: () -> Unit,
+    onNotificationsClick: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val view = LocalView.current
@@ -80,20 +83,49 @@ fun ClockStudioPreviewCard(
     var isDraggingClock by remember { mutableStateOf(false) }
     var isDraggingDate by remember { mutableStateOf(false) }
 
-    val activeStyle = remember(state.clockKitConfig.styleId) {
-        ClockKitEngine.getStyle(state.clockKitConfig.styleId)
+    val activeStyle = remember(state.lockscreenConfig.styleId) {
+        ClockEngine.getStyle(state.lockscreenConfig.styleId)
     }
     val latestStyle by rememberUpdatedState(activeStyle)
     val latestTime by rememberUpdatedState(timeString)
     val latestDate by rememberUpdatedState(dateText)
     val latestTypeface by rememberUpdatedState(customTypeface)
 
-    val glanceSnapshot = remember(state.clockKitConfig, dateText, timeString, atGlanceRefreshTick) {
-        AtAGlanceDataCollector.collect(context, state.clockKitConfig)
+    val notifStyle = NotificationStyle.fromId(state.lockscreenConfig.notificationStyle)
+    val targetNotifProgress = if (showNotificationPreview && notifStyle.collapsesClockWhenNotifsPresent) 1f else 0f
+    val animatedNotifProgress by animateFloatAsState(
+        targetValue = targetNotifProgress,
+        animationSpec = tween(durationMillis = 320),
+        label = "previewNotifCollapse"
+    )
+    val previewNotifGroups = remember(showNotificationPreview) {
+        if (showNotificationPreview) NotificationKitSampleProvider.getSamples() else null
+    }
+    val currentNotifStyleId = state.lockscreenConfig.notificationStyle
+    var previewExpandedGroupId by remember(showNotificationPreview, currentNotifStyleId) { mutableStateOf<String?>(null) }
+    var previewCollapsingGroupId by remember(showNotificationPreview, currentNotifStyleId) { mutableStateOf<String?>(null) }
+    val animatedExpandProgress by animateFloatAsState(
+        targetValue = if (previewExpandedGroupId != null) 1f else 0f,
+        animationSpec = tween(durationMillis = 220),
+        finishedListener = { v -> if (v == 0f) previewCollapsingGroupId = null },
+        label = "previewNotifExpand"
+    )
+    var previewPeekGroupId by remember(showNotificationPreview, currentNotifStyleId) { mutableStateOf<String?>(null) }
+    val animatedPeekProgress by animateFloatAsState(
+        targetValue = if (previewPeekGroupId != null) 1f else 0f,
+        animationSpec = tween(durationMillis = 190),
+        label = "previewNotifPeek"
+    )
+    val latestNotifGroups by rememberUpdatedState(previewNotifGroups)
+    val latestShowNotifPreview by rememberUpdatedState(showNotificationPreview)
+    val latestFreezeDrag by rememberUpdatedState(targetNotifProgress > 0.5f)
+
+    val glanceSnapshot = remember(state.lockscreenConfig, dateText, timeString, atGlanceRefreshTick) {
+        AtAGlanceDataCollector.collect(context, state.lockscreenConfig)
     }
     val latestSnapshot by rememberUpdatedState(glanceSnapshot)
 
-    val needsContinuous = activeStyle.needsContinuousFrames(state.clockKitConfig, 0f)
+    val needsContinuous = activeStyle.needsContinuousFrames(state.lockscreenConfig, animatedNotifProgress)
     var animFrameMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
 
     LaunchedEffect(needsContinuous, isMlLoading) {
@@ -107,6 +139,8 @@ fun ClockStudioPreviewCard(
     }
 
     val sharedPathBounds = remember { RectF() }
+    val sharedNotifBounds = remember { RectF() }
+    val sharedNotifHitRef = remember { arrayOf(NotificationHitLayout()) }
 
     val hardwareRenderNode = remember {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -130,21 +164,21 @@ fun ClockStudioPreviewCard(
     }
 
     LaunchedEffect(
-        state.clockKitConfig.clockX,
-        state.clockKitConfig.clockY,
-        state.clockKitConfig.dateAttached,
-        state.clockKitConfig.atGlanceEnabled,
-        state.clockKitConfig.atGlanceStyle,
-        state.clockKitConfig.styleId,
-        state.clockKitConfig.scale,
-        state.clockKitConfig.styleFloats,
-        state.clockKitConfig.styleStrings,
+        state.lockscreenConfig.clockX,
+        state.lockscreenConfig.clockY,
+        state.lockscreenConfig.dateAttached,
+        state.lockscreenConfig.atGlanceEnabled,
+        state.lockscreenConfig.atGlanceStyle,
+        state.lockscreenConfig.styleId,
+        state.lockscreenConfig.scale,
+        state.lockscreenConfig.styleFloats,
+        state.lockscreenConfig.styleStrings,
         state.dateSize.floatValue,
         glanceSnapshot,
         timeString,
         customTypeface
     ) {
-        val cfg = state.clockKitConfig
+        val cfg = state.lockscreenConfig
         val clamped = LockscreenSceneRenderer.clampConfigToScreen(
             context = context,
             cfg = cfg,
@@ -166,28 +200,28 @@ fun ClockStudioPreviewCard(
         }
     }
 
-    val datePhysicsSpringY = remember { Animatable(state.clockKitConfig.dateY) }
-    val latestDateX by rememberUpdatedState(state.clockKitConfig.dateX)
-    val latestDateY by rememberUpdatedState(state.clockKitConfig.dateY)
+    val datePhysicsSpringY = remember { Animatable(state.lockscreenConfig.dateY) }
+    val latestDateX by rememberUpdatedState(state.lockscreenConfig.dateX)
+    val latestDateY by rememberUpdatedState(state.lockscreenConfig.dateY)
 
     LaunchedEffect(
         isDraggingDate,
         isDraggingClock,
-        state.clockKitConfig.dateAttached,
-        state.clockKitConfig.atGlanceEnabled,
-        state.clockKitConfig.atGlanceStyle,
-        state.clockKitConfig.clockX,
-        state.clockKitConfig.clockY,
-        state.clockKitConfig.styleId,
-        state.clockKitConfig.scale,
-        state.clockKitConfig.styleFloats,
-        state.clockKitConfig.styleStrings,
+        state.lockscreenConfig.dateAttached,
+        state.lockscreenConfig.atGlanceEnabled,
+        state.lockscreenConfig.atGlanceStyle,
+        state.lockscreenConfig.clockX,
+        state.lockscreenConfig.clockY,
+        state.lockscreenConfig.styleId,
+        state.lockscreenConfig.scale,
+        state.lockscreenConfig.styleFloats,
+        state.lockscreenConfig.styleStrings,
         state.dateSize.floatValue,
         glanceSnapshot,
         customTypeface,
         timeString
     ) {
-        val cfg = state.clockKitConfig
+        val cfg = state.lockscreenConfig
         if (activeStyle.datePolicy(cfg) == ClockDatePolicy.EXTERNAL_STANDARD &&
             cfg.atGlanceEnabled && !cfg.dateAttached && !isDraggingDate && !isDraggingClock
         ) {
@@ -244,10 +278,10 @@ fun ClockStudioPreviewCard(
 
     val gestureModifier = if (!isMlLoading) {
         Modifier.pointerInput(realW, realH) {
-            var rawClockX = state.clockKitConfig.clockX
-            var rawClockY = state.clockKitConfig.clockY
-            var rawDateX = state.clockKitConfig.dateX
-            var rawDateY = state.clockKitConfig.dateY
+            var rawClockX = state.lockscreenConfig.clockX
+            var rawClockY = state.lockscreenConfig.clockY
+            var rawDateX = state.lockscreenConfig.dateX
+            var rawDateY = state.lockscreenConfig.dateY
 
             awaitEachGesture {
                 val down = awaitFirstDown(requireUnconsumed = true)
@@ -256,8 +290,17 @@ fun ClockStudioPreviewCard(
                 var dragged = false
 
                 val styleAtDown = latestStyle
-                val cfgAtDown = state.clockKitConfig
+                val cfgAtDown = state.lockscreenConfig
                 val previewScale = size.width / realW
+                val tapNativeX = down.position.x / previewScale
+                val tapNativeY = down.position.y / previewScale
+                val notifHitPad = 10f * densityVal
+
+                val hitNotifications = latestShowNotifPreview &&
+                    !sharedNotifBounds.isEmpty &&
+                    tapNativeX in (sharedNotifBounds.left - notifHitPad)..(sharedNotifBounds.right + notifHitPad) &&
+                    tapNativeY in (sharedNotifBounds.top - notifHitPad)..(sharedNotifBounds.bottom + notifHitPad)
+
                 val externalDateActive = styleAtDown.datePolicy(cfgAtDown) == ClockDatePolicy.EXTERNAL_STANDARD && cfgAtDown.atGlanceEnabled
                 val glanceM = AtAGlanceRenderer.measure(cfgAtDown, latestSnapshot, densityVal, state.dateSize.floatValue, realW)
 
@@ -267,10 +310,14 @@ fun ClockStudioPreviewCard(
                 val scaledDateHalfW = (glanceM.widthPx / 2f) * previewScale
                 val hitPad = LockscreenLayoutSpec.DATE_HIT_PAD_DP * densityVal * previewScale
 
-                val hitDate = externalDateActive &&
+                val hitDate = !hitNotifications && externalDateActive &&
                     down.position.y in (scaledDateTop - hitPad)..(scaledDateBottom + hitPad) &&
                     down.position.x in (scaledDateCenterX - scaledDateHalfW - hitPad)..(scaledDateCenterX + scaledDateHalfW + hitPad)
-                val activeDrag = if (hitDate) "DATE" else "CLOCK"
+                val activeDrag = when {
+                    hitNotifications -> "NOTIFS"
+                    hitDate -> "DATE"
+                    else -> "CLOCK"
+                }
 
                 rawClockX = cfgAtDown.clockX
                 rawClockY = cfgAtDown.clockY
@@ -284,9 +331,9 @@ fun ClockStudioPreviewCard(
 
                     if (pan.getDistance() > 2f || abs(zoom - 1f) > 0.01f) dragged = true
 
-                    if (dragged) {
+                    if (dragged && !latestFreezeDrag && activeDrag != "NOTIFS") {
                         val curStyle = latestStyle
-                        val curCfg = state.clockKitConfig
+                        val curCfg = state.lockscreenConfig
                         val deltaNativeDpX = (pan.x / previewScale) / densityVal
                         val deltaNativeDpY = (pan.y / previewScale) / densityVal
 
@@ -341,13 +388,42 @@ fun ClockStudioPreviewCard(
 
                 if (!dragged && (System.currentTimeMillis() - timeStart) < 300L) {
                     view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                    if (activeDrag == "DATE") onDateClick() else onClockClick()
+                    when (activeDrag) {
+                        "NOTIFS" -> {
+                            val curStyle = NotificationStyle.fromId(state.lockscreenConfig.notificationStyle)
+                            val hit = sharedNotifHitRef[0].targets.firstOrNull { it.bounds.contains(tapNativeX, tapNativeY) }
+                            when {
+                                curStyle == NotificationStyle.ICONS_ONLY && hit?.kind == NotificationHitKind.ICON_PEEK && hit.groupId != null -> {
+                                    previewPeekGroupId = if (previewPeekGroupId == hit.groupId) null else hit.groupId
+                                }
+                                curStyle == NotificationStyle.GROUPED_CARDS &&
+                                    (hit?.kind == NotificationHitKind.GROUP_CARD || hit?.kind == NotificationHitKind.MESSAGE_ROW) &&
+                                    hit.groupId != null -> {
+                                    val grp = latestNotifGroups?.firstOrNull { it.groupId == hit.groupId }
+                                    if (grp?.canExpand == true) {
+                                        if (previewExpandedGroupId == grp.groupId) {
+                                            previewCollapsingGroupId = grp.groupId
+                                            previewExpandedGroupId = null
+                                        } else {
+                                            previewCollapsingGroupId = null
+                                            previewExpandedGroupId = grp.groupId
+                                        }
+                                    } else {
+                                        onNotificationsClick()
+                                    }
+                                }
+                                else -> onNotificationsClick()
+                            }
+                        }
+                        "DATE" -> onDateClick()
+                        else -> onClockClick()
+                    }
                 }
 
                 isDraggingClock = false
                 isDraggingDate = false
 
-                val endCfg = state.clockKitConfig
+                val endCfg = state.lockscreenConfig
                 val snapClockX = if (abs(endCfg.clockX) < magneticSnapThresholdDp) 0f else endCfg.clockX
                 val snapDateX = if (!endCfg.dateAttached && abs(endCfg.dateX) < magneticSnapThresholdDp) 0f else endCfg.dateX
                 if (snapClockX != endCfg.clockX || snapDateX != endCfg.dateX) {
@@ -402,7 +478,7 @@ fun ClockStudioPreviewCard(
                 Box(modifier = Modifier.fillMaxSize()) {
                     Canvas(modifier = Modifier.fillMaxSize()) {
                         val previewScale = size.width / realW
-                        val cfg = state.clockKitConfig
+                        val cfg = state.lockscreenConfig
                         val frameMillis = if (needsContinuous) animFrameMillis else System.currentTimeMillis()
                         val depthLayer = state.layerStack.depthVisionLayer
                         val depthBlend = when (depthLayer.blendStyle) {
@@ -439,7 +515,14 @@ fun ClockStudioPreviewCard(
                             timeMillis = frameMillis,
                             is24Hour = android.text.format.DateFormat.is24HourFormat(context),
                             customTypeface = customTypeface,
-                            atGlanceSnapshot = glanceSnapshot
+                            atGlanceSnapshot = glanceSnapshot,
+                            notificationProgress = animatedNotifProgress,
+                            previewNotifications = previewNotifGroups,
+                            previewExpandedGroupId = previewExpandedGroupId,
+                            previewCollapsingGroupId = previewCollapsingGroupId,
+                            previewExpandProgress = animatedExpandProgress,
+                            previewPeekGroupId = previewPeekGroupId,
+                            previewPeekProgress = animatedPeekProgress
                         )
 
                         drawIntoCanvas { canvas ->
@@ -474,6 +557,9 @@ fun ClockStudioPreviewCard(
                                     outClockBounds = sharedPathBounds
                                 )
                             }
+
+                            sharedNotifBounds.set(drawResult.notificationBoundsOnScreen)
+                            sharedNotifHitRef[0] = drawResult.notificationHitLayout
 
                             if (state.layerStack.isDepthEnabled && previewMask != null) {
                                 val targetZ = if (drawResult.elevatedAboveSubject) 4 else 2

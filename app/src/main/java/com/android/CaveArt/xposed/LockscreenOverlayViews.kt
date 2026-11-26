@@ -1,5 +1,8 @@
 package com.android.CaveArt.xposed
 
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
+import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.*
 import android.os.Build
@@ -9,7 +12,7 @@ import android.widget.OverScroller
 import androidx.dynamicanimation.animation.FloatValueHolder
 import androidx.dynamicanimation.animation.SpringAnimation
 import androidx.dynamicanimation.animation.SpringForce
-import com.android.CaveArt.clockkit.*
+import com.android.CaveArt.lockscreenkit.*
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -57,7 +60,7 @@ internal class UnifiedLineIconView(
     override fun onDraw(canvas: Canvas) {
         val sz = min(width, height).toFloat()
         if (sz <= 0f) return
-        ClockToolbarIcons.draw(canvas, kind, tint, sz, strokePx)
+        LockscreenToolbarIcons.draw(canvas, kind, tint, sz, strokePx)
     }
 }
 
@@ -118,7 +121,7 @@ internal class FastScrollIndicatorView(ctx: Context) : View(ctx) {
     }
 
     override fun onDraw(canvas: Canvas) {
-        ClockToolbarIcons.drawFastScrollIndicator(
+        LockscreenToolbarIcons.drawFastScrollIndicator(
             canvas = canvas,
             width = width.toFloat(),
             height = height.toFloat(),
@@ -234,7 +237,7 @@ internal class SlimRulerSliderView(ctx: Context) : View(ctx) {
 
         canvas.save()
         canvas.translate(dpf(4f), dpf(2f))
-        ClockToolbarIcons.draw(canvas, iconKind, accent, dpf(15f), dpf(1.4f))
+        LockscreenToolbarIcons.draw(canvas, iconKind, accent, dpf(15f), dpf(1.4f))
         canvas.restore()
 
         textPaint.textSize = dpf(12.5f)
@@ -250,7 +253,7 @@ internal class SlimRulerSliderView(ctx: Context) : View(ctx) {
 
         val progress = ((curVal - minVal) / (maxVal - minVal).coerceAtLeast(0.0001f)).coerceIn(0f, 1f)
         val trackTop = dpf(24f)
-        ClockToolbarIcons.drawRulerTrack(
+        LockscreenToolbarIcons.drawRulerTrack(
             canvas = canvas,
             width = w,
             trackTop = trackTop,
@@ -300,16 +303,29 @@ internal class LockscreenPreviewCanvasView(ctx: Context) : View(ctx) {
     private fun dpf(v: Float): Float = v * density
 
     var sceneProvider: (() -> LockscreenSceneParams)? = null
-    var getConfig: () -> ClockKitConfig = { ClockKitConfig() }
+    var getConfig: () -> LockscreenConfig = { LockscreenConfig() }
     var getStatusBarPadPx: () -> Int = { 0 }
     var getNavBarPadPx: () -> Int = { 0 }
     var isClockFocused: () -> Boolean = { true }
-    var onConfigChanged: (ClockKitConfig) -> Unit = {}
+    var onConfigChanged: (LockscreenConfig) -> Unit = {}
     var onTapClockFocus: () -> Unit = {}
 
     private val clockBounds = RectF()
+    private var lastSceneResult: LockscreenSceneDrawResult? = null
+    private var lastPreviewNotifStyleId: Int = -1
+    private var previewExpandedGroupId: String? = null
+    private var previewCollapsingGroupId: String? = null
+    private var previewExpandProgress: Float = 0f
+    private var previewExpandAnimator: ValueAnimator? = null
+    private var previewPeekGroupId: String? = null
+    private var previewPeekProgress: Float = 0f
+    private var previewPeekAnimator: ValueAnimator? = null
+
     private var isCardDragging = false
     private var dragMode = "CLOCK"
+    private var downXView = 0f
+    private var downYView = 0f
+    private var notifTouchMoved = false
     private var lastX = 0f
     private var lastY = 0f
     private var rawClockX = 0f
@@ -330,7 +346,7 @@ internal class LockscreenPreviewCanvasView(ctx: Context) : View(ctx) {
         strokeWidth = dpf(1.5f)
     }
 
-    private fun clamp(cfg: ClockKitConfig, resolveOverlap: Boolean): ClockKitConfig =
+    private fun clamp(cfg: LockscreenConfig, resolveOverlap: Boolean): LockscreenConfig =
         LockscreenSceneRenderer.clampConfigToScreen(
             context = context,
             cfg = cfg,
@@ -348,7 +364,7 @@ internal class LockscreenPreviewCanvasView(ctx: Context) : View(ctx) {
         object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
             override fun onScale(detector: ScaleGestureDetector): Boolean {
                 val cfg = getConfig()
-                val clockStyle = ClockKitEngine.getStyle(cfg.styleId)
+                val clockStyle = ClockEngine.getStyle(cfg.styleId)
                 val zoomed = clockStyle.onPinchZoom(cfg, detector.scaleFactor)
                 onConfigChanged(clamp(zoomed, true))
                 return true
@@ -358,8 +374,26 @@ internal class LockscreenPreviewCanvasView(ctx: Context) : View(ctx) {
 
     override fun onDraw(canvas: Canvas) {
         if (width <= 0 || height <= 0) return
-        val params = sceneProvider?.invoke() ?: return
-        LockscreenSceneRenderer.drawScene(context, canvas, width.toFloat(), params, clockBounds)
+        val rawParams = sceneProvider?.invoke() ?: return
+        val hasNotifs = !rawParams.previewNotifications.isNullOrEmpty()
+        if (!hasNotifs || rawParams.config.notificationStyle != lastPreviewNotifStyleId) {
+            lastPreviewNotifStyleId = rawParams.config.notificationStyle
+            previewExpandedGroupId = null
+            previewCollapsingGroupId = null
+            previewExpandProgress = 0f
+            previewPeekGroupId = null
+            previewPeekProgress = 0f
+        }
+        val params = if (hasNotifs) {
+            rawParams.copy(
+                previewExpandedGroupId = previewExpandedGroupId,
+                previewCollapsingGroupId = previewCollapsingGroupId,
+                previewExpandProgress = previewExpandProgress,
+                previewPeekGroupId = previewPeekGroupId,
+                previewPeekProgress = previewPeekProgress
+            )
+        } else rawParams
+        lastSceneResult = LockscreenSceneRenderer.drawScene(context, canvas, width.toFloat(), params, clockBounds)
 
         if (isCardDragging && !clockBounds.isEmpty) {
             val scale = width / CaveArtXposedModule.screenW.coerceAtLeast(1f)
@@ -394,7 +428,7 @@ internal class LockscreenPreviewCanvasView(ctx: Context) : View(ctx) {
                 rawDateY = cfg.dateY
                 isCardDragging = false
 
-                val clockStyle = ClockKitEngine.getStyle(cfg.styleId)
+                val clockStyle = ClockEngine.getStyle(cfg.styleId)
                 val extDate = clockStyle.datePolicy(cfg) == ClockDatePolicy.EXTERNAL_STANDARD && cfg.atGlanceEnabled
                 val dateSp = LockscreenSceneRenderer.computeDateSizeSp(cfg)
                 val snap = AtAGlanceDataCollector.collect(context, cfg)
@@ -409,11 +443,31 @@ internal class LockscreenPreviewCanvasView(ctx: Context) : View(ctx) {
                 val hitDate = extDate && !cfg.dateAttached &&
                     event.y in (scaledDateTop - hitPad)..(scaledDateBottom + hitPad) &&
                     event.x in (scaledDateCenterX - scaledDateHalfW - hitPad)..(scaledDateCenterX + scaledDateHalfW + hitPad)
-                dragMode = if (hitDate) "DATE" else "CLOCK"
+
+                val notifBounds = lastSceneResult?.notificationBoundsOnScreen
+                val notifPad = dpf(10f) * previewScale
+                val hitNotif = notifBounds != null && !notifBounds.isEmpty &&
+                    event.x in (notifBounds.left * previewScale - notifPad)..(notifBounds.right * previewScale + notifPad) &&
+                    event.y in (notifBounds.top * previewScale - notifPad)..(notifBounds.bottom * previewScale + notifPad)
+
+                downXView = event.x
+                downYView = event.y
+                notifTouchMoved = false
+                dragMode = when {
+                    hitNotif -> "NOTIFS"
+                    hitDate -> "DATE"
+                    else -> "CLOCK"
+                }
                 return true
             }
             MotionEvent.ACTION_MOVE -> {
                 if (event.pointerCount > 1) return true
+                if (dragMode == "NOTIFS") {
+                    if (abs(event.x - downXView) > 8f || abs(event.y - downYView) > 8f) {
+                        notifTouchMoved = true
+                    }
+                    return true
+                }
                 val dx = event.x - lastX
                 val dy = event.y - lastY
                 if (!isCardDragging && (abs(dx) > 3f || abs(dy) > 3f)) isCardDragging = true
@@ -447,12 +501,14 @@ internal class LockscreenPreviewCanvasView(ctx: Context) : View(ctx) {
                 return true
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                if (isCardDragging) {
+                if (event.actionMasked == MotionEvent.ACTION_UP && dragMode == "NOTIFS" && !notifTouchMoved) {
+                    handleNotifPreviewTap(event.x / previewScale, event.y / previewScale, cfg)
+                } else if (isCardDragging) {
                     val snapThresholdDp = (CaveArtXposedModule.screenW * LockscreenLayoutSpec.MAGNETIC_SNAP_WIDTH_RATIO) / density
                     val snapClockX = if (abs(cfg.clockX) < snapThresholdDp) 0f else cfg.clockX
                     val snapDateX = if (!cfg.dateAttached && abs(cfg.dateX) < snapThresholdDp) 0f else cfg.dateX
                     onConfigChanged(clamp(cfg.copy(clockX = snapClockX, dateX = snapDateX), resolveOverlap = true))
-                } else if (!isClockFocused()) {
+                } else if (dragMode != "NOTIFS" && !isClockFocused()) {
                     onTapClockFocus()
                 }
                 isCardDragging = false
@@ -463,6 +519,83 @@ internal class LockscreenPreviewCanvasView(ctx: Context) : View(ctx) {
         }
         return super.onTouchEvent(event)
     }
+
+    private fun handleNotifPreviewTap(tapNativeX: Float, tapNativeY: Float, cfg: LockscreenConfig) {
+        val targets = lastSceneResult?.notificationHitLayout?.targets ?: return
+        val hit = targets.firstOrNull { it.bounds.contains(tapNativeX, tapNativeY) } ?: return
+        val style = NotificationStyle.fromId(cfg.notificationStyle)
+        val samples = sceneProvider?.invoke()?.previewNotifications ?: return
+
+        if (style == NotificationStyle.ICONS_ONLY && hit.kind == NotificationHitKind.ICON_PEEK && hit.groupId != null) {
+            performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+            animatePreviewPeek(if (previewPeekGroupId == hit.groupId) null else hit.groupId)
+        } else if (style == NotificationStyle.GROUPED_CARDS &&
+            (hit.kind == NotificationHitKind.GROUP_CARD || hit.kind == NotificationHitKind.MESSAGE_ROW) &&
+            hit.groupId != null
+        ) {
+            val grp = samples.firstOrNull { it.groupId == hit.groupId } ?: return
+            if (grp.canExpand) {
+                performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                togglePreviewExpand(grp.groupId)
+            }
+        }
+    }
+
+    private fun togglePreviewExpand(groupId: String) {
+        previewExpandAnimator?.cancel()
+        if (previewExpandedGroupId == groupId) {
+            previewCollapsingGroupId = groupId
+            previewExpandedGroupId = null
+            previewExpandAnimator = ValueAnimator.ofFloat(previewExpandProgress, 0f).apply {
+                duration = 210L
+                interpolator = DecelerateInterpolator()
+                addUpdateListener { previewExpandProgress = it.animatedValue as Float; invalidate() }
+                addListener(object : AnimatorListenerAdapter() {
+                    override fun onAnimationEnd(animation: Animator) { previewCollapsingGroupId = null; invalidate() }
+                })
+                start()
+            }
+        } else {
+            previewCollapsingGroupId = null
+            previewExpandedGroupId = groupId
+            val startP = if (previewExpandProgress > 0.01f) 0f else previewExpandProgress
+            previewExpandAnimator = ValueAnimator.ofFloat(startP, 1f).apply {
+                duration = 230L
+                interpolator = DecelerateInterpolator()
+                addUpdateListener { previewExpandProgress = it.animatedValue as Float; invalidate() }
+                start()
+            }
+        }
+    }
+
+    private fun animatePreviewPeek(targetId: String?) {
+        previewPeekAnimator?.cancel()
+        if (targetId == null) {
+            previewPeekAnimator = ValueAnimator.ofFloat(previewPeekProgress, 0f).apply {
+                duration = 170L
+                interpolator = DecelerateInterpolator()
+                addUpdateListener { previewPeekProgress = it.animatedValue as Float; invalidate() }
+                addListener(object : AnimatorListenerAdapter() {
+                    override fun onAnimationEnd(animation: Animator) { previewPeekGroupId = null; invalidate() }
+                })
+                start()
+            }
+        } else {
+            previewPeekGroupId = targetId
+            previewPeekAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+                duration = 190L
+                interpolator = DecelerateInterpolator()
+                addUpdateListener { previewPeekProgress = it.animatedValue as Float; invalidate() }
+                start()
+            }
+        }
+    }
+
+    override fun onDetachedFromWindow() {
+        previewExpandAnimator?.cancel()
+        previewPeekAnimator?.cancel()
+        super.onDetachedFromWindow()
+    }
 }
 
 internal class StyleCarouselPagerView(ctx: Context) : ViewGroup(ctx) {
@@ -470,7 +603,7 @@ internal class StyleCarouselPagerView(ctx: Context) : ViewGroup(ctx) {
     private fun dp(v: Float): Int = (v * density).roundToInt()
     private fun dpf(v: Float): Float = v * density
 
-    private val styles = ClockKitEngine.styles
+    private val styles = ClockEngine.styles
     private val cardViews = mutableListOf<View>()
     private val scroller = OverScroller(ctx, DecelerateInterpolator())
     private var velocityTracker: VelocityTracker? = null

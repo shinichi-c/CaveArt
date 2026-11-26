@@ -42,7 +42,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.android.CaveArt.clockkit.BackdropStyle
+import com.android.CaveArt.lockscreenkit.BackdropStyle
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

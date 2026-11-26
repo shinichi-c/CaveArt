@@ -17,7 +17,7 @@ import androidx.dynamicanimation.animation.SpringForce
 import com.android.CaveArt.animations.AnimationFactory
 import com.android.CaveArt.animations.AnimationStyle
 import com.android.CaveArt.animations.WallpaperAnimation
-import com.android.CaveArt.clockkit.AtAGlanceColorResolver
+import com.android.CaveArt.lockscreenkit.AtAGlanceColorResolver
 import kotlinx.coroutines.*
 import kotlin.math.max
 import kotlin.math.sin

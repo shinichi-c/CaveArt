@@ -1,7 +1,7 @@
-package com.android.CaveArt.clockkit.styles
+package com.android.CaveArt.lockscreenkit.styles
 
 import android.graphics.*
-import com.android.CaveArt.clockkit.*
+import com.android.CaveArt.lockscreenkit.*
 import kotlin.math.max
 
 class EditorialSplitClockStyle : BaseClockStyle() {
@@ -10,7 +10,7 @@ class EditorialSplitClockStyle : BaseClockStyle() {
     override val name: String = "Editorial Stack"
     override val subtitle: String = "Bold typographic stack with built-in pill date"
 
-    override fun datePolicy(config: ClockKitConfig): ClockDatePolicy =
+    override fun datePolicy(config: LockscreenConfig): ClockDatePolicy =
         ClockDatePolicy.INTEGRATED_BY_STYLE
 
     private class Scratch {
@@ -25,7 +25,7 @@ class EditorialSplitClockStyle : BaseClockStyle() {
 
     private val scratch = ThreadLocal.withInitial { Scratch() }
 
-    override fun describeControls(config: ClockKitConfig): List<ClockControl> = listOf(
+    override fun describeControls(config: LockscreenConfig): List<ClockControl> = listOf(
         ClockControl.Slider(
             id = "overlap", label = "Row Overlap", icon = ClockIcon.SPACING,
             min = -0.35f, max = 0.25f, defaultValue = -0.14f,
@@ -52,7 +52,7 @@ class EditorialSplitClockStyle : BaseClockStyle() {
         )
     )
 
-    override fun measure(ctx: ClockMeasureContext, config: ClockKitConfig): ClockMeasureResult {
+    override fun measure(ctx: ClockMeasureContext, config: LockscreenConfig): ClockMeasureResult {
         val styleScale = config.scale
         val shrink = 1f - (0.32f * ctx.notificationProgress)
         val digitPx = 124f * ctx.density * styleScale * shrink
@@ -72,7 +72,7 @@ class EditorialSplitClockStyle : BaseClockStyle() {
         )
     }
 
-    override fun render(canvas: Canvas, frame: ClockFrameContext, config: ClockKitConfig): ClockRenderResult {
+    override fun render(canvas: Canvas, frame: ClockFrameContext, config: LockscreenConfig): ClockRenderResult {
         val s = scratch.get()!!
         val styleScale = config.scale
         val shrink = 1f - (0.32f * frame.notificationProgress)

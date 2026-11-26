@@ -1,5 +1,6 @@
 package com.android.CaveArt.xposed
 
+import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.*
 import android.graphics.drawable.GradientDrawable
@@ -14,7 +15,7 @@ import android.view.animation.DecelerateInterpolator
 import android.widget.*
 import com.android.CaveArt.AdaptiveClockHelper
 import com.android.CaveArt.MonetEngine
-import com.android.CaveArt.clockkit.*
+import com.android.CaveArt.lockscreenkit.*
 import kotlin.math.max
 import kotlin.math.roundToInt
 
@@ -24,8 +25,8 @@ class LockscreenEditorOverlay(context: Context) : FrameLayout(context) {
     private fun dp(v: Float): Int = (v * density).roundToInt()
     private fun dpf(v: Float): Float = v * density
 
-    private var editConfig = ClockKitConfig()
-    private var initialConfig = ClockKitConfig()
+    private var editConfig = LockscreenConfig()
+    private var initialConfig = LockscreenConfig()
     private var editCollisionMap: FloatArray? = null
 
     private var activeLayerScope = EditorLayerScope.CLOCK
@@ -35,12 +36,16 @@ class LockscreenEditorOverlay(context: Context) : FrameLayout(context) {
     private var fastScrollStyle = 0
     private var backdropStyle = BackdropStyle.BLUR_BACKGROUND
 
+    private var showNotifPreview = false
+    private var notifPreviewProgress = 0f
+    private var notifPreviewAnimator: ValueAnimator? = null
+
     private var isDepthEnabled = true
     private var depthOcclusionLimit = 0.45f
     private var bgVibrance = 0f
     private var bgOpacity = 1f
     private var subjectOpacity = 1f
-    private var wallpaperZoom = 1.10f
+    private var wallpaperZoom = LockscreenLayoutSpec.DEFAULT_WALLPAPER_ZOOM
 
     private var wallpaperBitmap: Bitmap? = null
     private var blurredBackdrop: Bitmap? = null
@@ -90,6 +95,11 @@ class LockscreenEditorOverlay(context: Context) : FrameLayout(context) {
     private val previewCanvasView = LockscreenPreviewCanvasView(context)
     private val styleCarouselView = StyleCarouselPagerView(context)
     private val styleNamePill = TextView(context)
+    private val notifToggleBtn = TextView(context)
+    private val notifControlsRow = LinearLayout(context)
+    private val notifStylePill = TextView(context)
+    private val notifSurfacePill = TextView(context)
+    private val notifMaxPill = TextView(context)
     private val contextualSlot = FrameLayout(context)
     private val fastScrollView = FastScrollIndicatorView(context)
     private val toolbarContainer = FrameLayout(context)
@@ -98,9 +108,9 @@ class LockscreenEditorOverlay(context: Context) : FrameLayout(context) {
     private val layersSheetCard = LinearLayout(context)
 
     init {
-        isClickable = true
-        isFocusable = true
-        isFocusableInTouchMode = true
+        isClickable = false
+        isFocusable = false
+        isFocusableInTouchMode = false
         setOnApplyWindowInsetsListener { _, insets ->
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 val bars = insets.getInsetsIgnoringVisibility(WindowInsets.Type.systemBars())
@@ -158,6 +168,11 @@ class LockscreenEditorOverlay(context: Context) : FrameLayout(context) {
                 setStroke(dp(1f), Color.argb(60, 255, 255, 255))
             }
         }
+        val topStartRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+
         val layersBtn = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -170,7 +185,23 @@ class LockscreenEditorOverlay(context: Context) : FrameLayout(context) {
             })
             setOnClickListener { performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY); showLayersSheet() }
         }
-        previewCardFrame.addView(layersBtn, LayoutParams(-2, dp(34f), Gravity.TOP or Gravity.START).apply { setMargins(dp(14f), dp(14f), dp(14f), dp(14f)) })
+        topStartRow.addView(layersBtn, LinearLayout.LayoutParams(-2, dp(34f)).apply { marginEnd = dp(6f) })
+
+        notifToggleBtn.apply {
+            text = "Notifs"
+            gravity = Gravity.CENTER
+            setTextColor(Color.WHITE)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f)
+            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+            setPadding(dp(12f), 0, dp(12f), 0)
+            background = pillBg()
+            setOnClickListener {
+                performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                toggleNotifPreview(!showNotifPreview)
+            }
+        }
+        topStartRow.addView(notifToggleBtn, LinearLayout.LayoutParams(-2, dp(34f)))
+        previewCardFrame.addView(topStartRow, LayoutParams(-2, -2, Gravity.TOP or Gravity.START).apply { setMargins(dp(14f), dp(14f), dp(14f), dp(14f)) })
 
         val doneBtn = TextView(context).apply {
             text = "Done"; gravity = Gravity.CENTER; setTextColor(Color.WHITE); setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
@@ -179,6 +210,45 @@ class LockscreenEditorOverlay(context: Context) : FrameLayout(context) {
             setOnClickListener { performHapticFeedback(HapticFeedbackConstants.CONFIRM); dismiss(save = true) }
         }
         previewCardFrame.addView(doneBtn, LayoutParams(-2, dp(34f), Gravity.TOP or Gravity.END).apply { setMargins(dp(14f), dp(14f), dp(14f), dp(14f)) })
+
+        fun setupNotifPill(pill: TextView, onClick: () -> Unit) {
+            pill.gravity = Gravity.CENTER
+            pill.setTextColor(Color.WHITE)
+            pill.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f)
+            pill.typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+            pill.setPadding(dp(12f), 0, dp(12f), 0)
+            pill.background = pillBg()
+            pill.setOnClickListener {
+                performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                onClick()
+            }
+        }
+        setupNotifPill(notifStylePill) {
+            val styles = NotificationStyle.values()
+            val nextIdx = (styles.indexOfFirst { it.id == editConfig.notificationStyle } + 1) % styles.size
+            editConfig = editConfig.copy(notificationStyle = styles[nextIdx].id)
+            syncNotifPreviewUI()
+        }
+        setupNotifPill(notifSurfacePill) {
+            val modes = NotificationSurfaceMode.values()
+            val nextIdx = (modes.indexOfFirst { it.id == editConfig.notificationSurfaceMode } + 1) % modes.size
+            editConfig = editConfig.copy(notificationSurfaceMode = modes[nextIdx].id)
+            syncNotifPreviewUI()
+        }
+        setupNotifPill(notifMaxPill) {
+            val nextMax = if (editConfig.notificationMaxCards >= 5) 1 else (editConfig.notificationMaxCards + 1)
+            editConfig = editConfig.copy(notificationMaxCards = nextMax)
+            syncNotifPreviewUI()
+        }
+
+        notifControlsRow.orientation = LinearLayout.HORIZONTAL
+        notifControlsRow.gravity = Gravity.CENTER
+        notifControlsRow.visibility = View.GONE
+        notifControlsRow.addView(notifStylePill, LinearLayout.LayoutParams(-2, dp(32f)).apply { marginEnd = dp(6f) })
+        notifControlsRow.addView(notifSurfacePill, LinearLayout.LayoutParams(-2, dp(32f)).apply { marginEnd = dp(6f) })
+        notifControlsRow.addView(notifMaxPill, LinearLayout.LayoutParams(-2, dp(32f)))
+        previewCardFrame.addView(notifControlsRow, LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = dp(12f) })
+
         previewAreaContainer.addView(previewCardFrame, LayoutParams(-1, -1, Gravity.CENTER))
 
         styleCarouselView.apply {
@@ -232,6 +302,45 @@ class LockscreenEditorOverlay(context: Context) : FrameLayout(context) {
         applyRootPadding()
     }
 
+    private fun toggleNotifPreview(enable: Boolean) {
+        showNotifPreview = enable
+        syncNotifPreviewUI()
+    }
+
+    private fun syncNotifPreviewUI() {
+        val st = NotificationStyle.fromId(editConfig.notificationStyle)
+        val surf = NotificationSurfaceMode.fromId(editConfig.notificationSurfaceMode)
+        notifStylePill.text = "${st.label} ▾"
+        notifSurfacePill.text = "${surf.label} ▾"
+        notifMaxPill.text = "Max ${editConfig.notificationMaxCards}"
+
+        val showSurface = st == NotificationStyle.GROUPED_CARDS ||
+            st == NotificationStyle.FROSTED_PILL ||
+            (st == NotificationStyle.ICONS_ONLY && editConfig.notificationIconsBackdrop)
+        notifSurfacePill.visibility = if (showSurface) View.VISIBLE else View.GONE
+        notifMaxPill.visibility = if (st == NotificationStyle.GROUPED_CARDS) View.VISIBLE else View.GONE
+        notifControlsRow.visibility = if (showNotifPreview) View.VISIBLE else View.GONE
+
+        notifToggleBtn.background = GradientDrawable().apply {
+            setColor(if (showNotifPreview) theme.accentColor else Color.argb(115, 0, 0, 0))
+            cornerRadius = dpf(18f)
+            setStroke(dp(1f), Color.argb(if (showNotifPreview) 140 else 60, 255, 255, 255))
+        }
+
+        val target = if (showNotifPreview && st.collapsesClockWhenNotifsPresent) 1f else 0f
+        notifPreviewAnimator?.cancel()
+        notifPreviewAnimator = ValueAnimator.ofFloat(notifPreviewProgress, target).apply {
+            duration = 280L
+            interpolator = DecelerateInterpolator()
+            addUpdateListener {
+                notifPreviewProgress = it.animatedValue as Float
+                previewCanvasView.invalidate()
+            }
+            start()
+        }
+        previewCanvasView.invalidate()
+    }
+
     override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
         super.onLayout(changed, left, top, right, bottom)
         val areaW = previewAreaContainer.width - previewAreaContainer.paddingLeft - previewAreaContainer.paddingRight
@@ -256,7 +365,9 @@ class LockscreenEditorOverlay(context: Context) : FrameLayout(context) {
             postDelayed({
                 if (!CaveArtXposedModule.isEditModeActive) {
                     unlockPromptPill.animate().alpha(0f).setDuration(200L).withEndAction {
-                        unlockPromptPill.visibility = View.GONE; visibility = View.GONE
+                        unlockPromptPill.visibility = View.GONE
+                        visibility = View.GONE
+                        (parent as? ViewGroup)?.removeView(this@LockscreenEditorOverlay)
                     }.start()
                 }
             }, 2200L)
@@ -265,6 +376,9 @@ class LockscreenEditorOverlay(context: Context) : FrameLayout(context) {
 
     fun openEditor() {
         val clock = CaveArtXposedModule.activeClock ?: return
+        isClickable = true
+        isFocusable = true
+        isFocusableInTouchMode = true
         initialConfig = clock.clockConfig
         editConfig = syncDate(initialConfig)
         editCollisionMap = clock.collisionMap
@@ -277,6 +391,8 @@ class LockscreenEditorOverlay(context: Context) : FrameLayout(context) {
         backdropStyle = BackdropStyle.fromId(
             getSettingInt(context, "backdrop_style", BackdropStyle.BLUR_BACKGROUND.id)
         )
+        showNotifPreview = false
+        notifPreviewProgress = 0f
 
         activeLayerScope = EditorLayerScope.CLOCK; isStyleBrowseMode = false; activeActionIndex = 0
         isLayersSheetVisible = false; layersScrim.visibility = View.GONE; unlockPromptPill.visibility = View.GONE
@@ -287,6 +403,7 @@ class LockscreenEditorOverlay(context: Context) : FrameLayout(context) {
         val (resolvedTheme, resolvedPalette) = LockscreenOverlayPanels.resolveTheme(context, paletteColors, backdropStyle)
         theme = resolvedTheme; paletteColors = resolvedPalette
         backdropTintView.background = LockscreenOverlayPanels.buildBackdropOverlayDrawable(theme, backdropStyle)
+        syncNotifPreviewUI()
 
         loadAssetsAsync()
         rebuildActionsList()
@@ -311,6 +428,7 @@ class LockscreenEditorOverlay(context: Context) : FrameLayout(context) {
     fun dismiss(save: Boolean) {
         if (!CaveArtXposedModule.isEditModeActive) return
         stopKeepAwake(); stopContinuousFrameLoop()
+        notifPreviewAnimator?.cancel()
         isLayersSheetVisible = false; layersScrim.visibility = View.GONE
 
         if (save) {
@@ -324,11 +442,15 @@ class LockscreenEditorOverlay(context: Context) : FrameLayout(context) {
         }
 
         CaveArtXposedModule.setEditMode(false)
+        isClickable = false
+        isFocusable = false
+        isFocusableInTouchMode = false
         animate().alpha(0f).setDuration(190L).withEndAction {
             visibility = View.GONE
             backdropImageView.setImageDrawable(null)
             blurredBackdrop?.takeIf { !it.isRecycled }?.recycle(); blurredBackdrop = null
             wallpaperBitmap?.takeIf { !it.isRecycled }?.recycle(); wallpaperBitmap = null
+            (parent as? ViewGroup)?.removeView(this@LockscreenEditorOverlay)
         }.start()
     }
 
@@ -388,7 +510,7 @@ class LockscreenEditorOverlay(context: Context) : FrameLayout(context) {
         if (isStyleBrowseMode) {
             previewCardFrame.visibility = View.GONE; styleCarouselView.visibility = View.VISIBLE
             styleCarouselView.setCurrentStyle(editConfig.styleId)
-            styleNamePill.visibility = View.VISIBLE; styleNamePill.text = ClockKitEngine.getStyle(editConfig.styleId).name
+            styleNamePill.visibility = View.VISIBLE; styleNamePill.text = ClockEngine.getStyle(editConfig.styleId).name
         } else {
             styleCarouselView.visibility = View.GONE; styleNamePill.visibility = View.GONE
             previewCardFrame.visibility = View.VISIBLE
@@ -406,11 +528,11 @@ class LockscreenEditorOverlay(context: Context) : FrameLayout(context) {
             contextualSlot.removeAllViews()
             fastScrollView.apply {
                 setScrollStyle(fastScrollStyle)
-                setPageCount(ClockKitEngine.styles.size)
-                setPage(ClockKitEngine.styles.indexOfFirst { it.id == editConfig.styleId }.coerceAtLeast(0), 0f)
+                setPageCount(ClockEngine.styles.size)
+                setPage(ClockEngine.styles.indexOfFirst { it.id == editConfig.styleId }.coerceAtLeast(0), 0f)
                 setColors(theme.accentColor, theme.onSurfaceColor)
                 onPageSelected = { page ->
-                    ClockKitEngine.styles.getOrNull(page)?.let { settled ->
+                    ClockEngine.styles.getOrNull(page)?.let { settled ->
                         if (settled.id != editConfig.styleId) {
                             editConfig = syncDate(editConfig.copy(styleId = settled.id))
                             styleNamePill.text = settled.name
@@ -448,12 +570,18 @@ class LockscreenEditorOverlay(context: Context) : FrameLayout(context) {
         isLayersSheetVisible = true
         LockscreenOverlayPanels.populateLayersSheet(
             context, layersSheetCard, theme, isDepthEnabled, activeLayerScope,
+            notifConfig = editConfig,
             onDiscard = { dismiss(save = false) },
             onToggleDepth = {
                 isDepthEnabled = !isDepthEnabled; editConfig = editConfig.copy(isDepthEnabled = isDepthEnabled)
                 previewCanvasView.invalidate(); showLayersSheet()
             },
-            onSelectScope = { scope -> focusScope(scope); hideLayersSheet() }
+            onSelectScope = { scope -> focusScope(scope); hideLayersSheet() },
+            onUpdateNotifConfig = { nextCfg ->
+                editConfig = nextCfg
+                syncNotifPreviewUI()
+                showLayersSheet()
+            }
         )
         layersScrim.visibility = View.VISIBLE; layersScrim.alpha = 0f; layersSheetCard.translationY = dpf(140f)
         layersScrim.animate().alpha(1f).setDuration(180L).start()
@@ -470,7 +598,7 @@ class LockscreenEditorOverlay(context: Context) : FrameLayout(context) {
     private fun onConfigMutated() {
         editConfig = syncDate(editConfig)
         syncContinuousFrameLoop()
-        val style = ClockKitEngine.getStyle(editConfig.styleId)
+        val style = ClockEngine.getStyle(editConfig.styleId)
         if (style.needsCollisionMap(editConfig) && editCollisionMap == null && depthMaskBitmap != null) {
             val mask = depthMaskBitmap!!; val zoom = wallpaperZoom
             Thread {
@@ -482,19 +610,34 @@ class LockscreenEditorOverlay(context: Context) : FrameLayout(context) {
         previewCanvasView.invalidate(); styleCarouselView.invalidateActiveCard()
     }
 
-    private fun syncDate(cfg: ClockKitConfig) = LockscreenSceneRenderer.clampConfigToScreen(
+    private fun syncDate(cfg: LockscreenConfig) = LockscreenSceneRenderer.clampConfigToScreen(
         context, cfg, CaveArtXposedModule.screenW, CaveArtXposedModule.screenH, density, statusBarPadPx, navBarPadPx
     )
 
-    private fun sceneParamsFor(cfg: ClockKitConfig, showUdfps: Boolean) = LockscreenSceneParams(
-        CaveArtXposedModule.screenW, CaveArtXposedModule.screenH, density,
-        wallpaperBitmap, depthMaskBitmap, rawDepthBitmap, editCollisionMap,
-        cfg, isDepthEnabled, wallpaperZoom, bgVibrance, bgOpacity, subjectOpacity,
-        showUdfps, CaveArtXposedModule.cachedUdfpsX, CaveArtXposedModule.cachedUdfpsY, CaveArtXposedModule.cachedUdfpsRadius
+    private fun sceneParamsFor(cfg: LockscreenConfig, showUdfps: Boolean) = LockscreenSceneParams(
+        screenW = CaveArtXposedModule.screenW,
+        screenH = CaveArtXposedModule.screenH,
+        density = density,
+        wallpaperBitmap = wallpaperBitmap,
+        depthMaskBitmap = depthMaskBitmap,
+        rawDepthBitmap = rawDepthBitmap,
+        collisionMap = editCollisionMap,
+        config = cfg,
+        isDepthEnabled = isDepthEnabled,
+        wallpaperZoom = wallpaperZoom,
+        bgVibrance = bgVibrance,
+        bgOpacity = bgOpacity,
+        subjectOpacity = subjectOpacity,
+        showUdfps = showUdfps,
+        udfpsX = CaveArtXposedModule.cachedUdfpsX,
+        udfpsY = CaveArtXposedModule.cachedUdfpsY,
+        udfpsRadius = CaveArtXposedModule.cachedUdfpsRadius,
+        notificationProgress = notifPreviewProgress,
+        previewNotifications = if (showNotifPreview) NotificationKitSampleProvider.getSamples() else null
     )
 
     private fun syncContinuousFrameLoop() {
-        val run = CaveArtXposedModule.isEditModeActive && ClockKitEngine.getStyle(editConfig.styleId).needsContinuousFrames(editConfig, 0f)
+        val run = CaveArtXposedModule.isEditModeActive && ClockEngine.getStyle(editConfig.styleId).needsContinuousFrames(editConfig, notifPreviewProgress)
         if (run && !frameLoopRunning) { frameLoopRunning = true; Choreographer.getInstance().postFrameCallback(frameCallback) }
         else if (!run && frameLoopRunning) stopContinuousFrameLoop()
     }
@@ -537,5 +680,5 @@ class LockscreenEditorOverlay(context: Context) : FrameLayout(context) {
         return super.dispatchKeyEvent(event)
     }
 
-    override fun onDetachedFromWindow() { stopKeepAwake(); stopContinuousFrameLoop(); super.onDetachedFromWindow() }
+    override fun onDetachedFromWindow() { stopKeepAwake(); stopContinuousFrameLoop(); notifPreviewAnimator?.cancel(); super.onDetachedFromWindow() }
 }

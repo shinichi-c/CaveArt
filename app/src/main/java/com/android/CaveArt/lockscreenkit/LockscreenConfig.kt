@@ -1,4 +1,4 @@
-package com.android.CaveArt.clockkit
+package com.android.CaveArt.lockscreenkit
 
 import android.content.Context
 import android.graphics.Bitmap
@@ -98,7 +98,7 @@ sealed class QuickChipItem {
     ) : QuickChipItem()
 }
 
-data class ClockKitConfig(
+data class LockscreenConfig(
     val styleId: String = "adaptive_vector",
     val clockX: Float = 0f,
     val clockY: Float = 110f,
@@ -124,12 +124,19 @@ data class ClockKitConfig(
     val gravityIntensity: Float = 1.0f,
     val gravityMode: GravityMode = GravityMode.SURFACE_PLANE,
     val styleFloats: Map<String, Map<String, Float>> = emptyMap(),
-    val styleStrings: Map<String, Map<String, String>> = emptyMap()
+    val styleStrings: Map<String, Map<String, String>> = emptyMap(),
+    val notificationStyle: Int = NotificationStyle.GROUPED_CARDS.id,
+    val notificationMaxCards: Int = 3,
+    val notificationSurfaceMode: Int = NotificationSurfaceMode.FROSTED_GLASS.id,
+    val notificationIconsBackdrop: Boolean = true,
+    val notificationShowAvatars: Boolean = true,
+    val notificationShowActions: Boolean = true,
+    val notificationIncludeSilent: Boolean = true
 ) {
     fun getFloat(styleId: String, key: String, default: Float): Float =
         styleFloats[styleId]?.get(key) ?: default
 
-    fun withFloat(styleId: String, key: String, value: Float): ClockKitConfig {
+    fun withFloat(styleId: String, key: String, value: Float): LockscreenConfig {
         val inner = (styleFloats[styleId] ?: emptyMap()).toMutableMap().apply { put(key, value) }
         return copy(styleFloats = styleFloats.toMutableMap().apply { put(styleId, inner) })
     }
@@ -137,13 +144,13 @@ data class ClockKitConfig(
     fun getBool(styleId: String, key: String, default: Boolean): Boolean =
         (styleFloats[styleId]?.get(key) ?: if (default) 1f else 0f) > 0.5f
 
-    fun withBool(styleId: String, key: String, value: Boolean): ClockKitConfig =
+    fun withBool(styleId: String, key: String, value: Boolean): LockscreenConfig =
         withFloat(styleId, key, if (value) 1f else 0f)
 
     fun getString(styleId: String, key: String, default: String): String =
         styleStrings[styleId]?.get(key) ?: default
 
-    fun withString(styleId: String, key: String, value: String): ClockKitConfig {
+    fun withString(styleId: String, key: String, value: String): LockscreenConfig {
         val inner = (styleStrings[styleId] ?: emptyMap()).toMutableMap().apply { put(key, value) }
         return copy(styleStrings = styleStrings.toMutableMap().apply { put(styleId, inner) })
     }

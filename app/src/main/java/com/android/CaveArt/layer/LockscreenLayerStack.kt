@@ -10,8 +10,6 @@ class LockscreenLayerStack {
     val subjectLayer = SubjectRenderLayer()
     val clockLayer = ClockRenderLayer()
     val basePhotoLayer = BasePhotoRenderLayer()
-    
-    // NEW: Real-time MiDaS depth vision layer
     val depthVisionLayer = DepthVisionRenderLayer()
 
     private val customLayers = mutableListOf<RenderLayer>()
@@ -25,7 +23,7 @@ class LockscreenLayerStack {
         val list = mutableListOf<RenderLayer>(
             basePhotoLayer, 
             backgroundLayer, 
-            depthVisionLayer, // Depth map layer sits under the clock
+            depthVisionLayer,
             clockLayer, 
             subjectLayer
         )

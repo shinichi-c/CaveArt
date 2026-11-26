@@ -1,4 +1,4 @@
-package com.android.CaveArt.clockkit
+package com.android.CaveArt.lockscreenkit
 
 import android.graphics.Canvas
 import android.graphics.Color
@@ -14,7 +14,7 @@ enum class ToolbarIconKind {
     CUBE, CLOCK, SPARK, GRID, SCALE, TOGGLE
 }
 
-object ClockToolbarIcons {
+object LockscreenToolbarIcons {
 
     private val fallbackKinds = listOf(
         ToolbarIconKind.CUBE,

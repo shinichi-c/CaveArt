@@ -5,11 +5,11 @@ import android.graphics.Bitmap
 import android.os.Build
 import androidx.compose.runtime.*
 import androidx.compose.ui.graphics.vector.ImageVector
-import com.android.CaveArt.clockkit.ClockControl
-import com.android.CaveArt.clockkit.ClockKitConfig
-import com.android.CaveArt.clockkit.ClockKitConfigStore
-import com.android.CaveArt.clockkit.ClockKitEngine
-import com.android.CaveArt.clockkit.LockscreenSceneRenderer
+import com.android.CaveArt.lockscreenkit.ClockControl
+import com.android.CaveArt.lockscreenkit.LockscreenConfig
+import com.android.CaveArt.lockscreenkit.LockscreenConfigStore
+import com.android.CaveArt.lockscreenkit.ClockEngine
+import com.android.CaveArt.lockscreenkit.LockscreenSceneRenderer
 import com.android.CaveArt.layer.LockscreenLayerStack
 
 enum class ActiveLayerTab(val label: String) {
@@ -24,7 +24,6 @@ enum class ContextualToolType {
     SLIDER,
     FONT,
     COLOR,
-    OPTIONS,
     CHOICE,
     QUICK_CHIPS,
     TOGGLE
@@ -44,8 +43,8 @@ data class LayerAction(
 
 class ClockStudioState(viewModel: WallpaperViewModel) {
     val layerStack: LockscreenLayerStack = LockscreenLayerStack().apply {
-        setDepthClockActive(viewModel.clockKitConfig.isDepthEnabled)
-        depthOcclusionLimit = viewModel.clockKitConfig.depthOcclusionLimit
+        setDepthClockActive(viewModel.lockscreenConfig.isDepthEnabled)
+        depthOcclusionLimit = viewModel.lockscreenConfig.depthOcclusionLimit
         backgroundLayer.structure = viewModel.layerBackgroundStructure
         subjectLayer.opacity = viewModel.layerSubjectOpacity.coerceAtLeast(1.0f)
         backgroundLayer.opacity = viewModel.layerBackgroundOpacity.coerceAtLeast(1.0f)
@@ -53,11 +52,11 @@ class ClockStudioState(viewModel: WallpaperViewModel) {
         subjectLayer.isVisible = true
     }
 
-    var clockKitConfig: ClockKitConfig by mutableStateOf(viewModel.clockKitConfig)
+    var lockscreenConfig: LockscreenConfig by mutableStateOf(viewModel.lockscreenConfig)
 
-    fun updateConfig(transform: (ClockKitConfig) -> ClockKitConfig) {
-        val next = transform(clockKitConfig)
-        clockKitConfig = next
+    fun updateConfig(transform: (LockscreenConfig) -> LockscreenConfig) {
+        val next = transform(lockscreenConfig)
+        lockscreenConfig = next
         if (next.isDepthEnabled != layerStack.isDepthEnabled) {
             layerStack.setDepthClockActive(next.isDepthEnabled)
         }
@@ -67,7 +66,7 @@ class ClockStudioState(viewModel: WallpaperViewModel) {
     }
 
     val dateSize: MutableFloatState = mutableFloatStateOf(
-        LockscreenSceneRenderer.computeDateSizeSp(viewModel.clockKitConfig)
+        LockscreenSceneRenderer.computeDateSizeSp(viewModel.lockscreenConfig)
     )
 
     val collisionMap: MutableState<String> = mutableStateOf(viewModel.clockCollisionMap)
@@ -94,17 +93,17 @@ fun saveAndBroadcastClockSettings(
         context.createDeviceProtectedStorageContext()
     } else context
 
-    safeCtx.getSharedPreferences(ClockKitConfigStore.PREFS_NAME, Context.MODE_PRIVATE)
+    safeCtx.getSharedPreferences(LockscreenConfigStore.PREFS_NAME, Context.MODE_PRIVATE)
         .edit()
         .putFloat("telemetry_zoom", state.liveWallpaperZoom.floatValue)
         .apply()
 
-    val finalConfig = state.clockKitConfig.copy(
+    val finalConfig = state.lockscreenConfig.copy(
         isDepthEnabled = state.layerStack.isDepthEnabled,
         depthOcclusionLimit = state.layerStack.depthOcclusionLimit
     )
 
-    val activeStyle = ClockKitEngine.getStyle(finalConfig.styleId)
+    val activeStyle = ClockEngine.getStyle(finalConfig.styleId)
     val mapToSave = if (activeStyle.needsCollisionMap(finalConfig) && previewMask != null) {
         state.collisionMap.value.ifEmpty {
             AdaptiveClockHelper.generateCollisionMap(previewMask, realW, realH, state.liveWallpaperZoom.floatValue)
@@ -122,6 +121,6 @@ fun saveAndBroadcastClockSettings(
         viewModel.saveRawDepthToDisk(context, activeRawDepth)
     }
 
-    viewModel.updateClockKitConfig(context, finalConfig, mapToSave)
+    viewModel.updateLockscreenConfig(context, finalConfig, mapToSave)
     viewModel.saveLayerStackSettings(context, state.layerStack)
 }

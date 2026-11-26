@@ -1,4 +1,4 @@
-package com.android.CaveArt.clockkit
+package com.android.CaveArt.lockscreenkit
 
 import android.app.WallpaperColors
 import android.content.Context
@@ -11,6 +11,7 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 
+
 object LockscreenLayoutSpec {
     const val DEFAULT_WALLPAPER_ZOOM = 1.10f
     const val SIDE_SAFE_MARGIN_DP = 18f
@@ -22,11 +23,12 @@ object LockscreenLayoutSpec {
     const val DETACHED_OVERLAP_MARGIN_DP = 16f
     const val MAGNETIC_SNAP_WIDTH_RATIO = 0.025f
     const val UDFPS_HIT_BUFFER_RATIO = 0.15f
-    const val NOTIF_PUSH_MARGIN_DP = 26f
+    const val NOTIF_PUSH_MARGIN_DP = 22f
     const val DATE_HIT_PAD_DP = 14f
     const val SYSTEMUI_BOTTOM_SAFE_DP = 120f
     const val EDITOR_BOTTOM_SAFE_DP = 8f
 }
+
 
 object LockscreenControlSpec {
     val OCCLUSION_RANGE = 0.10f..0.85f
@@ -53,6 +55,7 @@ enum class BackdropStyle(val id: Int, val label: String) {
         fun fromId(id: Int): BackdropStyle = values().firstOrNull { it.id == id } ?: BLUR_BACKGROUND
     }
 }
+
 
 object BackdropSpec {
     const val AMBIENT_BLUR_DP = 85f
@@ -83,7 +86,7 @@ data class LockscreenSceneParams(
     val depthMaskBitmap: Bitmap?,
     val rawDepthBitmap: Bitmap?,
     val collisionMap: FloatArray?,
-    val config: ClockKitConfig,
+    val config: LockscreenConfig,
     val isDepthEnabled: Boolean,
     val wallpaperZoom: Float,
     val bgVibrance: Float = 0f,
@@ -105,17 +108,26 @@ data class LockscreenSceneParams(
     val timeMillis: Long = System.currentTimeMillis(),
     val is24Hour: Boolean? = null,
     val customTypeface: Typeface? = null,
-    val fallbackWallpaperColors: WallpaperColors? = null
+    val fallbackWallpaperColors: WallpaperColors? = null,
+    val notificationProgress: Float = 0f,
+    val previewNotifications: List<LockNotifAppGroup>? = null,
+    val previewExpandedGroupId: String? = null,
+    val previewCollapsingGroupId: String? = null,
+    val previewExpandProgress: Float = 1f,
+    val previewPeekGroupId: String? = null,
+    val previewPeekProgress: Float = 0f
 )
 
 data class LockscreenSceneDrawResult(
     val clockBoundsOnScreen: RectF,
-    val elevatedAboveSubject: Boolean
+    val elevatedAboveSubject: Boolean,
+    val notificationBoundsOnScreen: RectF = RectF(),
+    val notificationHitLayout: NotificationHitLayout = NotificationHitLayout()
 )
 
 object LockscreenSceneRenderer {
 
-    fun computeDateSizeSp(cfg: ClockKitConfig): Float {
+    fun computeDateSizeSp(cfg: LockscreenConfig): Float {
         return if (cfg.styleId == "adaptive_vector") {
             (cfg.getFloat("adaptive_vector", "hour_size", 100f) * 0.17f).coerceIn(14f, 20f)
         } else {
@@ -133,7 +145,7 @@ object LockscreenSceneRenderer {
     }
 
     fun computeAttachedDateGapDp(
-        cfg: ClockKitConfig,
+        cfg: LockscreenConfig,
         dateSizeSp: Float = computeDateSizeSp(cfg)
     ): Float {
         val strokeW = cfg.getFloat("adaptive_vector", "stroke_width", 8f)
@@ -154,7 +166,7 @@ object LockscreenSceneRenderer {
     fun computeEffectiveMarginsPx(
         clockTopMarginPx: Int,
         dateTopMarginPx: Int,
-        cfg: ClockKitConfig,
+        cfg: LockscreenConfig,
         isExternalDate: Boolean,
         needsCollisionMap: Boolean,
         dateHeightPx: Float,
@@ -180,6 +192,53 @@ object LockscreenSceneRenderer {
             max(minSafeTopPx, idealAbovePx).toInt()
         }
         return effectiveClockTopPx to effectiveDateTopPx
+    }
+
+    fun computeNotificationsMaxBottomPx(
+        screenH: Float,
+        density: Float,
+        udfpsY: Float,
+        udfpsRadius: Float
+    ): Float {
+        val defaultSafeBottom = screenH - (LockscreenLayoutSpec.SYSTEMUI_BOTTOM_SAFE_DP * density)
+        return if (udfpsRadius > 0f && udfpsY > 0f) {
+            min(defaultSafeBottom, udfpsY - udfpsRadius - (18f * density))
+        } else {
+            defaultSafeBottom
+        }.coerceAtLeast(120f * density)
+    }
+
+    fun computeNotificationsTopPx(
+        anchorBottomPx: Float,
+        notifHeightPx: Float,
+        maxBottomPx: Float,
+        density: Float,
+        isCollapsingStyle: Boolean = true,
+        isIconsOnly: Boolean = false,
+        clockTopPx: Float = -1f,
+        dateBottomPx: Float = -1f
+    ): Float {
+        val idealTop = anchorBottomPx + (LockscreenLayoutSpec.NOTIF_PUSH_MARGIN_DP * density)
+        if (idealTop + notifHeightPx <= maxBottomPx) {
+            return idealTop
+        }
+        if (!isCollapsingStyle) {
+            val tightTop = anchorBottomPx + (8f * density)
+            if (tightTop + notifHeightPx <= maxBottomPx) {
+                return tightTop
+            }
+            if (isIconsOnly && clockTopPx > 0f) {
+                val upperSlotTop = if (dateBottomPx > 0f) {
+                    dateBottomPx + (8f * density)
+                } else {
+                    LockscreenLayoutSpec.COMPACT_DATE_TOP_DP * density
+                }
+                if (upperSlotTop + notifHeightPx + (10f * density) <= clockTopPx) {
+                    return upperSlotTop
+                }
+            }
+        }
+        return (maxBottomPx - notifHeightPx).coerceAtLeast(LockscreenLayoutSpec.NOTIF_CLOCK_TOP_DP * density)
     }
 
     fun resolveDetachedOverlapTargetYDp(
@@ -219,7 +278,7 @@ object LockscreenSceneRenderer {
 
     fun clampConfigToScreen(
         context: Context,
-        cfg: ClockKitConfig,
+        cfg: LockscreenConfig,
         screenW: Float,
         screenH: Float,
         density: Float,
@@ -228,9 +287,9 @@ object LockscreenSceneRenderer {
         resolveDetachedOverlap: Boolean = true,
         drawnClockBoundsPx: RectF? = null,
         snapshotOverride: AtAGlanceSnapshot? = null
-    ): ClockKitConfig {
+    ): LockscreenConfig {
         if (screenW <= 0f || screenH <= 0f || density <= 0f) return cfg
-        val clockStyle = ClockKitEngine.getStyle(cfg.styleId)
+        val clockStyle = ClockEngine.getStyle(cfg.styleId)
         val now = System.currentTimeMillis()
         val is24 = DateFormat.is24HourFormat(context)
         val timeStr = SimpleDateFormat(if (is24) "HH:mm" else "hh:mm", Locale.getDefault())
@@ -331,13 +390,13 @@ object LockscreenSceneRenderer {
 
     fun syncAttachedDatePosition(
         context: Context,
-        cfg: ClockKitConfig,
+        cfg: LockscreenConfig,
         statusBarPadPx: Int,
         density: Float,
         screenW: Float,
         screenH: Float,
         navBarPadPx: Int = 0
-    ): ClockKitConfig = clampConfigToScreen(context, cfg, screenW, screenH, density, statusBarPadPx, navBarPadPx, true)
+    ): LockscreenConfig = clampConfigToScreen(context, cfg, screenW, screenH, density, statusBarPadPx, navBarPadPx, true)
 
     fun drawScene(
         context: Context,
@@ -355,9 +414,16 @@ object LockscreenSceneRenderer {
         val timeStr = SimpleDateFormat(if (is24) "HH:mm" else "hh:mm", Locale.getDefault()).format(Date(frameNow))
         val dateStr = ClockTypefaceResolver.formatDate(frameNow, cfg.dateFormat)
         val tf = params.customTypeface ?: ClockTypefaceResolver.resolve(context, cfg.font)
-        val clockStyle = ClockKitEngine.getStyle(cfg.styleId)
+        val clockStyle = ClockEngine.getStyle(cfg.styleId)
+        val notifStyle = NotificationStyle.fromId(cfg.notificationStyle)
+        val notifP = if (notifStyle.collapsesClockWhenNotifsPresent) {
+            params.notificationProgress.coerceIn(0f, 1f)
+        } else {
+            0f
+        }
 
         val localBounds = RectF()
+        val notifBounds = RectF()
         var elevatedAboveSubject = false
 
         canvas.drawColor(Color.BLACK)
@@ -434,34 +500,55 @@ object LockscreenSceneRenderer {
             drawSubjectCutout()
         }
 
+        val isExternalDate = clockStyle.datePolicy(cfg) == ClockDatePolicy.EXTERNAL_STANDARD && cfg.atGlanceEnabled
+        val snapshot = params.atGlanceSnapshot ?: AtAGlanceDataCollector.collect(context, cfg, frameNow)
+        val compactDateM = if (isExternalDate) {
+            AtAGlanceRenderer.measure(cfg, snapshot, params.density, LockscreenLayoutSpec.COMPACT_DATE_SIZE_SP, realW)
+        } else null
+
+        val idleClockX = (realW / 2f) + (cfg.clockX * params.density)
+        val idleClockY = cfg.clockY * params.density
+        val compactClockX = realW / 2f
+        val compactClockY = computeCompactClockTopPx(
+            hasExternalDate = isExternalDate,
+            compactDateHeightPx = compactDateM?.heightPx ?: 0f,
+            density = params.density
+        )
+
         val frameCtx = ClockFrameContext(
             context = context,
             screenW = realW,
             screenH = realH,
             density = params.density,
-            clockCenterX = (realW / 2f) + (cfg.clockX * params.density),
-            clockTopY = cfg.clockY * params.density,
+            clockCenterX = idleClockX + (compactClockX - idleClockX) * notifP,
+            clockTopY = idleClockY + (compactClockY - idleClockY) * notifP,
             timeMillis = frameNow,
             timeString = timeStr,
             dateString = dateStr,
             is24Hour = is24,
             typeface = tf,
-            notificationProgress = 0f,
+            notificationProgress = notifP,
             collisionMap = params.collisionMap,
             depthMask = mask,
             rawDepthMap = params.rawDepthBitmap,
             zoomFactor = params.wallpaperZoom
         )
 
+        var dateBottomPx = 0f
         if (params.showClock) {
-            if (clockStyle.datePolicy(cfg) == ClockDatePolicy.EXTERNAL_STANDARD && cfg.atGlanceEnabled) {
-                val dateSp = computeDateSizeSp(cfg)
-                val snapshot = params.atGlanceSnapshot ?: AtAGlanceDataCollector.collect(context, cfg, frameNow)
-                val nativeDateX = (realW / 2f) + (cfg.dateX * params.density)
-                val nativeDateY = cfg.dateY * params.density
+            if (isExternalDate) {
+                val idleDateSp = computeDateSizeSp(cfg)
+                val dateSp = idleDateSp + (LockscreenLayoutSpec.COMPACT_DATE_SIZE_SP - idleDateSp) * notifP
+                val idleDateX = (realW / 2f) + (cfg.dateX * params.density)
+                val idleDateY = cfg.dateY * params.density
+                val compactDateX = realW / 2f
+                val compactDateY = LockscreenLayoutSpec.COMPACT_DATE_TOP_DP * params.density
+
+                val nativeDateX = idleDateX + (compactDateX - idleDateX) * notifP
+                val nativeDateY = idleDateY + (compactDateY - idleDateY) * notifP
                 val effectiveBgOpacity = if (params.showBackground) params.bgOpacity else 0f
 
-                AtAGlanceRenderer.drawAuto(
+                val glanceDrawn = AtAGlanceRenderer.drawAuto(
                     canvas = canvas,
                     centerX = nativeDateX,
                     topY = nativeDateY,
@@ -477,27 +564,78 @@ object LockscreenSceneRenderer {
                     bgOpacity = effectiveBgOpacity,
                     fallbackColors = params.fallbackWallpaperColors
                 )
+                dateBottomPx = nativeDateY + glanceDrawn.heightPx
             }
 
             if (timeStr.isNotEmpty()) {
-                val (renderRes, elevate) = ClockKitEngine.renderForPreview(canvas, clockStyle, frameCtx, cfg)
+                val (renderRes, elevate) = ClockEngine.renderForPreview(canvas, clockStyle, frameCtx, cfg)
                 localBounds.set(renderRes.boundsOnScreen)
                 elevatedAboveSubject = elevate
             }
         }
 
-        if (params.showSubject && params.showClock && params.isDepthEnabled && !elevatedAboveSubject) {
+        if (params.showSubject && params.showClock && params.isDepthEnabled && !elevatedAboveSubject && notifP < 0.2f) {
             drawSubjectCutout()
         }
 
         if (params.showClock && timeStr.isNotEmpty()) {
-            val overlayRes = ClockKitEngine.renderPreviewOverlay(canvas, clockStyle, frameCtx, cfg)
+            val overlayRes = ClockEngine.renderPreviewOverlay(canvas, clockStyle, frameCtx, cfg)
             if (overlayRes != null) {
                 localBounds.union(overlayRes.boundsOnScreen)
             }
         }
 
         outClockBounds?.set(localBounds)
+
+        var hitLayoutOut = NotificationHitLayout()
+        val previewNotifs = params.previewNotifications
+        if (!previewNotifs.isNullOrEmpty() && params.showClock) {
+            val anchorBottom = max(localBounds.bottom, dateBottomPx).coerceAtLeast(110f * params.density)
+            val maxBottom = computeNotificationsMaxBottomPx(realH, params.density, params.udfpsY, params.udfpsRadius)
+            val activeExpanded = params.previewExpandedGroupId ?: params.previewCollapsingGroupId
+            val notifH = NotificationKitRenderer.measureTotalHeightPx(
+                groups = previewNotifs,
+                config = cfg,
+                density = params.density,
+                expandedGroupId = activeExpanded,
+                expandProgress = params.previewExpandProgress,
+                screenW = realW
+            )
+            val notifTop = computeNotificationsTopPx(
+                anchorBottomPx = anchorBottom,
+                notifHeightPx = notifH,
+                maxBottomPx = maxBottom,
+                density = params.density,
+                isCollapsingStyle = notifStyle.collapsesClockWhenNotifsPresent,
+                isIconsOnly = notifStyle == NotificationStyle.ICONS_ONLY,
+                clockTopPx = if (!localBounds.isEmpty) localBounds.top else frameCtx.clockTopY,
+                dateBottomPx = if (isExternalDate) dateBottomPx else -1f
+            )
+            val effectiveBgOpacity = if (params.showBackground) params.bgOpacity else 0f
+
+            hitLayoutOut = NotificationKitRenderer.draw(
+                canvas = canvas,
+                groups = previewNotifs,
+                config = cfg,
+                screenW = realW,
+                screenH = realH,
+                topY = notifTop,
+                maxBottomY = maxBottom,
+                density = params.density,
+                nowMillis = frameNow,
+                wallpaperBitmap = if (params.showBackground) wp else null,
+                wallpaperZoom = params.wallpaperZoom,
+                bgOpacity = effectiveBgOpacity,
+                fallbackColors = params.fallbackWallpaperColors,
+                expandedGroupId = params.previewExpandedGroupId,
+                collapsingGroupId = params.previewCollapsingGroupId,
+                expandProgress = params.previewExpandProgress,
+                peekGroupId = params.previewPeekGroupId,
+                peekProgress = params.previewPeekProgress,
+                isNightMode = NotificationKitRenderer.isSystemNightMode(context)
+            )
+            notifBounds.set(hitLayoutOut.totalBounds)
+        }
 
         if (params.showNotificationShelfGuide && params.notificationShelfTop > 0f && localBounds.bottom > params.notificationShelfTop) {
             val notificationPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -532,8 +670,44 @@ object LockscreenSceneRenderer {
         canvas.restore()
         return LockscreenSceneDrawResult(
             clockBoundsOnScreen = localBounds,
-            elevatedAboveSubject = elevatedAboveSubject
+            elevatedAboveSubject = elevatedAboveSubject,
+            notificationBoundsOnScreen = notifBounds,
+            notificationHitLayout = hitLayoutOut
         )
+    }
+
+    fun createNotificationFrostBitmap(src: Bitmap): Bitmap {
+        val targetW = 220
+        val targetH = ((src.height.toFloat() / src.width.coerceAtLeast(1)) * targetW)
+            .roundToInt().coerceIn(120, 480)
+        val small = Bitmap.createScaledBitmap(src, targetW, targetH, true)
+        fastBoxBlurInPlace(small, radius = 14, passes = 3)
+
+        val boosted = Bitmap.createBitmap(small.width, small.height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(boosted)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            colorFilter = ColorMatrixColorFilter(ColorMatrix().apply { setSaturation(1.28f) })
+        }
+        canvas.drawBitmap(small, 0f, 0f, paint)
+        small.recycle()
+        return boosted
+    }
+
+    fun createNotificationAmbientBitmap(src: Bitmap): Bitmap {
+        val targetW = BackdropSpec.XPOSED_AMBIENT_WIDTH
+        val targetH = ((src.height.toFloat() / src.width.coerceAtLeast(1)) * targetW)
+            .roundToInt().coerceIn(64, 240)
+        val small = Bitmap.createScaledBitmap(src, targetW, targetH, true)
+        fastBoxBlurInPlace(small, radius = BackdropSpec.XPOSED_AMBIENT_RADIUS, passes = 3)
+
+        val boosted = Bitmap.createBitmap(small.width, small.height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(boosted)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            colorFilter = ColorMatrixColorFilter(ColorMatrix().apply { setSaturation(1.35f) })
+        }
+        canvas.drawBitmap(small, 0f, 0f, paint)
+        small.recycle()
+        return boosted
     }
 
     fun createBlurredBackdrop(

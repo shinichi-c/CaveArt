@@ -61,8 +61,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.rememberAsyncImagePainter
-import com.android.CaveArt.clockkit.BackdropSpec
-import com.android.CaveArt.clockkit.BackdropStyle
+import com.android.CaveArt.lockscreenkit.BackdropSpec
+import com.android.CaveArt.lockscreenkit.BackdropStyle
 import kotlin.random.Random
 
 data class Particle(

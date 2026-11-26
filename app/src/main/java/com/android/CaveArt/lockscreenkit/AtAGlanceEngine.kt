@@ -1,4 +1,4 @@
-package com.android.CaveArt.clockkit
+package com.android.CaveArt.lockscreenkit
 
 import android.app.AlarmManager
 import android.app.NotificationManager
@@ -143,7 +143,7 @@ object AtAGlanceDataCollector {
         }
     }
 
-    fun collect(context: Context, config: ClockKitConfig, nowMillis: Long = System.currentTimeMillis()): AtAGlanceSnapshot {
+    fun collect(context: Context, config: LockscreenConfig, nowMillis: Long = System.currentTimeMillis()): AtAGlanceSnapshot {
         ensureTorchListener(context)
 
         val dateText = ClockTypefaceResolver.formatDate(nowMillis, config.dateFormat)
@@ -177,7 +177,7 @@ object AtAGlanceDataCollector {
             val safeCtx = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                 context.createDeviceProtectedStorageContext()
             } else context
-            val prefs = safeCtx.getSharedPreferences(ClockKitConfigStore.PREFS_NAME, Context.MODE_PRIVATE)
+            val prefs = safeCtx.getSharedPreferences(LockscreenConfigStore.PREFS_NAME, Context.MODE_PRIVATE)
             val updated = prefs.getLong("glance_weather_updated", 0L)
             if (updated > 0L) {
                 val data = AtAGlanceWeatherData(
@@ -376,10 +376,7 @@ object AtAGlanceDataCollector {
     }
 }
 
-/**
- * Single Source of Truth for At a Glance colors, thresholds, and pill styling.
- * Edit these constants here and all previews, carousels, and SystemUI views update together.
- */
+
 object AtAGlanceColorResolver {
     const val DEFAULT_INK_COLOR: Int = Color.WHITE
     const val DARK_INK_COLOR: Int = 0xFF14161A.toInt()
@@ -398,21 +395,28 @@ object AtAGlanceColorResolver {
         return 0.2126f * r + 0.7152f * g + 0.0722f * b
     }
 
-    fun isDarkInkFromWallpaperColors(colors: WallpaperColors?): Boolean {
+    fun isDarkInkFromWallpaperColors(
+        colors: WallpaperColors?,
+        lightThreshold: Float = LIGHT_WALLPAPER_LUM_THRESHOLD
+    ): Boolean {
         if (!ADAPT_TO_LIGHT_WALLPAPER || colors == null) return false
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            if ((colors.colorHints and WallpaperColors.HINT_SUPPORTS_DARK_TEXT) != 0) {
+            if ((colors.colorHints and WallpaperColors.HINT_SUPPORTS_DARK_TEXT) != 0 &&
+                lightThreshold <= LIGHT_WALLPAPER_LUM_THRESHOLD
+            ) {
                 return true
             }
         } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             try {
                 val hints = colors.javaClass.getMethod("getColorHints").invoke(colors) as? Int ?: 0
                 val darkTextFlag = WallpaperColors::class.java.getField("HINT_SUPPORTS_DARK_TEXT").getInt(null)
-                if ((hints and darkTextFlag) != 0) return true
+                if ((hints and darkTextFlag) != 0 && lightThreshold <= LIGHT_WALLPAPER_LUM_THRESHOLD) {
+                    return true
+                }
             } catch (_: Throwable) {}
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
-            if (colorLuminance(colors.primaryColor.toArgb()) >= LIGHT_WALLPAPER_LUM_THRESHOLD) {
+            if (colorLuminance(colors.primaryColor.toArgb()) >= lightThreshold) {
                 return true
             }
         }
@@ -429,15 +433,16 @@ object AtAGlanceColorResolver {
         widthPx: Float,
         heightPx: Float,
         bgOpacity: Float = 1f,
-        fallbackColors: WallpaperColors? = null
+        fallbackColors: WallpaperColors? = null,
+        lightThreshold: Float = LIGHT_WALLPAPER_LUM_THRESHOLD
     ): Int {
         if (!ADAPT_TO_LIGHT_WALLPAPER) return DEFAULT_INK_COLOR
 
         if (wallpaperBitmap == null || wallpaperBitmap.isRecycled || screenW <= 0f || screenH <= 0f) {
-            return if (isDarkInkFromWallpaperColors(fallbackColors)) DARK_INK_COLOR else DEFAULT_INK_COLOR
+            return if (isDarkInkFromWallpaperColors(fallbackColors, lightThreshold)) DARK_INK_COLOR else DEFAULT_INK_COLOR
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && wallpaperBitmap.config == Bitmap.Config.HARDWARE) {
-            return if (isDarkInkFromWallpaperColors(fallbackColors)) DARK_INK_COLOR else DEFAULT_INK_COLOR
+            return if (isDarkInkFromWallpaperColors(fallbackColors, lightThreshold)) DARK_INK_COLOR else DEFAULT_INK_COLOR
         }
 
         val bw = wallpaperBitmap.width.toFloat()
@@ -458,7 +463,7 @@ object AtAGlanceColorResolver {
         val bottom = (topY + safeH).coerceIn(0f, screenH)
 
         if (right <= left || bottom <= top) {
-            return if (isDarkInkFromWallpaperColors(fallbackColors)) DARK_INK_COLOR else DEFAULT_INK_COLOR
+            return if (isDarkInkFromWallpaperColors(fallbackColors, lightThreshold)) DARK_INK_COLOR else DEFAULT_INK_COLOR
         }
 
         val cols = 12
@@ -486,7 +491,7 @@ object AtAGlanceColorResolver {
         }
 
         val avgLum = if (count > 0) lumSum / count else 0f
-        return if (avgLum >= LIGHT_WALLPAPER_LUM_THRESHOLD) DARK_INK_COLOR else DEFAULT_INK_COLOR
+        return if (avgLum >= lightThreshold) DARK_INK_COLOR else DEFAULT_INK_COLOR
     }
 }
 
@@ -542,7 +547,7 @@ object AtAGlanceRenderer {
     }
 
     fun measure(
-        config: ClockKitConfig,
+        config: LockscreenConfig,
         snapshot: AtAGlanceSnapshot,
         density: Float,
         dateSizeSp: Float,
@@ -702,15 +707,12 @@ object AtAGlanceRenderer {
         )
     }
 
-    /**
-     * Single entry point used by App Preview, Carousel, Xposed Editor, and Live SystemUI.
-     * Automatically resolves pure white vs dark ink from the wallpaper behind the widget.
-     */
+   
     fun drawAuto(
         canvas: Canvas,
         centerX: Float,
         topY: Float,
-        config: ClockKitConfig,
+        config: LockscreenConfig,
         snapshot: AtAGlanceSnapshot,
         density: Float,
         dateSizeSp: Float,
@@ -754,7 +756,7 @@ object AtAGlanceRenderer {
         canvas: Canvas,
         centerX: Float,
         topY: Float,
-        config: ClockKitConfig,
+        config: LockscreenConfig,
         snapshot: AtAGlanceSnapshot,
         density: Float,
         textColor: Int,
@@ -771,7 +773,7 @@ object AtAGlanceRenderer {
         m: AtAGlanceMeasureResult,
         centerX: Float,
         topY: Float,
-        config: ClockKitConfig,
+        config: LockscreenConfig,
         density: Float,
         textColor: Int,
         alphaScale: Float

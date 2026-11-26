@@ -1,9 +1,9 @@
-package com.android.CaveArt.clockkit.styles
+package com.android.CaveArt.lockscreenkit.styles
 
 import android.graphics.*
 import com.android.CaveArt.AdaptiveClockHelper
 import com.android.CaveArt.PerspectiveFitHelper
-import com.android.CaveArt.clockkit.*
+import com.android.CaveArt.lockscreenkit.*
 import kotlin.math.min
 
 class AdaptiveVectorClockStyle : BaseClockStyle() {
@@ -14,7 +14,7 @@ class AdaptiveVectorClockStyle : BaseClockStyle() {
 
     override val handlesGravityManually: Boolean = true
 
-    override fun needsCollisionMap(config: ClockKitConfig): Boolean =
+    override fun needsCollisionMap(config: LockscreenConfig): Boolean =
         config.getBool(id, "stretch", false)
 
     private class Scratch {
@@ -29,7 +29,7 @@ class AdaptiveVectorClockStyle : BaseClockStyle() {
 
     private val scratch = ThreadLocal.withInitial { Scratch() }
 
-    override fun describeControls(config: ClockKitConfig): List<ClockControl> = listOf(
+    override fun describeControls(config: LockscreenConfig): List<ClockControl> = listOf(
         ClockControl.Slider(
             id = "stroke_width", label = "Thickness", icon = ClockIcon.THICKNESS,
             min = 0f, max = 25f, defaultValue = 8f
@@ -60,7 +60,7 @@ class AdaptiveVectorClockStyle : BaseClockStyle() {
         )
     )
 
-    override fun onPinchZoom(config: ClockKitConfig, zoomFactor: Float): ClockKitConfig {
+    override fun onPinchZoom(config: LockscreenConfig, zoomFactor: Float): LockscreenConfig {
         val h = (config.getFloat(id, "hour_size", 100f) * zoomFactor).coerceIn(35f, 200f)
         val m = (config.getFloat(id, "min_size", 75f) * zoomFactor).coerceIn(30f, 180f)
         return config.withFloat(id, "hour_size", h).withFloat(id, "min_size", m)
@@ -68,12 +68,12 @@ class AdaptiveVectorClockStyle : BaseClockStyle() {
 
     override fun onAction(
         actionId: String,
-        config: ClockKitConfig,
+        config: LockscreenConfig,
         mask: Bitmap?,
         screenW: Float,
         screenH: Float,
         density: Float
-    ): ClockKitConfig {
+    ): LockscreenConfig {
         if (actionId == "auto_fit" && mask != null) {
             val h = config.getFloat(id, "hour_size", 100f)
             val m = config.getFloat(id, "min_size", 75f)
@@ -89,7 +89,7 @@ class AdaptiveVectorClockStyle : BaseClockStyle() {
         return config
     }
 
-    override fun measure(ctx: ClockMeasureContext, config: ClockKitConfig): ClockMeasureResult {
+    override fun measure(ctx: ClockMeasureContext, config: LockscreenConfig): ClockMeasureResult {
         val baseH = config.getFloat(id, "hour_size", 100f)
         val baseM = config.getFloat(id, "min_size", 75f)
         val strokeW = config.getFloat(id, "stroke_width", 8f)
@@ -118,7 +118,7 @@ class AdaptiveVectorClockStyle : BaseClockStyle() {
         )
     }
 
-    override fun render(canvas: Canvas, frame: ClockFrameContext, config: ClockKitConfig): ClockRenderResult {
+    override fun render(canvas: Canvas, frame: ClockFrameContext, config: LockscreenConfig): ClockRenderResult {
         val s = scratch.get()!!
         val baseH = config.getFloat(id, "hour_size", 100f)
         val baseM = config.getFloat(id, "min_size", 75f)

@@ -24,14 +24,14 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.lerp
-import com.android.CaveArt.clockkit.*
+import com.android.CaveArt.lockscreenkit.*
 import kotlinx.coroutines.launch
 import kotlin.math.absoluteValue
 
 @Composable
 fun ClockStyleCarousel(
     pagerState: PagerState,
-    currentConfig: ClockKitConfig,
+    currentConfig: LockscreenConfig,
     displayGeometry: NativeDisplayGeometry,
     previewOriginal: Bitmap?,
     previewMask: Bitmap?,
@@ -50,7 +50,7 @@ fun ClockStyleCarousel(
     val view = LocalView.current
     val scope = rememberCoroutineScope()
 
-    val styles = ClockKitEngine.styles
+    val styles = ClockEngine.styles
 
     LaunchedEffect(pagerState.settledPage) {
         val settled = styles[pagerState.settledPage]

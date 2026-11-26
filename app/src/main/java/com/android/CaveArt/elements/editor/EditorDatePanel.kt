@@ -20,8 +20,8 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.android.CaveArt.clockkit.AtAGlanceDataCollector
-import com.android.CaveArt.clockkit.AtAGlanceStyle
+import com.android.CaveArt.lockscreenkit.AtAGlanceDataCollector
+import com.android.CaveArt.lockscreenkit.AtAGlanceStyle
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -36,8 +36,8 @@ fun EditorDatePanel(
     val view = LocalView.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    val snapshot = remember(state.clockKitConfig) {
-        AtAGlanceDataCollector.collect(context, state.clockKitConfig)
+    val snapshot = remember(state.lockscreenConfig) {
+        AtAGlanceDataCollector.collect(context, state.lockscreenConfig)
     }
 
     AmbientBottomSheet(
@@ -74,7 +74,7 @@ fun EditorDatePanel(
                         )
                     }
                     Switch(
-                        checked = state.clockKitConfig.atGlanceEnabled,
+                        checked = state.lockscreenConfig.atGlanceEnabled,
                         onCheckedChange = { enabled ->
                             view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
                             state.updateConfig { it.copy(atGlanceEnabled = enabled) }
@@ -83,7 +83,7 @@ fun EditorDatePanel(
                 }
             }
 
-            AnimatedVisibility(visible = state.clockKitConfig.atGlanceEnabled) {
+            AnimatedVisibility(visible = state.lockscreenConfig.atGlanceEnabled) {
                 Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     StaggeredRow(1) {
                         Row(
@@ -104,7 +104,7 @@ fun EditorDatePanel(
                                 )
                             }
                             Switch(
-                                checked = state.clockKitConfig.dateAttached,
+                                checked = state.lockscreenConfig.dateAttached,
                                 onCheckedChange = { attached ->
                                     state.updateConfig { it.copy(dateAttached = attached) }
                                 }
@@ -122,7 +122,7 @@ fun EditorDatePanel(
                             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 items(AtAGlanceStyle.values()) { glanceStyle ->
                                     FilterChip(
-                                        selected = state.clockKitConfig.atGlanceStyle == glanceStyle.id,
+                                        selected = state.lockscreenConfig.atGlanceStyle == glanceStyle.id,
                                         onClick = {
                                             view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
                                             state.updateConfig { it.copy(atGlanceStyle = glanceStyle.id) }
@@ -148,7 +148,7 @@ fun EditorDatePanel(
                             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 items(formatTitles.size) { index ->
                                     FilterChip(
-                                        selected = state.clockKitConfig.dateFormat == index,
+                                        selected = state.lockscreenConfig.dateFormat == index,
                                         onClick = {
                                             view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
                                             state.updateConfig { it.copy(dateFormat = index) }
@@ -173,35 +173,35 @@ fun EditorDatePanel(
                                 verticalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
                                 FilterChip(
-                                    selected = state.clockKitConfig.atGlanceWeather,
+                                    selected = state.lockscreenConfig.atGlanceWeather,
                                     onClick = { state.updateConfig { it.copy(atGlanceWeather = !it.atGlanceWeather) } },
                                     leadingIcon = { Icon(Icons.Rounded.WbSunny, null, Modifier.size(16.dp)) },
                                     label = { Text("System Weather", fontWeight = FontWeight.Bold, fontSize = 12.sp) },
                                     shape = CircleShape
                                 )
                                 FilterChip(
-                                    selected = state.clockKitConfig.atGlanceAlarm,
+                                    selected = state.lockscreenConfig.atGlanceAlarm,
                                     onClick = { state.updateConfig { it.copy(atGlanceAlarm = !it.atGlanceAlarm) } },
                                     leadingIcon = { Icon(Icons.Rounded.Alarm, null, Modifier.size(16.dp)) },
                                     label = { Text("Next Alarm", fontWeight = FontWeight.Bold, fontSize = 12.sp) },
                                     shape = CircleShape
                                 )
                                 FilterChip(
-                                    selected = state.clockKitConfig.atGlanceBattery,
+                                    selected = state.lockscreenConfig.atGlanceBattery,
                                     onClick = { state.updateConfig { it.copy(atGlanceBattery = !it.atGlanceBattery) } },
                                     leadingIcon = { Icon(Icons.Rounded.BatteryChargingFull, null, Modifier.size(16.dp)) },
                                     label = { Text("Charging", fontWeight = FontWeight.Bold, fontSize = 12.sp) },
                                     shape = CircleShape
                                 )
                                 FilterChip(
-                                    selected = state.clockKitConfig.atGlanceMedia,
+                                    selected = state.lockscreenConfig.atGlanceMedia,
                                     onClick = { state.updateConfig { it.copy(atGlanceMedia = !it.atGlanceMedia) } },
                                     leadingIcon = { Icon(Icons.Rounded.MusicNote, null, Modifier.size(16.dp)) },
                                     label = { Text("Now Playing", fontWeight = FontWeight.Bold, fontSize = 12.sp) },
                                     shape = CircleShape
                                 )
                                 FilterChip(
-                                    selected = state.clockKitConfig.atGlanceStatus,
+                                    selected = state.lockscreenConfig.atGlanceStatus,
                                     onClick = { state.updateConfig { it.copy(atGlanceStatus = !it.atGlanceStatus) } },
                                     leadingIcon = { Icon(Icons.Rounded.DoNotDisturbOn, null, Modifier.size(16.dp)) },
                                     label = { Text("DND / Torch", fontWeight = FontWeight.Bold, fontSize = 12.sp) },
@@ -211,7 +211,7 @@ fun EditorDatePanel(
                         }
                     }
 
-                    AnimatedVisibility(visible = state.clockKitConfig.atGlanceWeather) {
+                    AnimatedVisibility(visible = state.lockscreenConfig.atGlanceWeather) {
                         Surface(
                             shape = RoundedCornerShape(20.dp),
                             color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.55f),
@@ -224,7 +224,7 @@ fun EditorDatePanel(
                             ) {
                                 val w = snapshot.weather
                                 val statusText = if (w != null) {
-                                    val t = if (state.clockKitConfig.atGlanceFahrenheit) {
+                                    val t = if (state.lockscreenConfig.atGlanceFahrenheit) {
                                         "${((w.tempC * 9f / 5f) + 32f).roundToInt()}°F"
                                     } else {
                                         "${w.tempC.roundToInt()}°C"
@@ -240,13 +240,13 @@ fun EditorDatePanel(
                                     modifier = Modifier.weight(1f).padding(end = 8.dp)
                                 )
                                 FilterChip(
-                                    selected = state.clockKitConfig.atGlanceFahrenheit,
+                                    selected = state.lockscreenConfig.atGlanceFahrenheit,
                                     onClick = {
                                         state.updateConfig { it.copy(atGlanceFahrenheit = !it.atGlanceFahrenheit) }
                                     },
                                     label = {
                                         Text(
-                                            if (state.clockKitConfig.atGlanceFahrenheit) "°F" else "°C",
+                                            if (state.lockscreenConfig.atGlanceFahrenheit) "°F" else "°C",
                                             fontWeight = FontWeight.Black,
                                             fontSize = 12.sp
                                         )

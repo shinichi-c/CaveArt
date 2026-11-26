@@ -21,6 +21,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.outlined.*
+import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -33,7 +34,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.android.CaveArt.clockkit.*
+import com.android.CaveArt.lockscreenkit.*
 import com.android.CaveArt.layer.LayerType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -67,6 +68,8 @@ fun ClockStudio(
     var isMlLoading by remember(wallpaper.id) { mutableStateOf(true) }
 
     var showDateCustomizeSheet by remember { mutableStateOf(false) }
+    var showNotifsCustomizeSheet by remember { mutableStateOf(false) }
+    var showNotificationPreview by remember { mutableStateOf(false) }
     var isStyleBrowseMode by remember { mutableStateOf(true) }
     var showLayersSheet by remember { mutableStateOf(false) }
     var showApplyOptions by remember { mutableStateOf(false) }
@@ -75,9 +78,9 @@ fun ClockStudio(
     var activeLayerTab by remember { mutableStateOf(ActiveLayerTab.CLOCK) }
     var activeActionIndex by remember { mutableIntStateOf(0) }
 
-    LaunchedEffect(viewModel.clockKitConfig) {
-        if (state.clockKitConfig != viewModel.clockKitConfig) {
-            state.updateConfig { viewModel.clockKitConfig }
+    LaunchedEffect(viewModel.lockscreenConfig) {
+        if (state.lockscreenConfig != viewModel.lockscreenConfig) {
+            state.updateConfig { viewModel.lockscreenConfig }
         }
     }
     LaunchedEffect(viewModel.clockCollisionMap) {
@@ -86,9 +89,9 @@ fun ClockStudio(
         }
     }
 
-    val styles = ClockKitEngine.styles
-    val activeStyle = remember(state.clockKitConfig.styleId) {
-        ClockKitEngine.getStyle(state.clockKitConfig.styleId)
+    val styles = ClockEngine.styles
+    val activeStyle = remember(state.lockscreenConfig.styleId) {
+        ClockEngine.getStyle(state.lockscreenConfig.styleId)
     }
 
     val stylePagerState = rememberPagerState(
@@ -98,7 +101,7 @@ fun ClockStudio(
 
     LaunchedEffect(isStyleBrowseMode) {
         if (isStyleBrowseMode) {
-            val targetIdx = styles.indexOfFirst { it.id == state.clockKitConfig.styleId }.coerceAtLeast(0)
+            val targetIdx = styles.indexOfFirst { it.id == state.lockscreenConfig.styleId }.coerceAtLeast(0)
             if (stylePagerState.currentPage != targetIdx) {
                 stylePagerState.scrollToPage(targetIdx)
             }
@@ -110,8 +113,8 @@ fun ClockStudio(
     }
 
     LaunchedEffect(state.layerStack.isDepthEnabled, state.layerStack.depthOcclusionLimit) {
-        if (state.clockKitConfig.isDepthEnabled != state.layerStack.isDepthEnabled ||
-            state.clockKitConfig.depthOcclusionLimit != state.layerStack.depthOcclusionLimit
+        if (state.lockscreenConfig.isDepthEnabled != state.layerStack.isDepthEnabled ||
+            state.lockscreenConfig.depthOcclusionLimit != state.layerStack.depthOcclusionLimit
         ) {
             state.updateConfig {
                 it.copy(
@@ -125,7 +128,7 @@ fun ClockStudio(
     val currentLayerActions = remember(
         activeLayerTab,
         activeStyle.id,
-        state.clockKitConfig.isGravityEnabled,
+        state.lockscreenConfig.isGravityEnabled,
         state
     ) {
         when (activeLayerTab) {
@@ -177,7 +180,7 @@ fun ClockStudio(
                 )
             )
             ActiveLayerTab.CLOCK -> buildList {
-                activeStyle.describeControls(state.clockKitConfig).forEach { ctrl ->
+                activeStyle.describeControls(state.lockscreenConfig).forEach { ctrl ->
                     val toolType = when (ctrl) {
                         is ClockControl.Slider -> ContextualToolType.SLIDER
                         is ClockControl.Toggle -> ContextualToolType.TOGGLE
@@ -193,7 +196,7 @@ fun ClockStudio(
                                 label = ctrl.label,
                                 icon = clockIconToImageVector(ctrl.icon),
                                 toolType = toolType,
-                                getVal = { state.clockKitConfig.getFloat(activeStyle.id, ctrl.id, ctrl.defaultValue) },
+                                getVal = { state.lockscreenConfig.getFloat(activeStyle.id, ctrl.id, ctrl.defaultValue) },
                                 setVal = { v -> state.updateConfig { it.withFloat(activeStyle.id, ctrl.id, v) } },
                                 range = ctrl.min..ctrl.max,
                                 formatDisplay = ctrl.formatter,
@@ -212,14 +215,14 @@ fun ClockStudio(
                         )
                     }
                 }
-                if (state.clockKitConfig.isGravityEnabled) {
+                if (state.lockscreenConfig.isGravityEnabled) {
                     add(
                         LayerAction(
                             id = "clock_gravity_intensity",
                             label = "Gravity Slant",
                             icon = Icons.Outlined.Explore,
                             toolType = ContextualToolType.SLIDER,
-                            getVal = { state.clockKitConfig.gravityIntensity },
+                            getVal = { state.lockscreenConfig.gravityIntensity },
                             setVal = { v -> state.updateConfig { it.copy(gravityIntensity = v) } },
                             range = LockscreenControlSpec.GRAVITY_INTENSITY_RANGE,
                             formatDisplay = LockscreenControlSpec::formatGravity
@@ -284,9 +287,9 @@ fun ClockStudio(
     var dateText by remember { mutableStateOf("") }
     val availableFonts = remember { viewModel.getAvailableFonts(context) }
 
-    val activeHourSize = state.clockKitConfig.getFloat("adaptive_vector", "hour_size", 100f)
-    LaunchedEffect(activeHourSize, state.clockKitConfig.styleId, state.clockKitConfig.scale) {
-        state.dateSize.floatValue = LockscreenSceneRenderer.computeDateSizeSp(state.clockKitConfig)
+    val activeHourSize = state.lockscreenConfig.getFloat("adaptive_vector", "hour_size", 100f)
+    LaunchedEffect(activeHourSize, state.lockscreenConfig.styleId, state.lockscreenConfig.scale) {
+        state.dateSize.floatValue = LockscreenSceneRenderer.computeDateSizeSp(state.lockscreenConfig)
     }
 
     LaunchedEffect(Unit) {
@@ -303,7 +306,7 @@ fun ClockStudio(
             val safeCtx = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                 context.createDeviceProtectedStorageContext()
             } else context
-            val prefs = safeCtx.getSharedPreferences(ClockKitConfigStore.PREFS_NAME, Context.MODE_PRIVATE)
+            val prefs = safeCtx.getSharedPreferences(LockscreenConfigStore.PREFS_NAME, Context.MODE_PRIVATE)
             val zoom = prefs.getFloat("telemetry_zoom", displayGeometry.wallpaperMaxScale)
             val nssl = prefs.getFloat("telemetry_nssl_top", -1f)
             val ux = prefs.getFloat("udfps_x", -1f)
@@ -381,7 +384,7 @@ fun ClockStudio(
 
     val currentMask = previewMask
     val currentZoom = state.liveWallpaperZoom.floatValue
-    val needsCollisionMap = activeStyle.needsCollisionMap(state.clockKitConfig)
+    val needsCollisionMap = activeStyle.needsCollisionMap(state.lockscreenConfig)
     LaunchedEffect(currentMask, needsCollisionMap, currentZoom) {
         if (needsCollisionMap && currentMask != null) {
             withContext(Dispatchers.Default) {
@@ -393,7 +396,7 @@ fun ClockStudio(
         }
     }
 
-    LaunchedEffect(state.clockKitConfig.dateFormat) {
+    LaunchedEffect(state.lockscreenConfig.dateFormat) {
         while (true) {
             val now = System.currentTimeMillis()
             val is24 = android.text.format.DateFormat.is24HourFormat(context)
@@ -401,7 +404,7 @@ fun ClockStudio(
                 if (is24) "HH:mm" else "hh:mm",
                 java.util.Locale.getDefault()
             ).format(java.util.Date(now))
-            dateText = ClockTypefaceResolver.formatDate(now, state.clockKitConfig.dateFormat)
+            dateText = ClockTypefaceResolver.formatDate(now, state.lockscreenConfig.dateFormat)
             delay(1000L)
         }
     }
@@ -412,7 +415,7 @@ fun ClockStudio(
             withContext(Dispatchers.Main) {
                 extractedColors = dynamicTheme.allColors
                 viewModel.savePaletteColorsForLockEditor(dynamicTheme.allColors)
-                if (state.clockKitConfig.color == 0 || isDefaultColor(state.clockKitConfig.color)) {
+                if (state.lockscreenConfig.color == 0 || isDefaultColor(state.lockscreenConfig.color)) {
                     val picked = dynamicTheme.tonalSpot.firstOrNull() ?: dynamicTheme.seedColor
                     state.updateConfig { it.copy(color = picked) }
                 }
@@ -420,8 +423,8 @@ fun ClockStudio(
         }
     }
 
-    val customTypeface = remember(state.clockKitConfig.font) {
-        ClockTypefaceResolver.resolve(context, state.clockKitConfig.font)
+    val customTypeface = remember(state.lockscreenConfig.font) {
+        ClockTypefaceResolver.resolve(context, state.lockscreenConfig.font)
     }
 
     val collisionMapArray = remember(state.collisionMap.value) {
@@ -505,26 +508,26 @@ fun ClockStudio(
                                             if (ctrl != null) {
                                                 CompactChoiceStrip(
                                                     options = ctrl.options,
-                                                    selectedKey = state.clockKitConfig.getString(activeStyle.id, ctrl.id, ctrl.defaultKey),
+                                                    selectedKey = state.lockscreenConfig.getString(activeStyle.id, ctrl.id, ctrl.defaultKey),
                                                     onSelected = { selectedKey ->
                                                         state.updateConfig { it.withString(activeStyle.id, ctrl.id, selectedKey) }
                                                     }
                                                 )
                                             }
                                         }
-                                        ContextualToolType.QUICK_CHIPS, ContextualToolType.OPTIONS -> {
+                                        ContextualToolType.QUICK_CHIPS -> {
                                             val ctrl = activeAction.clockControl as? ClockControl.QuickChips
                                             if (ctrl != null) {
                                                 CompactQuickChipsStrip(
                                                     items = ctrl.items,
                                                     styleId = activeStyle.id,
-                                                    config = state.clockKitConfig,
+                                                    config = state.lockscreenConfig,
                                                     onConfigChange = { next -> state.updateConfig { next } },
                                                     onCustomAction = { actionId ->
                                                         scope.launch(Dispatchers.Default) {
                                                             val updated = activeStyle.onAction(
                                                                 actionId = actionId,
-                                                                config = state.clockKitConfig,
+                                                                config = state.lockscreenConfig,
                                                                 mask = previewMask,
                                                                 screenW = realW,
                                                                 screenH = realH,
@@ -544,7 +547,7 @@ fun ClockStudio(
                                                 CompactSingleToggleBar(
                                                     label = ctrl.label,
                                                     icon = activeAction.icon,
-                                                    checked = state.clockKitConfig.getBool(activeStyle.id, ctrl.id, ctrl.defaultValue),
+                                                    checked = state.lockscreenConfig.getBool(activeStyle.id, ctrl.id, ctrl.defaultValue),
                                                     onCheckedChange = { checked ->
                                                         state.updateConfig { it.withBool(activeStyle.id, ctrl.id, checked) }
                                                     }
@@ -554,7 +557,7 @@ fun ClockStudio(
                                         ContextualToolType.FONT -> {
                                             CompactFontSelectorStrip(
                                                 availableFonts = availableFonts,
-                                                selectedFont = state.clockKitConfig.font,
+                                                selectedFont = state.lockscreenConfig.font,
                                                 onFontSelected = { fontName ->
                                                     state.updateConfig { it.copy(font = fontName) }
                                                 },
@@ -565,7 +568,7 @@ fun ClockStudio(
                                         ContextualToolType.COLOR -> {
                                             CompactColorSelectorStrip(
                                                 extractedColors = extractedColors,
-                                                selectedColor = state.clockKitConfig.color,
+                                                selectedColor = state.lockscreenConfig.color,
                                                 onColorSelected = { col ->
                                                     state.updateConfig { it.copy(color = col) }
                                                 }
@@ -624,7 +627,7 @@ fun ClockStudio(
                         if (browsingStyles) {
                             ClockStyleCarousel(
                                 pagerState = stylePagerState,
-                                currentConfig = state.clockKitConfig,
+                                currentConfig = state.lockscreenConfig,
                                 displayGeometry = displayGeometry,
                                 previewOriginal = previewOriginal,
                                 previewMask = previewMask,
@@ -660,8 +663,10 @@ fun ClockStudio(
                                 focusedLayerType = focusedLayerType,
                                 sharedElementModifier = sharedElementModifier,
                                 atGlanceRefreshTick = atGlanceRefreshTick,
+                                showNotificationPreview = showNotificationPreview,
                                 onDateClick = { showDateCustomizeSheet = true },
-                                onClockClick = { activeLayerTab = ActiveLayerTab.CLOCK }
+                                onClockClick = { activeLayerTab = ActiveLayerTab.CLOCK },
+                                onNotificationsClick = { showNotifsCustomizeSheet = true }
                             )
                         }
                     }
@@ -680,15 +685,28 @@ fun ClockStudio(
                         modifier = Modifier.fillMaxSize()
                     ) {
                         Box(modifier = Modifier.fillMaxSize()) {
-                            PreviewCornerPill(
-                                label = "Layers",
-                                icon = Icons.Outlined.Layers,
-                                onClick = {
-                                    view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                                    showLayersSheet = true
-                                },
-                                modifier = Modifier.align(Alignment.TopStart)
-                            )
+                            Row(
+                                modifier = Modifier.align(Alignment.TopStart),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                PreviewCornerPill(
+                                    label = "Layers",
+                                    icon = Icons.Outlined.Layers,
+                                    onClick = {
+                                        view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                                        showLayersSheet = true
+                                    }
+                                )
+                                PreviewCornerIconPill(
+                                    icon = if (showNotificationPreview) Icons.Rounded.NotificationsActive else Icons.Outlined.Notifications,
+                                    isActive = showNotificationPreview,
+                                    onClick = {
+                                        view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                                        showNotificationPreview = !showNotificationPreview
+                                    }
+                                )
+                            }
 
                             PreviewCornerPill(
                                 label = "Done",
@@ -699,6 +717,25 @@ fun ClockStudio(
                                 },
                                 modifier = Modifier.align(Alignment.TopEnd)
                             )
+
+                            androidx.compose.animation.AnimatedVisibility(
+                                visible = showNotificationPreview,
+                                enter = fadeIn(tween(180)) + slideInVertically { it / 2 },
+                                exit = fadeOut(tween(140)) + slideOutVertically { it / 2 },
+                                modifier = Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .padding(bottom = 10.dp)
+                            ) {
+                                val currentNotifStyle = NotificationStyle.fromId(state.lockscreenConfig.notificationStyle)
+                                PreviewCornerPill(
+                                    label = "Notifs: ${currentNotifStyle.label}",
+                                    icon = Icons.Outlined.Tune,
+                                    onClick = {
+                                        view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                                        showNotifsCustomizeSheet = true
+                                    }
+                                )
+                            }
                         }
                     }
 
@@ -750,6 +787,17 @@ fun ClockStudio(
                     wallpaper = wallpaper,
                     state = state,
                     onDismiss = { showDateCustomizeSheet = false }
+                )
+            }
+
+            if (showNotifsCustomizeSheet) {
+                EditorNotificationsPanel(
+                    viewModel = viewModel,
+                    wallpaper = wallpaper,
+                    state = state,
+                    isPreviewingNotifications = showNotificationPreview,
+                    onTogglePreview = { showNotificationPreview = it },
+                    onDismiss = { showNotifsCustomizeSheet = false }
                 )
             }
 
@@ -844,6 +892,33 @@ private fun PreviewCornerPill(
                     fontSize = 13.sp
                 ),
                 color = Color.White
+            )
+        }
+    }
+}
+
+@Composable
+private fun PreviewCornerIconPill(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    isActive: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier
+            .size(34.dp)
+            .clip(CircleShape)
+            .clickable(onClick = onClick),
+        shape = CircleShape,
+        color = if (isActive) MaterialTheme.colorScheme.primary else Color.Black.copy(alpha = 0.44f),
+        border = BorderStroke(1.dp, Color.White.copy(alpha = if (isActive) 0.45f else 0.22f))
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(
+                imageVector = icon,
+                contentDescription = "Preview Notifications",
+                tint = if (isActive) MaterialTheme.colorScheme.onPrimary else Color.White,
+                modifier = Modifier.size(16.dp)
             )
         }
     }

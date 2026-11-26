@@ -1,7 +1,7 @@
-package com.android.CaveArt.clockkit.styles
+package com.android.CaveArt.lockscreenkit.styles
 
 import android.graphics.*
-import com.android.CaveArt.clockkit.*
+import com.android.CaveArt.lockscreenkit.*
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -14,7 +14,7 @@ class MonolithClockStyle : BaseClockStyle() {
     override val name: String = "Monolith"
     override val subtitle: String = "Glass-split depth numerals & horizontal collapse"
 
-    override fun datePolicy(config: ClockKitConfig): ClockDatePolicy =
+    override fun datePolicy(config: LockscreenConfig): ClockDatePolicy =
         ClockDatePolicy.INTEGRATED_BY_STYLE
 
     private class Scratch {
@@ -57,7 +57,7 @@ class MonolithClockStyle : BaseClockStyle() {
 
     private val scratch = ThreadLocal.withInitial { Scratch() }
     
-    override fun describeControls(config: ClockKitConfig): List<ClockControl> = listOf(
+    override fun describeControls(config: LockscreenConfig): List<ClockControl> = listOf(
         ClockControl.Slider(
             id = "tallness", label = "Condensed Width", icon = ClockIcon.SPACING,
             min = 0.45f, max = 0.95f, defaultValue = 0.62f,
@@ -112,7 +112,7 @@ class MonolithClockStyle : BaseClockStyle() {
         )
     )
 
-    private fun resolveMonolithTypeface(frameFont: Typeface, config: ClockKitConfig): Typeface {
+    private fun resolveMonolithTypeface(frameFont: Typeface, config: LockscreenConfig): Typeface {
         return if (config.font == "default" || config.font.isEmpty()) {
             Typeface.create("sans-serif-condensed", Typeface.BOLD)
         } else {
@@ -171,7 +171,7 @@ class MonolithClockStyle : BaseClockStyle() {
         tf: Typeface,
         hText: String,
         mText: String,
-        config: ClockKitConfig,
+        config: LockscreenConfig,
         s: Scratch
     ): LayoutPlan {
         val p = notificationProgress.coerceIn(0f, 1f)
@@ -227,7 +227,7 @@ class MonolithClockStyle : BaseClockStyle() {
         )
     }
 
-    override fun measure(ctx: ClockMeasureContext, config: ClockKitConfig): ClockMeasureResult {
+    override fun measure(ctx: ClockMeasureContext, config: LockscreenConfig): ClockMeasureResult {
         val s = scratch.get()!!
         val tf = resolveMonolithTypeface(ctx.typeface, config)
         val parts = ctx.timeString.split(":")
@@ -276,7 +276,7 @@ class MonolithClockStyle : BaseClockStyle() {
         )
     }
 
-    override fun render(canvas: Canvas, frame: ClockFrameContext, config: ClockKitConfig): ClockRenderResult {
+    override fun render(canvas: Canvas, frame: ClockFrameContext, config: LockscreenConfig): ClockRenderResult {
         val s = scratch.get()!!
         val tf = resolveMonolithTypeface(frame.typeface, config)
         val parts = frame.timeString.split(":")
@@ -331,7 +331,7 @@ class MonolithClockStyle : BaseClockStyle() {
         )
     }
 
-    override fun renderOverlay(canvas: Canvas, frame: ClockFrameContext, config: ClockKitConfig): ClockRenderResult? {
+    override fun renderOverlay(canvas: Canvas, frame: ClockFrameContext, config: LockscreenConfig): ClockRenderResult? {
         val splitDepth = config.getBool(id, "split_depth", true) && frame.notificationProgress < 0.2f
         if (!splitDepth) return null
 
@@ -370,7 +370,7 @@ class MonolithClockStyle : BaseClockStyle() {
     private fun drawMinutesAndDate(
         canvas: Canvas,
         frame: ClockFrameContext,
-        config: ClockKitConfig,
+        config: LockscreenConfig,
         plan: LayoutPlan,
         mText: String,
         s: Scratch
@@ -475,7 +475,7 @@ class MonolithClockStyle : BaseClockStyle() {
     private fun drawMonolithDate(
         canvas: Canvas,
         frame: ClockFrameContext,
-        config: ClockKitConfig,
+        config: LockscreenConfig,
         dateMode: String,
         plan: LayoutPlan,
         s: Scratch

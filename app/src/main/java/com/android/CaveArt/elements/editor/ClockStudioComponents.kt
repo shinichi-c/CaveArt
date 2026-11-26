@@ -49,7 +49,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.android.CaveArt.clockkit.*
+import com.android.CaveArt.lockscreenkit.*
 import kotlin.math.abs
 
 fun clockIconToImageVector(icon: ClockIcon): ImageVector = when (icon) {
@@ -79,7 +79,7 @@ private fun UnifiedLineIcon(
 ) {
     Canvas(modifier = modifier.size(22.dp)) {
         drawIntoCanvas { canvas ->
-            ClockToolbarIcons.draw(
+            LockscreenToolbarIcons.draw(
                 canvas = canvas.nativeCanvas,
                 kind = kind,
                 tint = tint.toArgb(),
@@ -103,7 +103,7 @@ fun HorizontalBottomToolbarStrip(
     val view = LocalView.current
     val uniqueKinds = remember(actions, showStyleItem) {
         val candidates = actions.map { action ->
-            ClockToolbarIcons.preferredKind(
+            LockscreenToolbarIcons.preferredKind(
                 id = action.id,
                 label = action.label,
                 clockIcon = action.clockControl?.icon,
@@ -112,7 +112,7 @@ fun HorizontalBottomToolbarStrip(
                 isQuickChips = action.toolType == ContextualToolType.QUICK_CHIPS
             )
         }
-        ClockToolbarIcons.buildUniqueKinds(candidates, reserveStyle = showStyleItem)
+        LockscreenToolbarIcons.buildUniqueKinds(candidates, reserveStyle = showStyleItem)
     }
     val totalCount = actions.size + if (showStyleItem) 1 else 0
 
@@ -139,7 +139,7 @@ fun HorizontalBottomToolbarStrip(
                 val isSelected = !isStyleSelected && index == selectedIndex
                 BottomToolbarItem(
                     iconKind = uniqueKinds[index],
-                    label = ClockToolbarIcons.shortLabel(action.label),
+                    label = LockscreenToolbarIcons.shortLabel(action.label),
                     isSelected = isSelected,
                     onClick = {
                         view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
@@ -172,7 +172,7 @@ fun HorizontalBottomToolbarStrip(
                 val isSelected = !isStyleSelected && index == selectedIndex
                 BottomToolbarItem(
                     iconKind = uniqueKinds[index],
-                    label = ClockToolbarIcons.shortLabel(action.label),
+                    label = LockscreenToolbarIcons.shortLabel(action.label),
                     isSelected = isSelected,
                     onClick = {
                         view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
@@ -389,8 +389,8 @@ fun CompactChoiceStrip(
 fun CompactQuickChipsStrip(
     items: List<QuickChipItem>,
     styleId: String,
-    config: ClockKitConfig,
-    onConfigChange: (ClockKitConfig) -> Unit,
+    config: LockscreenConfig,
+    onConfigChange: (LockscreenConfig) -> Unit,
     onCustomAction: (String) -> Unit
 ) {
     val view = LocalView.current
@@ -685,147 +685,6 @@ fun CompactColorSelectorStrip(
 }
 
 @Composable
-fun CompactClockOptionsStrip(
-    isVertical: Boolean,
-    onToggleLayout: () -> Unit,
-    isDualTone: Boolean,
-    onToggleDualTone: () -> Unit,
-    isDepthEnabled: Boolean,
-    onToggleDepth: () -> Unit,
-    isAdaptive: Boolean,
-    onToggleAdaptive: () -> Unit,
-    isGravity: Boolean,
-    onToggleGravity: () -> Unit,
-    onAutoFit: () -> Unit
-) {
-    val view = LocalView.current
-
-    LazyRow(
-        modifier = Modifier.fillMaxSize(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        item {
-            FilterChip(
-                selected = isVertical,
-                onClick = {
-                    view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                    onToggleLayout()
-                },
-                leadingIcon = {
-                    Icon(
-                        imageVector = if (isVertical) Icons.Rounded.SwapVert else Icons.Rounded.SwapHoriz,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp)
-                    )
-                },
-                label = { Text(if (isVertical) "Vertical" else "Horizontal", fontSize = 12.sp, fontWeight = FontWeight.Bold) },
-                shape = CircleShape
-            )
-        }
-
-        item {
-            FilterChip(
-                selected = isGravity,
-                onClick = {
-                    view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
-                    onToggleGravity()
-                },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Rounded.Explore,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp)
-                    )
-                },
-                label = { Text("Gravity 3D", fontSize = 12.sp, fontWeight = FontWeight.Bold) },
-                shape = CircleShape,
-                colors = FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = MaterialTheme.colorScheme.tertiaryContainer,
-                    selectedLabelColor = MaterialTheme.colorScheme.onTertiaryContainer
-                )
-            )
-        }
-
-        item {
-            FilterChip(
-                selected = isDualTone,
-                onClick = {
-                    view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                    onToggleDualTone()
-                },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Rounded.Contrast,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp)
-                    )
-                },
-                label = { Text("Dual Tone", fontSize = 12.sp, fontWeight = FontWeight.Bold) },
-                shape = CircleShape
-            )
-        }
-
-        item {
-            FilterChip(
-                selected = isDepthEnabled,
-                onClick = {
-                    view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
-                    onToggleDepth()
-                },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Rounded.Layers,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp)
-                    )
-                },
-                label = { Text("Depth", fontSize = 12.sp, fontWeight = FontWeight.Bold) },
-                shape = CircleShape
-            )
-        }
-
-        item {
-            FilterChip(
-                selected = isAdaptive,
-                onClick = {
-                    view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                    onToggleAdaptive()
-                },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Rounded.Transform,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp)
-                    )
-                },
-                label = { Text("Adaptive", fontSize = 12.sp, fontWeight = FontWeight.Bold) },
-                shape = CircleShape
-            )
-        }
-
-        item {
-            FilterChip(
-                selected = false,
-                onClick = {
-                    view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
-                    onAutoFit()
-                },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Rounded.AutoFixHigh,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp)
-                    )
-                },
-                label = { Text("Auto Fit", fontSize = 12.sp, fontWeight = FontWeight.Bold) },
-                shape = CircleShape
-            )
-        }
-    }
-}
-
-@Composable
 fun SlimRulerSlider(
     value: Float,
     onValueChange: (Float) -> Unit,
@@ -925,7 +784,7 @@ fun SlimRulerSlider(
 
             Canvas(modifier = Modifier.fillMaxSize()) {
                 drawIntoCanvas { canvas ->
-                    ClockToolbarIcons.drawRulerTrack(
+                    LockscreenToolbarIcons.drawRulerTrack(
                         canvas = canvas.nativeCanvas,
                         width = size.width,
                         trackTop = 0f,

@@ -14,7 +14,7 @@ import android.util.TypedValue
 import android.view.*
 import android.widget.*
 import com.android.CaveArt.MonetEngine
-import com.android.CaveArt.clockkit.*
+import com.android.CaveArt.lockscreenkit.*
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -159,7 +159,7 @@ internal object LockscreenOverlayPanels {
     fun buildActions(
         context: Context,
         scope: EditorLayerScope,
-        config: ClockKitConfig,
+        config: LockscreenConfig,
         statusBarPadPx: Int,
         getDepthLimit: () -> Float,
         setDepthLimit: (Float) -> Unit,
@@ -171,10 +171,10 @@ internal object LockscreenOverlayPanels {
         setBgOpacity: (Float) -> Unit,
         getSubjectOpacity: () -> Float,
         setSubjectOpacity: (Float) -> Unit,
-        onConfigChange: (ClockKitConfig) -> Unit
+        onConfigChange: (LockscreenConfig) -> Unit
     ): List<OverlayAction> {
         val density = context.resources.displayMetrics.density
-        val clockStyle = ClockKitEngine.getStyle(config.styleId)
+        val clockStyle = ClockEngine.getStyle(config.styleId)
 
         return when (scope) {
             EditorLayerScope.ALL -> listOf(
@@ -218,7 +218,7 @@ internal object LockscreenOverlayPanels {
                         is ClockControl.FontPicker -> ActionKind.FONT
                         is ClockControl.ColorPicker -> ActionKind.COLOR
                     }
-                    val iconKind = ClockToolbarIcons.preferredKind(
+                    val iconKind = LockscreenToolbarIcons.preferredKind(
                         id = ctrl.id,
                         label = ctrl.label,
                         clockIcon = ctrl.icon,
@@ -260,13 +260,13 @@ internal object LockscreenOverlayPanels {
         context: Context,
         slot: FrameLayout,
         action: OverlayAction,
-        editConfig: ClockKitConfig,
+        editConfig: LockscreenConfig,
         theme: OverlayTheme,
         paletteColors: List<Int>,
         isDepthEnabled: Boolean,
         depthMaskBitmap: Bitmap?,
         statusBarPadPx: Int,
-        onConfigUpdated: (ClockKitConfig, rebuildToolbar: Boolean) -> Unit,
+        onConfigUpdated: (LockscreenConfig, rebuildToolbar: Boolean) -> Unit,
         onDepthToggled: (Boolean) -> Unit
     ) {
         val d = context.resources.displayMetrics.density
@@ -348,7 +348,7 @@ internal object LockscreenOverlayPanels {
                                 row.addView(
                                     makeFilterChip(context, item.label, false, theme) {
                                         depthMaskBitmap?.let { mask ->
-                                            val clockStyle = ClockKitEngine.getStyle(styleId)
+                                            val clockStyle = ClockEngine.getStyle(styleId)
                                             val fitted = clockStyle.onAction(
                                                 item.actionId, editConfig, mask,
                                                 CaveArtXposedModule.screenW, CaveArtXposedModule.screenH, d
@@ -494,7 +494,7 @@ internal object LockscreenOverlayPanels {
     ) {
         val d = context.resources.displayMetrics.density
         container.removeAllViews()
-        val uniqueKinds = ClockToolbarIcons.buildUniqueKinds(actions.map { it.iconKind }, reserveStyle = showStyle)
+        val uniqueKinds = LockscreenToolbarIcons.buildUniqueKinds(actions.map { it.iconKind }, reserveStyle = showStyle)
         val totalCount = actions.size + if (showStyle) 1 else 0
 
         val row = LinearLayout(context).apply {
@@ -515,7 +515,7 @@ internal object LockscreenOverlayPanels {
                 makeBottomToolbarItem(
                     context,
                     uniqueKinds[idx],
-                    ClockToolbarIcons.shortLabel(action.label),
+                    LockscreenToolbarIcons.shortLabel(action.label),
                     !isStyleBrowseMode && idx == activeActionIndex,
                     theme
                 ) { onSelectAction(idx) },
@@ -585,9 +585,11 @@ internal object LockscreenOverlayPanels {
         theme: OverlayTheme,
         isDepthEnabled: Boolean,
         activeScope: EditorLayerScope,
+        notifConfig: LockscreenConfig = LockscreenConfig(),
         onDiscard: () -> Unit,
         onToggleDepth: () -> Unit,
-        onSelectScope: (EditorLayerScope) -> Unit
+        onSelectScope: (EditorLayerScope) -> Unit,
+        onUpdateNotifConfig: (LockscreenConfig) -> Unit = {}
     ) {
         val d = context.resources.displayMetrics.density
         sheetCard.removeAllViews()
@@ -680,11 +682,110 @@ internal object LockscreenOverlayPanels {
             activeScope == EditorLayerScope.BACKGROUND) { onSelectScope(EditorLayerScope.BACKGROUND) }
         addLayerRow("Depth & Zoom", "Occlusion Threshold & Framing", ToolbarIconKind.ZOOM,
             activeScope == EditorLayerScope.ALL) { onSelectScope(EditorLayerScope.ALL) }
+
+        sheetCard.addView(TextView(context).apply {
+            text = "Notifications"
+            setTextColor(theme.accentColor)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f)
+            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+            setPadding(dp(d, 2f), dp(d, 6f), 0, dp(d, 6f))
+        })
+
+        fun addChipBar(topMarginDp: Float = 0f, builder: (LinearLayout) -> Unit) {
+            val scroll = HorizontalScrollView(context).apply {
+                isHorizontalScrollBarEnabled = false
+                overScrollMode = View.OVER_SCROLL_NEVER
+            }
+            val row = LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            builder(row)
+            scroll.addView(row, FrameLayout.LayoutParams(-2, -1))
+            sheetCard.addView(scroll, LinearLayout.LayoutParams(-1, dp(d, 36f)).apply {
+                if (topMarginDp > 0f) topMargin = dp(d, topMarginDp)
+            })
+        }
+
+        val currentNotifStyle = NotificationStyle.fromId(notifConfig.notificationStyle)
+        addChipBar { row ->
+            NotificationStyle.values().forEach { style ->
+                row.addView(
+                    makeFilterChip(context, style.label, style.id == notifConfig.notificationStyle, theme) {
+                        onUpdateNotifConfig(notifConfig.copy(notificationStyle = style.id))
+                    },
+                    LinearLayout.LayoutParams(-2, dp(d, 34f)).apply { marginEnd = dp(d, 8f) }
+                )
+            }
+        }
+
+        val showSurface = currentNotifStyle == NotificationStyle.GROUPED_CARDS ||
+            currentNotifStyle == NotificationStyle.FROSTED_PILL ||
+            (currentNotifStyle == NotificationStyle.ICONS_ONLY && notifConfig.notificationIconsBackdrop)
+        if (showSurface) {
+            addChipBar(6f) { row ->
+                NotificationSurfaceMode.values().forEach { mode ->
+                    row.addView(
+                        makeFilterChip(context, mode.label, mode.id == notifConfig.notificationSurfaceMode, theme) {
+                            onUpdateNotifConfig(notifConfig.copy(notificationSurfaceMode = mode.id))
+                        },
+                        LinearLayout.LayoutParams(-2, dp(d, 32f)).apply { marginEnd = dp(d, 8f) }
+                    )
+                }
+            }
+        }
+
+        if (currentNotifStyle == NotificationStyle.ICONS_ONLY) {
+            addChipBar(6f) { row ->
+                row.addView(
+                    makeFilterChip(context, "Capsule Backdrop", notifConfig.notificationIconsBackdrop, theme) {
+                        onUpdateNotifConfig(notifConfig.copy(notificationIconsBackdrop = !notifConfig.notificationIconsBackdrop))
+                    },
+                    LinearLayout.LayoutParams(-2, dp(d, 32f))
+                )
+            }
+        }
+
+        if (currentNotifStyle == NotificationStyle.GROUPED_CARDS) {
+            addChipBar(6f) { row ->
+                (1..5).forEach { count ->
+                    row.addView(
+                        makeFilterChip(context, "$count", notifConfig.notificationMaxCards == count, theme) {
+                            onUpdateNotifConfig(notifConfig.copy(notificationMaxCards = count))
+                        },
+                        LinearLayout.LayoutParams(-2, dp(d, 32f)).apply { marginEnd = dp(d, 6f) }
+                    )
+                }
+                row.addView(
+                    makeFilterChip(context, "Avatars", notifConfig.notificationShowAvatars, theme) {
+                        onUpdateNotifConfig(notifConfig.copy(notificationShowAvatars = !notifConfig.notificationShowAvatars))
+                    },
+                    LinearLayout.LayoutParams(-2, dp(d, 32f)).apply { marginEnd = dp(d, 6f) }
+                )
+                row.addView(
+                    makeFilterChip(context, "Actions", notifConfig.notificationShowActions, theme) {
+                        onUpdateNotifConfig(notifConfig.copy(notificationShowActions = !notifConfig.notificationShowActions))
+                    },
+                    LinearLayout.LayoutParams(-2, dp(d, 32f))
+                )
+            }
+        }
+
+        if (currentNotifStyle != NotificationStyle.STOCK && currentNotifStyle != NotificationStyle.HIDDEN) {
+            addChipBar(6f) { row ->
+                row.addView(
+                    makeFilterChip(context, "Silent & Downloads", notifConfig.notificationIncludeSilent, theme) {
+                        onUpdateNotifConfig(notifConfig.copy(notificationIncludeSilent = !notifConfig.notificationIncludeSilent))
+                    },
+                    LinearLayout.LayoutParams(-2, dp(d, 32f))
+                )
+            }
+        }
     }
 
     fun persistAllToCaveArt(
         context: Context,
-        cfg: ClockKitConfig,
+        cfg: LockscreenConfig,
         collMap: FloatArray?,
         isDepthEnabled: Boolean,
         depthOcclusionLimit: Float,
@@ -696,7 +797,7 @@ internal object LockscreenOverlayPanels {
             try {
                 context.contentResolver.call(Uri.parse("content://com.android.CaveArt.settings"), "saveClockKitConfig", null,
                     Bundle().apply {
-                        putString("clockkit_config", ClockKitConfigStore.toJson(cfg))
+                        putString("clockkit_config", LockscreenConfigStore.toJson(cfg))
                         if (collMap != null) putString("collision_map", collMap.joinToString(","))
                     })
                 context.contentResolver.call(Uri.parse("content://com.android.CaveArt.settings"), "updateDepth", null,

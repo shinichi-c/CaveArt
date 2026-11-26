@@ -12,8 +12,8 @@ import android.os.Build
 import android.os.Bundle
 import android.os.ParcelFileDescriptor
 import android.os.Process
-import com.android.CaveArt.clockkit.BackdropStyle
-import com.android.CaveArt.clockkit.ClockKitConfigStore
+import com.android.CaveArt.lockscreenkit.BackdropStyle
+import com.android.CaveArt.lockscreenkit.LockscreenConfigStore
 import java.io.File
 import java.io.FileNotFoundException
 
@@ -79,10 +79,10 @@ class CaveArtSettingsProvider : ContentProvider() {
                 return Bundle().apply { putBoolean("success", false) }
             }
             val json = extras.getString("clockkit_config") ?: return null
-            val parsed = ClockKitConfigStore.fromJson(json) ?: return null
+            val parsed = LockscreenConfigStore.fromJson(json) ?: return null
             val collisionMap = extras.getString("collision_map")
 
-            ClockKitConfigStore.saveAndBroadcast(baseContext, parsed, collisionMap)
+            LockscreenConfigStore.saveAndBroadcast(baseContext, parsed, collisionMap)
             return Bundle().apply { putBoolean("success", true) }
         }
 

@@ -33,7 +33,7 @@ import android.view.WindowManager
 import android.view.animation.PathInterpolator
 import android.widget.TextClock
 import android.widget.TextView
-import com.android.CaveArt.clockkit.*
+import com.android.CaveArt.lockscreenkit.*
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
 import java.io.File
@@ -81,11 +81,11 @@ fun getSettingString(ctx: Context, path: String, default: String): String {
     return res
 }
 
-fun loadClockKitConfigFromProvider(ctx: Context): ClockKitConfig {
+fun loadLockscreenConfigFromProvider(ctx: Context): LockscreenConfig {
     val json = getSettingString(ctx, "clockkit_config", "")
-    ClockKitConfigStore.fromJson(json)?.let { return it }
+    LockscreenConfigStore.fromJson(json)?.let { return it }
 
-    val base = ClockKitConfig(
+    val base = LockscreenConfig(
         styleId = "adaptive_vector",
         clockX = getSettingFloat(ctx, "clock_x", 0f),
         clockY = getSettingFloat(ctx, "clock_y", 110f),
@@ -174,6 +174,8 @@ class CaveArtXposedModule : XposedModule() {
     companion object {
         val customClockId = View.generateViewId()
         val customDateId = View.generateViewId()
+        val customNotifsId = View.generateViewId()
+
         var topMarginPx = 300
         var effectiveTopMarginPx = 300
         var dateTopMarginPx = 150
@@ -183,6 +185,7 @@ class CaveArtXposedModule : XposedModule() {
 
         var activeClock: VectorTextClock? = null
         var activeDate: IndependentDateView? = null
+        var activeNotifsView: LockscreenNotificationsView? = null
         var activeRootLayout: ViewGroup? = null
         var activeEditorOverlay: LockscreenEditorOverlay? = null
 
@@ -192,6 +195,8 @@ class CaveArtXposedModule : XposedModule() {
         @Volatile var isEditModeActive = false
         @Volatile var statusBarState = 1
         @Volatile var isDozing = false
+        @Volatile var isBouncerShowing = false
+        @Volatile var isQsExpanded = false
         @Volatile var keyguardStateControllerObj: Any? = null
         @Volatile var lastDownWasOnClock = false
         @Volatile var keyguardSettingsButtonId = 0
@@ -205,8 +210,21 @@ class CaveArtXposedModule : XposedModule() {
         @Volatile private var lastWeatherSyncTemp = Float.NaN
         @Volatile private var lastWeatherSyncCode = -1
         @Volatile private var lastWeatherSyncMs = 0L
+        @Volatile private var lastReportedNsslTop = -1f
 
         private val savedChildAlphas = WeakHashMap<View, Float>()
+
+        fun isKeyguardActive(ctx: Context): Boolean {
+            if (statusBarState != 1) return false
+            val km = ctx.getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
+            return km?.isKeyguardLocked != false
+        }
+
+        fun shouldHideStockNotifs(): Boolean {
+            val clock = activeClock ?: return false
+            val style = NotificationStyle.fromId(clock.clockConfig.notificationStyle)
+            return !isEditModeActive && isKeyguardActive(clock.context) && style.hidesStockNsslOnKeyguard
+        }
 
         fun getCompactClockTopPx(context: Context): Float {
             val density = context.resources.displayMetrics.density
@@ -217,6 +235,117 @@ class CaveArtXposedModule : XposedModule() {
                 date?.visibility == View.VISIBLE
             val dateH = date?.measureCompactHeightPx() ?: (20f * density)
             return LockscreenSceneRenderer.computeCompactClockTopPx(showExternalDate, dateH, density)
+        }
+
+        fun computeCurrentHeaderBottomPx(context: Context): Float {
+            val density = context.resources.displayMetrics.density
+            val clock = activeClock ?: return (effectiveTopMarginPx + 110f * density)
+            val date = activeDate
+            val style = NotificationStyle.fromId(clock.clockConfig.notificationStyle)
+            val p = if (style.collapsesClockWhenNotifsPresent) {
+                clock.notificationProgress.coerceIn(0f, 1f)
+            } else 0f
+
+            val idleTop = effectiveTopMarginPx.toFloat()
+            val compactTop = getCompactClockTopPx(context)
+            val clockTop = idleTop + (compactTop - idleTop) * p
+
+            val idleMeasuredH = clock.measureHeightForNotificationPush(false)
+            val idleH = if (p < 0.05f && !clock.lastRenderedBounds.isEmpty) {
+                max(idleMeasuredH, clock.lastRenderedBounds.bottom - idleTop)
+            } else {
+                idleMeasuredH
+            }
+            val compactH = clock.measureHeightForNotificationPush(true)
+            val clockH = idleH + (compactH - idleH) * p
+            val clockBottom = clockTop + clockH
+
+            val showExt = clock.activeDatePolicy() == ClockDatePolicy.EXTERNAL_STANDARD &&
+                clock.clockConfig.atGlanceEnabled
+
+            return if (showExt) {
+                val idleDateTop = effectiveDateTopMarginPx.toFloat()
+                val compactDateTop = LockscreenLayoutSpec.COMPACT_DATE_TOP_DP * density
+                val dateTop = idleDateTop + (compactDateTop - idleDateTop) * p
+
+                val idleDateH = date?.lastMeasuredH?.takeIf { it > 0f } ?: (24f * density)
+                val compactDateH = date?.measureCompactHeightPx() ?: (24f * density)
+                val dateH = idleDateH + (compactDateH - idleDateH) * p
+
+                max(clockBottom, dateTop + dateH)
+            } else {
+                clockBottom
+            }
+        }
+
+        fun computeCurrentHeaderBoundsPx(context: Context): Pair<Float, Float> {
+            val density = context.resources.displayMetrics.density
+            val clock = activeClock ?: return (effectiveTopMarginPx.toFloat() to -1f)
+            val date = activeDate
+            val style = NotificationStyle.fromId(clock.clockConfig.notificationStyle)
+            val p = if (style.collapsesClockWhenNotifsPresent) {
+                clock.notificationProgress.coerceIn(0f, 1f)
+            } else 0f
+
+            val idleTop = effectiveTopMarginPx.toFloat()
+            val compactTop = getCompactClockTopPx(context)
+            val clockTop = if (p < 0.05f && !clock.lastRenderedBounds.isEmpty) {
+                clock.lastRenderedBounds.top
+            } else {
+                idleTop + (compactTop - idleTop) * p
+            }
+
+            val showExt = clock.activeDatePolicy() == ClockDatePolicy.EXTERNAL_STANDARD &&
+                clock.clockConfig.atGlanceEnabled
+            val dateBottom = if (showExt) {
+                val idleDateTop = effectiveDateTopMarginPx.toFloat()
+                val compactDateTop = LockscreenLayoutSpec.COMPACT_DATE_TOP_DP * density
+                val dateTop = idleDateTop + (compactDateTop - idleDateTop) * p
+                val idleDateH = date?.lastMeasuredH?.takeIf { it > 0f } ?: (24f * density)
+                val compactDateH = date?.measureCompactHeightPx() ?: (24f * density)
+                dateTop + idleDateH + (compactDateH - idleDateH) * p
+            } else -1f
+
+            return clockTop to dateBottom
+        }
+
+        fun onNotificationsChanged(context: Context, groups: List<LockNotifAppGroup>) {
+            val applyUpdate = {
+                activeNotifsView?.let { v ->
+                    v.groups = groups
+                    v.updateVisibilityState()
+                    v.invalidate()
+                }
+                val clock = activeClock
+                if (clock != null) {
+                    val style = NotificationStyle.fromId(clock.clockConfig.notificationStyle)
+                    val shouldCollapse = !isEditModeActive &&
+                        groups.isNotEmpty() &&
+                        style.collapsesClockWhenNotifsPresent
+                    if (style != NotificationStyle.STOCK) {
+                        updateNotificationShift(context, shouldCollapse)
+                    }
+                    activeRootLayout?.let { root ->
+                        SystemUIHider.syncKeyguardNotificationVisibility(root, shouldHideStockNotifs())
+                    }
+                    activeNotifsView?.invalidate()
+                }
+            }
+            if (Looper.myLooper() == Looper.getMainLooper()) {
+                applyUpdate()
+            } else {
+                Handler(Looper.getMainLooper()).post { applyUpdate() }
+            }
+        }
+
+        private fun maybeReportNsslTelemetry(ctx: Context, targetMarginPx: Float) {
+            if (abs(targetMarginPx - lastReportedNsslTop) < 8f) return
+            lastReportedNsslTop = targetMarginPx
+            try {
+                ctx.sendBroadcast(Intent("com.android.CaveArt.UPDATE_TELEMETRY").apply {
+                    putExtra("telemetry_nssl_top", targetMarginPx)
+                })
+            } catch (_: Throwable) {}
         }
 
         fun refreshCachedLockEditSettings(ctx: Context) {
@@ -243,6 +372,7 @@ class CaveArtXposedModule : XposedModule() {
                 computeEffectiveMargins(ctx)
                 activeClock?.updateInterpolatedPositions()
                 activeClock?.invalidate()
+                activeNotifsView?.invalidate()
             }
 
             val now = System.currentTimeMillis()
@@ -457,6 +587,7 @@ class CaveArtXposedModule : XposedModule() {
             val root = activeRootLayout ?: return
             val clock = activeClock
             val date = activeDate
+            val notifs = activeNotifsView
 
             if (active) {
                 updateNotificationShift(root.context, false)
@@ -468,6 +599,7 @@ class CaveArtXposedModule : XposedModule() {
                     child.animate().cancel()
                     child.alpha = 0f
                 }
+                notifs?.updateVisibilityState()
             } else {
                 for (i in 0 until root.childCount) {
                     val child = root.getChildAt(i)
@@ -483,18 +615,27 @@ class CaveArtXposedModule : XposedModule() {
                         child.animate().alpha(if (showExt) 1f else 0f).setDuration(180L).start()
                         continue
                     }
+                    if (child.id == customNotifsId) {
+                        notifs?.updateVisibilityState()
+                        child.animate().cancel()
+                        child.animate().alpha(1f).setDuration(180L).start()
+                        continue
+                    }
                     val prevAlpha = savedChildAlphas[child] ?: continue
                     child.animate().cancel()
                     child.animate().alpha(prevAlpha).setDuration(180L).start()
                 }
                 savedChildAlphas.clear()
+                SystemUIHider.syncKeyguardNotificationVisibility(root, shouldHideStockNotifs())
             }
             date?.invalidate()
+            notifs?.invalidate()
         }
 
-        fun applyLiveEditPreview(cfg: ClockKitConfig, newCollisionMap: FloatArray? = null) {
+        fun applyLiveEditPreview(cfg: LockscreenConfig, newCollisionMap: FloatArray? = null) {
             val clock = activeClock ?: return
             val date = activeDate
+            val notifs = activeNotifsView
             val ctx = clock.context
             val dm = ctx.resources.displayMetrics
 
@@ -559,6 +700,11 @@ class CaveArtXposedModule : XposedModule() {
                 date.invalidate()
                 date.checkAndResolveOverlap(animated = false)
             }
+
+            notifs?.updateConfig(cfg)
+            activeRootLayout?.let { root ->
+                SystemUIHider.syncKeyguardNotificationVisibility(root, shouldHideStockNotifs())
+            }
         }
 
         fun updateNotificationShift(context: Context, hasNotifications: Boolean) {
@@ -566,6 +712,7 @@ class CaveArtXposedModule : XposedModule() {
             isShiftedForNotifications = effective
             activeClock?.setClockState(effective)
             activeDate?.setDateState(effective)
+            activeNotifsView?.invalidate()
         }
 
         fun computeEffectiveMargins(context: Context) {
@@ -674,8 +821,10 @@ class CaveArtXposedModule : XposedModule() {
 
                 val pm = ctx.getSystemService(Context.POWER_SERVICE) as? PowerManager
                 val isAwakeKeyguard = (pm?.isInteractive != false) &&
-                    statusBarState == 1 &&
+                    isKeyguardActive(ctx) &&
                     !isDozing &&
+                    !isBouncerShowing &&
+                    !isQsExpanded &&
                     rootLayout.isAttachedToWindow &&
                     rootLayout.isShown &&
                     rootLayout.alpha > 0.6f &&
@@ -704,8 +853,7 @@ class CaveArtXposedModule : XposedModule() {
                             downTime = ev.downTime
                             val r = Runnable {
                                 pendingLongPress = null
-                                val currentOverlay = activeEditorOverlay ?: return@Runnable
-                                if (!currentOverlay.isAttachedToWindow) return@Runnable
+                                val currentOverlay = ensureEditorAttached(windowView, ctx)
 
                                 windowView.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
 
@@ -771,22 +919,26 @@ class CaveArtXposedModule : XposedModule() {
         } catch (_: Throwable) {}
     }
 
-    private fun attachOverlayToWindow(rootLayout: ViewGroup, context: Context) {
-        val windowRoot = (rootLayout.rootView as? ViewGroup) ?: rootLayout
-        installWindowTouchHooks(windowRoot.javaClass)
-
+    private fun ensureEditorAttached(windowRoot: ViewGroup, context: Context): LockscreenEditorOverlay {
         val editor = activeEditorOverlay ?: LockscreenEditorOverlay(context).also {
             activeEditorOverlay = it
         }
-        editor.visibility = if (isEditModeActive) View.VISIBLE else View.GONE
         editor.elevation = 250f
         editor.translationZ = 250f
-
         if (editor.parent !== windowRoot) {
             (editor.parent as? ViewGroup)?.removeView(editor)
             windowRoot.addView(editor, ViewGroup.LayoutParams(-1, -1))
         } else {
             editor.bringToFront()
+        }
+        return editor
+    }
+
+    private fun attachOverlayToWindow(rootLayout: ViewGroup, context: Context) {
+        val windowRoot = (rootLayout.rootView as? ViewGroup) ?: rootLayout
+        installWindowTouchHooks(windowRoot.javaClass)
+        if (isEditModeActive) {
+            ensureEditorAttached(windowRoot, context).visibility = View.VISIBLE
         }
     }
 
@@ -799,6 +951,8 @@ class CaveArtXposedModule : XposedModule() {
             } catch (_: Exception) {
                 param.javaClass.getMethod("getClassLoader").invoke(param) as ClassLoader
             }
+
+            CaveArtNotifSystemBridge.installHooks(this, classLoader)
 
             listOf(
                 "com.android.systemui.statusbar.lockscreen.LockscreenSmartspaceController",
@@ -827,8 +981,21 @@ class CaveArtXposedModule : XposedModule() {
                         val res = chain.proceed()
                         (chain.args.firstOrNull() as? Int)?.let { newState ->
                             statusBarState = newState
+                            if (newState == 0) {
+                                isBouncerShowing = false
+                                isQsExpanded = false
+                            } else if (newState == 1) {
+                                isBouncerShowing = false
+                            }
                             if (newState != 1 && isEditModeActive) {
                                 activeEditorOverlay?.dismiss(save = false)
+                            }
+                            activeRootLayout?.post {
+                                activeRootLayout?.let { root ->
+                                    SystemUIHider.syncKeyguardNotificationVisibility(root, shouldHideStockNotifs())
+                                }
+                                activeNotifsView?.updateVisibilityState()
+                                activeNotifsView?.invalidate()
                             }
                         }
                         res
@@ -841,6 +1008,28 @@ class CaveArtXposedModule : XposedModule() {
                             isDozing = dozing
                             if (dozing && isEditModeActive) {
                                 activeEditorOverlay?.dismiss(save = false)
+                            }
+                            activeNotifsView?.post {
+                                activeNotifsView?.isDozingState = dozing
+                                if (!dozing) activeNotifsView?.dozeAmount = 0f
+                                activeNotifsView?.invalidate()
+                            }
+                        }
+                        res
+                    }
+                }
+                sbscClass.declaredMethods.filter {
+                    it.name == "setDozeAmount" || it.name == "setDozeAmountInternal" || it.name == "onDozeAmountChanged"
+                }.forEach { m ->
+                    hook(m).intercept { chain ->
+                        val res = chain.proceed()
+                        val amount = (chain.args.getOrNull(1) as? Float)
+                            ?: (chain.args.firstOrNull() as? Float)
+                        if (amount != null) {
+                            val clamped = amount.coerceIn(0f, 1f)
+                            activeNotifsView?.post {
+                                activeNotifsView?.dozeAmount = clamped
+                                activeNotifsView?.invalidate()
                             }
                         }
                         res
@@ -858,6 +1047,50 @@ class CaveArtXposedModule : XposedModule() {
                     }
                 }
             } catch (_: Throwable) {}
+
+            try {
+                val bvmClass = classLoader.loadClass("com.android.systemui.statusbar.phone.StatusBarKeyguardViewManager")
+                listOf("showPrimaryBouncer", "showBouncer", "hideBouncer").forEach { mName ->
+                    bvmClass.declaredMethods.filter { it.name == mName }.forEach { m ->
+                        hook(m).intercept { chain ->
+                            val res = chain.proceed()
+                            isBouncerShowing = (mName != "hideBouncer")
+                            activeNotifsView?.post {
+                                activeNotifsView?.updateVisibilityState()
+                                activeNotifsView?.invalidate()
+                            }
+                            res
+                        }
+                    }
+                }
+            } catch (_: Throwable) {}
+
+            listOf(
+                "com.android.systemui.shade.NotificationPanelViewController",
+                "com.android.systemui.shade.QuickSettingsControllerImpl"
+            ).forEach { qsCls ->
+                try {
+                    val cls = classLoader.loadClass(qsCls)
+                    cls.declaredMethods.filter { it.name == "setQsExpansion" || it.name == "onQsExpansionStarted" }.forEach { m ->
+                        hook(m).intercept { chain ->
+                            val res = chain.proceed()
+                            val expanded = when (val arg0 = chain.args.firstOrNull()) {
+                                is Float -> arg0 > 0.08f
+                                is Boolean -> arg0
+                                else -> isQsExpanded
+                            }
+                            if (expanded != isQsExpanded) {
+                                isQsExpanded = expanded
+                                activeNotifsView?.post {
+                                    activeNotifsView?.updateVisibilityState()
+                                    activeNotifsView?.invalidate()
+                                }
+                            }
+                            res
+                        }
+                    }
+                } catch (_: Throwable) {}
+            }
 
             listOf(
                 "com.android.systemui.keyguard.ui.viewmodel.KeyguardTouchHandlingViewModel",
@@ -971,7 +1204,7 @@ class CaveArtXposedModule : XposedModule() {
                         refreshCachedLockEditSettings(context)
 
                         if (rootLayout.findViewById<View>(customClockId) == null) {
-                            val initialConfig = loadClockKitConfigFromProvider(context)
+                            val initialConfig = loadLockscreenConfigFromProvider(context)
                             val collMap = getSettingString(context, "clock_collision_map", "")
                             val dateSize = LockscreenSceneRenderer.computeDateSizeSp(initialConfig)
 
@@ -1015,6 +1248,17 @@ class CaveArtXposedModule : XposedModule() {
                             }
                             activeDate = myCustomDate
 
+                            val myCustomNotifs = LockscreenNotificationsView(context).apply {
+                                id = customNotifsId
+                                clockConfig = initialConfig
+                                groups = CaveArtNotifSystemBridge.activeGroups
+                                isDozingState = isDozing
+                                translationZ = 55f
+                                elevation = 55f
+                                updateVisibilityState()
+                            }
+                            activeNotifsView = myCustomNotifs
+
                             computeEffectiveMargins(context)
 
                             rootLayout.viewTreeObserver.addOnPreDrawListener {
@@ -1024,8 +1268,9 @@ class CaveArtXposedModule : XposedModule() {
                                     hideStockSettingsPopupIfPresent(rootLayout)
                                     if (myCustomClock.alpha != 0f) myCustomClock.alpha = 0f
                                     if (myCustomDate.alpha != 0f) myCustomDate.alpha = 0f
+                                    if (myCustomNotifs.alpha != 0f) myCustomNotifs.alpha = 0f
                                 }
-                                SystemUIHider.forceHideOnPreDraw(rootLayout)
+                                SystemUIHider.forceHideOnPreDraw(rootLayout, hideStockNotifs = shouldHideStockNotifs())
                                 true
                             }
 
@@ -1034,8 +1279,9 @@ class CaveArtXposedModule : XposedModule() {
 
                             rootLayout.addView(myCustomClock, lpConstructor.newInstance(-1, -2) as ViewGroup.LayoutParams)
                             rootLayout.addView(myCustomDate, lpConstructor.newInstance(-2, -2) as ViewGroup.LayoutParams)
+                            rootLayout.addView(myCustomNotifs, lpConstructor.newInstance(-1, -1) as ViewGroup.LayoutParams)
 
-                            OverlapPreventionHelper.forceElementsBelow(rootLayout, myCustomClock, myCustomDate)
+                            CaveArtNotifSystemBridge.scheduleRefresh(context)
 
                             if (rootLayout.isAttachedToWindow) {
                                 attachOverlayToWindow(rootLayout, context)
@@ -1051,25 +1297,13 @@ class CaveArtXposedModule : XposedModule() {
                             }
 
                             val filter = IntentFilter().apply {
-                                addAction(ClockKitConfigStore.ACTION_CLOCKKIT_UPDATED)
+                                addAction(LockscreenConfigStore.ACTION_CLOCKKIT_UPDATED)
                                 addAction("com.android.CaveArt.UPDATE_LOCK_EDIT_SETTINGS")
                                 addAction("com.android.CaveArt.UPDATE_UDFPS_LOCATION")
                                 addAction("com.android.CaveArt.UPDATE_AT_A_GLANCE")
                                 addAction("com.android.CaveArt.UPDATE_TELEMETRY")
-                                addAction("com.android.CaveArt.UPDATE_CLOCK_STYLE")
-                                addAction("com.android.CaveArt.UPDATE_CLOCK_POSITION")
-                                addAction("com.android.CaveArt.UPDATE_DATE_POSITION")
-                                addAction("com.android.CaveArt.UPDATE_DATE_FORMAT")
-                                addAction("com.android.CaveArt.UPDATE_DATE_ATTACHED")
-                                addAction("com.android.CaveArt.UPDATE_CLOCK_STRETCH")
                                 addAction("com.android.CaveArt.UPDATE_COLLISION_MAP")
-                                addAction("com.android.CaveArt.UPDATE_CLOCK_COLOR")
-                                addAction("com.android.CaveArt.UPDATE_CLOCK_FONT")
-                                addAction("com.android.CaveArt.UPDATE_CLOCK_DUAL_TONE")
-                                addAction("com.android.CaveArt.UPDATE_CLOCK_LAYOUT")
-                                addAction("com.android.CaveArt.UPDATE_CLOCK_DEPTH")
                                 addAction("com.android.CaveArt.UPDATE_LAYER_STACK")
-                                addAction("com.android.CaveArt.UPDATE_CLOCK_GRAVITY")
                                 addAction(Intent.ACTION_WALLPAPER_CHANGED)
                                 addAction(AlarmManager.ACTION_NEXT_ALARM_CLOCK_CHANGED)
                                 addAction(NotificationManager.ACTION_INTERRUPTION_FILTER_CHANGED)
@@ -1097,10 +1331,12 @@ class CaveArtXposedModule : XposedModule() {
                                                 cachedUdfpsX = intent.getFloatExtra("udfps_x", -1f)
                                                 cachedUdfpsY = intent.getFloatExtra("udfps_y", -1f)
                                                 cachedUdfpsRadius = r
+                                                myCustomNotifs.invalidate()
                                             }
                                         }
                                         Intent.ACTION_WALLPAPER_CHANGED -> {
                                             myCustomDate.reloadWallpaperAppearanceAsync()
+                                            myCustomNotifs.reloadWallpaperAppearanceAsync()
                                         }
                                         "com.android.CaveArt.UPDATE_AT_A_GLANCE",
                                         AlarmManager.ACTION_NEXT_ALARM_CLOCK_CHANGED,
@@ -1110,17 +1346,21 @@ class CaveArtXposedModule : XposedModule() {
                                                 myCustomDate.updateTimeDirectly()
                                                 myCustomClock.updateInterpolatedPositions()
                                                 myCustomClock.invalidate()
+                                                myCustomNotifs.invalidate()
                                             }
                                         }
                                         Intent.ACTION_SCREEN_OFF -> {
+                                            isBouncerShowing = false
+                                            isQsExpanded = false
                                             if (isEditModeActive) {
                                                 activeEditorOverlay?.dismiss(save = false)
                                             }
+                                            myCustomNotifs.updateVisibilityState()
                                         }
-                                        ClockKitConfigStore.ACTION_CLOCKKIT_UPDATED -> {
-                                            val newCfg = ClockKitConfigStore.fromJson(
+                                        LockscreenConfigStore.ACTION_CLOCKKIT_UPDATED -> {
+                                            val newCfg = LockscreenConfigStore.fromJson(
                                                 intent.getStringExtra("clockkit_config")
-                                            ) ?: loadClockKitConfigFromProvider(context)
+                                            ) ?: loadLockscreenConfigFromProvider(context)
 
                                             if (intent.hasExtra("collision_map")) {
                                                 val mapStr = intent.getStringExtra("collision_map") ?: ""
@@ -1132,6 +1372,7 @@ class CaveArtXposedModule : XposedModule() {
                                                 context, "telemetry_zoom", LockscreenLayoutSpec.DEFAULT_WALLPAPER_ZOOM
                                             )
                                             myCustomDate.reloadWallpaperAppearanceAsync()
+                                            myCustomNotifs.reloadWallpaperAppearanceAsync()
                                             applyFullConfigToViews(context, rootLayout, classLoader, myCustomClock, myCustomDate, newCfg)
                                         }
                                         "com.android.CaveArt.UPDATE_TELEMETRY" -> {
@@ -1139,6 +1380,7 @@ class CaveArtXposedModule : XposedModule() {
                                                 myCustomClock.telemetryZoom = intent.getFloatExtra("telemetry_zoom", myCustomClock.telemetryZoom)
                                                 myCustomClock.invalidate()
                                                 myCustomDate.invalidate()
+                                                myCustomNotifs.invalidate()
                                             }
                                         }
                                         "com.android.CaveArt.UPDATE_COLLISION_MAP" -> {
@@ -1149,32 +1391,27 @@ class CaveArtXposedModule : XposedModule() {
                                             myCustomClock.requestLayout()
                                             myCustomClock.invalidate()
                                         }
-                                        "com.android.CaveArt.UPDATE_CLOCK_DEPTH",
                                         "com.android.CaveArt.UPDATE_LAYER_STACK",
-                                        "com.android.CaveArt.UPDATE_CLOCK_STYLE",
-                                        "com.android.CaveArt.UPDATE_CLOCK_POSITION",
-                                        "com.android.CaveArt.UPDATE_DATE_POSITION",
-                                        "com.android.CaveArt.UPDATE_DATE_FORMAT",
-                                        "com.android.CaveArt.UPDATE_DATE_ATTACHED",
-                                        "com.android.CaveArt.UPDATE_CLOCK_STRETCH",
-                                        "com.android.CaveArt.UPDATE_CLOCK_COLOR",
-                                        "com.android.CaveArt.UPDATE_CLOCK_FONT",
-                                        "com.android.CaveArt.UPDATE_CLOCK_DUAL_TONE",
-                                        "com.android.CaveArt.UPDATE_CLOCK_LAYOUT",
-                                        "com.android.CaveArt.UPDATE_CLOCK_GRAVITY",
                                         Intent.ACTION_TIME_TICK,
                                         Intent.ACTION_USER_PRESENT,
                                         Intent.ACTION_SCREEN_ON -> {
+                                            if (intent.action == Intent.ACTION_USER_PRESENT) {
+                                                isBouncerShowing = false
+                                                isQsExpanded = false
+                                                myCustomNotifs.dozeAmount = 0f
+                                            }
                                             if (intent.action == Intent.ACTION_SCREEN_ON) {
                                                 refreshCachedLockEditSettings(context)
                                                 scanHiddenSmartspaceOrOmniJaws(context, rootLayout)
                                                 myCustomDate.reloadWallpaperAppearanceAsync()
+                                                myCustomNotifs.reloadWallpaperAppearanceAsync()
+                                                CaveArtNotifSystemBridge.scheduleRefresh(context)
                                             }
                                             if (isEditModeActive) return
                                             myCustomClock.telemetryZoom = getSettingFloat(
                                                 context, "telemetry_zoom", LockscreenLayoutSpec.DEFAULT_WALLPAPER_ZOOM
                                             )
-                                            val refreshed = loadClockKitConfigFromProvider(context)
+                                            val refreshed = loadLockscreenConfigFromProvider(context)
                                             applyFullConfigToViews(context, rootLayout, classLoader, myCustomClock, myCustomDate, refreshed)
                                         }
                                     }
@@ -1182,6 +1419,7 @@ class CaveArtXposedModule : XposedModule() {
                             }, filter, receiverFlags)
                         } else if (rootLayout.isAttachedToWindow) {
                             attachOverlayToWindow(rootLayout, context)
+                            CaveArtNotifSystemBridge.scheduleRefresh(context, immediate = true)
                         }
                     }
 
@@ -1213,13 +1451,30 @@ class CaveArtXposedModule : XposedModule() {
                         val clock = activeClock
                         val context = clock?.context
                         if (context != null) {
-                            var hasNotifications = false
-                            try {
-                                val getVisibility = constraintSetClass.getMethod("getVisibility", Int::class.javaPrimitiveType)
-                                val largeVis = getVisibility.invoke(cs, largeId) as Int
-                                hasNotifications = !isEditModeActive && (largeVis == 8 || largeVis == 4)
-                                updateNotificationShift(context, hasNotifications)
-                            } catch (_: Exception) {}
+                            val getVisibility = try {
+                                constraintSetClass.getMethod("getVisibility", Int::class.javaPrimitiveType)
+                            } catch (_: Exception) { null }
+
+                            val largeVis = try {
+                                if (largeId != 0 && getVisibility != null) getVisibility.invoke(cs, largeId) as Int else 0
+                            } catch (_: Exception) { 0 }
+
+                            val mediaVisible = try {
+                                OverlapPreventionHelper.mediaCarouselId != 0 &&
+                                    getVisibility != null &&
+                                    (getVisibility.invoke(cs, OverlapPreventionHelper.mediaCarouselId) as Int) == 0
+                            } catch (_: Exception) { false }
+
+                            val notifStyle = NotificationStyle.fromId(clock.clockConfig.notificationStyle)
+                            val bridgeConnected = CaveArtNotifSystemBridge.listenerService != null ||
+                                CaveArtNotifSystemBridge.notifPipelineObj != null
+
+                            val hasNotifications = !isEditModeActive && if (bridgeConnected) {
+                                (CaveArtNotifSystemBridge.activeGroups.isNotEmpty() && notifStyle.collapsesClockWhenNotifsPresent) || mediaVisible
+                            } else {
+                                (largeVis == 8 || largeVis == 4) && notifStyle.collapsesClockWhenNotifsPresent
+                            }
+                            updateNotificationShift(context, hasNotifications)
 
                             if (largeId != 0) { setVisibility.invoke(cs, largeId, 8); setAlpha?.invoke(cs, largeId, 0f) }
                             if (smallId != 0) { setVisibility.invoke(cs, smallId, 8); setAlpha?.invoke(cs, smallId, 0f) }
@@ -1256,6 +1511,19 @@ class CaveArtXposedModule : XposedModule() {
                             setVisibility.invoke(cs, customDateId, if (showExternalDate) 0 else 8)
                             setAlpha?.invoke(cs, customDateId, if (!isEditModeActive && showExternalDate) 1f else 0f)
 
+                            val showCustomNotifs = !isEditModeActive &&
+                                statusBarState == 1 &&
+                                notifStyle != NotificationStyle.STOCK &&
+                                notifStyle != NotificationStyle.HIDDEN &&
+                                CaveArtNotifSystemBridge.activeGroups.isNotEmpty()
+                            constrainWidth?.invoke(cs, customNotifsId, screenW.toInt())
+                            constrainHeight?.invoke(cs, customNotifsId, screenH.toInt())
+                            connect.invoke(cs, customNotifsId, 3, 0, 3, 0)
+                            connect.invoke(cs, customNotifsId, 6, 0, 6, 0)
+                            connect.invoke(cs, customNotifsId, 7, 0, 7, 0)
+                            setVisibility.invoke(cs, customNotifsId, if (showCustomNotifs) 0 else 8)
+                            setAlpha?.invoke(cs, customNotifsId, if (showCustomNotifs) 1f else 0f)
+
                             try {
                                 val clockCurrentY = if (hasNotifications) getCompactClockTopPx(context) else effectiveTopMarginPx.toFloat()
                                 val clockHeight = clock.measureHeightForNotificationPush(hasNotifications)
@@ -1273,24 +1541,43 @@ class CaveArtXposedModule : XposedModule() {
                                 }.toInt()
 
                                 val targetMargin = lowestPoint + (LockscreenLayoutSpec.NOTIF_PUSH_MARGIN_DP * density).toInt()
+                                maybeReportNsslTelemetry(context, targetMargin.toFloat())
 
-                                val idsToPush = listOf(
-                                    OverlapPreventionHelper.nsslId,
-                                    OverlapPreventionHelper.mediaCarouselId,
-                                    OverlapPreventionHelper.nsslPlaceholderId,
-                                    OverlapPreventionHelper.keyguardStatusId,
-                                    OverlapPreventionHelper.aodIconsId
-                                )
+                                if (isKeyguardActive(context)) {
+                                    val hideStock = shouldHideStockNotifs()
+                                    if (!hideStock) {
+                                        val stockIds = listOf(
+                                            OverlapPreventionHelper.nsslId,
+                                            OverlapPreventionHelper.nsslPlaceholderId,
+                                            OverlapPreventionHelper.aodIconsId
+                                        )
+                                        for (id in stockIds) {
+                                            if (id != 0) connect.invoke(cs, id, 3, 0, 3, targetMargin)
+                                        }
+                                    }
 
-                                for (id in idsToPush) {
-                                    if (id != 0) {
-                                        connect.invoke(cs, id, 3, 0, 3, targetMargin)
+                                    val customNotifPush = if (showCustomNotifs) {
+                                        NotificationKitRenderer.measureTotalHeightPx(
+                                            groups = CaveArtNotifSystemBridge.activeGroups,
+                                            config = clock.clockConfig,
+                                            density = density,
+                                            screenW = screenW
+                                        ).toInt() + (12f * density).toInt()
+                                    } else 0
+
+                                    val mediaAndStatusMargin = targetMargin + customNotifPush
+                                    val sharedIds = listOf(
+                                        OverlapPreventionHelper.mediaCarouselId,
+                                        OverlapPreventionHelper.keyguardStatusId
+                                    )
+                                    for (id in sharedIds) {
+                                        if (id != 0) connect.invoke(cs, id, 3, 0, 3, mediaAndStatusMargin)
                                     }
                                 }
                             } catch (_: Exception) {}
                         }
 
-                        SystemUIHider.hideInConstraintSet(cs, constraintSetClass)
+                        SystemUIHider.hideInConstraintSet(cs, constraintSetClass, hideStockNotifs = shouldHideStockNotifs())
                         result
                     }
                 } catch (_: Exception) {}
@@ -1304,7 +1591,7 @@ class CaveArtXposedModule : XposedModule() {
         classLoader: ClassLoader,
         clock: VectorTextClock,
         date: IndependentDateView,
-        cfg: ClockKitConfig
+        cfg: LockscreenConfig
     ) {
         val dm = context.resources.displayMetrics
         topMarginPx = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, cfg.clockY, dm).toInt()
@@ -1359,13 +1646,21 @@ class CaveArtXposedModule : XposedModule() {
         date.updatePosition()
         date.requestLayout()
         date.invalidate()
-        CaveArtXposedModule.updateNotificationShift(context, CaveArtXposedModule.isShiftedForNotifications)
+
+        val notifStyle = NotificationStyle.fromId(cfg.notificationStyle)
+        val shouldShift = !isEditModeActive &&
+            CaveArtNotifSystemBridge.activeGroups.isNotEmpty() &&
+            notifStyle.collapsesClockWhenNotifsPresent
+        updateNotificationShift(context, shouldShift)
+
+        activeNotifsView?.updateConfig(cfg)
+        SystemUIHider.syncKeyguardNotificationVisibility(rootLayout, shouldHideStockNotifs())
         date.checkAndResolveOverlap(animated = true)
     }
 }
 
 class IndependentDateView(context: Context) : View(context) {
-    var clockConfig: ClockKitConfig = ClockKitConfig()
+    var clockConfig: LockscreenConfig = LockscreenConfig()
     var notificationProgress = 0f
     private var notifAnimator: ValueAnimator? = null
     var userTranslationX = 0f
@@ -1409,10 +1704,6 @@ class IndependentDateView(context: Context) : View(context) {
         val density = resources.displayMetrics.density
         val snap = if (snapshot.dateText.isNotEmpty()) snapshot else AtAGlanceDataCollector.collect(context, clockConfig)
         return AtAGlanceRenderer.measure(clockConfig, snap, density, compactDateSizeSp, CaveArtXposedModule.screenW).heightPx
-    }
-
-    fun setTextColor(color: Int) {
-        invalidate()
     }
 
     fun setTextSize(unit: Int, sizeSp: Float) {
@@ -1505,6 +1796,7 @@ class IndependentDateView(context: Context) : View(context) {
                 applyCurrentTextSize()
                 updatePosition()
                 invalidate()
+                CaveArtXposedModule.activeNotifsView?.invalidate()
             }
             start()
         }
@@ -1626,6 +1918,7 @@ class IndependentDateView(context: Context) : View(context) {
                 updatePosition()
                 CaveArtXposedModule.activeClock?.updateInterpolatedPositions()
                 CaveArtXposedModule.activeClock?.invalidate()
+                CaveArtXposedModule.activeNotifsView?.invalidate()
             }
             invalidate()
             checkAndResolveOverlap(animated = true)
@@ -1633,7 +1926,7 @@ class IndependentDateView(context: Context) : View(context) {
     }
 
     fun refreshSettings() {
-        val cfg = loadClockKitConfigFromProvider(context)
+        val cfg = loadLockscreenConfigFromProvider(context)
         clockConfig = cfg
         val dateSp = LockscreenSceneRenderer.computeDateSizeSp(cfg)
         dynamicDateSizeSp = dateSp
@@ -1643,7 +1936,7 @@ class IndependentDateView(context: Context) : View(context) {
         dateFormatIndex = cfg.dateFormat
         isAttachedToClock = cfg.dateAttached
 
-        val showExternal = ClockKitEngine.getStyle(cfg.styleId).datePolicy(cfg) == ClockDatePolicy.EXTERNAL_STANDARD && cfg.atGlanceEnabled
+        val showExternal = ClockEngine.getStyle(cfg.styleId).datePolicy(cfg) == ClockDatePolicy.EXTERNAL_STANDARD && cfg.atGlanceEnabled
         visibility = if (showExternal) View.VISIBLE else View.GONE
 
         updateTimeDirectly()
@@ -1773,7 +2066,7 @@ class IndependentDateView(context: Context) : View(context) {
 }
 
 class VectorTextClock(context: Context) : TextClock(context) {
-    var clockConfig: ClockKitConfig = ClockKitConfig()
+    var clockConfig: LockscreenConfig = LockscreenConfig()
     var collisionMap: FloatArray? = null
     var userTranslationX = 0f
     var telemetryZoom = LockscreenLayoutSpec.DEFAULT_WALLPAPER_ZOOM
@@ -1811,7 +2104,7 @@ class VectorTextClock(context: Context) : TextClock(context) {
 
     override fun onTouchEvent(event: MotionEvent?): Boolean = false
 
-    fun activeStyle(): ClockStyle = ClockKitEngine.getStyle(clockConfig.styleId)
+    fun activeStyle(): ClockStyle = ClockEngine.getStyle(clockConfig.styleId)
 
     fun activeDatePolicy(): ClockDatePolicy = activeStyle().datePolicy(clockConfig)
 
@@ -1944,21 +2237,8 @@ class VectorTextClock(context: Context) : TextClock(context) {
         }.start()
     }
 
-    fun reloadDepthMask() {
-        val oldMask = depthMaskBitmap
-        depthMaskBitmap = null
-        oldMask?.takeIf { !it.isRecycled }?.recycle()
-
-        val oldRaw = rawDepthBitmap
-        rawDepthBitmap = null
-        oldRaw?.takeIf { !it.isRecycled }?.recycle()
-
-        rawDepthBitmap = decodeRawDepthBitmap()
-        depthMaskBitmap = decodeDepthMaskBitmap()
-    }
-
     fun refreshSettings() {
-        clockConfig = loadClockKitConfigFromProvider(context)
+        clockConfig = loadLockscreenConfigFromProvider(context)
         telemetryZoom = getSettingFloat(context, "telemetry_zoom", LockscreenLayoutSpec.DEFAULT_WALLPAPER_ZOOM)
 
         val mapStr = getSettingString(context, "clock_collision_map", "")
@@ -1979,6 +2259,7 @@ class VectorTextClock(context: Context) : TextClock(context) {
         invalidate()
 
         CaveArtXposedModule.activeDate?.refreshSettings()
+        CaveArtXposedModule.activeNotifsView?.updateConfig(clockConfig)
     }
 
     override fun onAttachedToWindow() {
@@ -2014,6 +2295,7 @@ class VectorTextClock(context: Context) : TextClock(context) {
                 notificationProgress = it.animatedValue as Float
                 updateInterpolatedPositions()
                 invalidate()
+                CaveArtXposedModule.activeNotifsView?.invalidate()
             }
             addListener(object : android.animation.AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: android.animation.Animator) {
@@ -2115,7 +2397,7 @@ class VectorTextClock(context: Context) : TextClock(context) {
             zoomFactor = telemetryZoom
         )
 
-        val renderRes = ClockKitEngine.renderForSystemUI(canvas, style, frame, clockConfig)
+        val renderRes = ClockEngine.renderForSystemUI(canvas, style, frame, clockConfig)
         lastRenderedBounds.set(renderRes.boundsOnScreen)
 
         canvas.restore()

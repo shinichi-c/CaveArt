@@ -1,14 +1,14 @@
-package com.android.CaveArt.clockkit
+package com.android.CaveArt.lockscreenkit
 
 import android.graphics.*
 import com.android.CaveArt.AdaptiveClockHelper
 import com.android.CaveArt.PerspectiveFitHelper
-import com.android.CaveArt.clockkit.styles.AdaptiveVectorClockStyle
-import com.android.CaveArt.clockkit.styles.EditorialSplitClockStyle
-import com.android.CaveArt.clockkit.styles.MonolithClockStyle
+import com.android.CaveArt.lockscreenkit.styles.AdaptiveVectorClockStyle
+import com.android.CaveArt.lockscreenkit.styles.EditorialSplitClockStyle
+import com.android.CaveArt.lockscreenkit.styles.MonolithClockStyle
 import kotlin.math.max
 
-object ClockKitEngine {
+object ClockEngine {
 
     val styles: List<ClockStyle> = listOf(
         AdaptiveVectorClockStyle(),
@@ -34,7 +34,7 @@ object ClockKitEngine {
         canvas: Canvas,
         style: ClockStyle,
         frame: ClockFrameContext,
-        config: ClockKitConfig
+        config: LockscreenConfig
     ): Pair<ClockRenderResult, Boolean> {
         val gravityMatrix = computeGravityMatrix(style, frame, config)
         val result = if (gravityMatrix != null) {
@@ -65,7 +65,7 @@ object ClockKitEngine {
         canvas: Canvas,
         style: ClockStyle,
         frame: ClockFrameContext,
-        config: ClockKitConfig
+        config: LockscreenConfig
     ): ClockRenderResult? {
         val gravityMatrix = computeGravityMatrix(style, frame, config)
         return if (gravityMatrix != null) {
@@ -87,7 +87,7 @@ object ClockKitEngine {
         canvas: Canvas,
         style: ClockStyle,
         frame: ClockFrameContext,
-        config: ClockKitConfig
+        config: LockscreenConfig
     ): ClockRenderResult {
         val mask = frame.depthMask
         val canDepthMask = config.isDepthEnabled &&
@@ -151,7 +151,7 @@ object ClockKitEngine {
         canvas: Canvas,
         style: ClockStyle,
         frame: ClockFrameContext,
-        config: ClockKitConfig,
+        config: LockscreenConfig,
         gravityMatrix: Matrix?
     ): ClockRenderResult {
         if (gravityMatrix == null) return style.render(canvas, frame, config)
@@ -168,7 +168,7 @@ object ClockKitEngine {
     private fun computeGravityMatrix(
         style: ClockStyle,
         frame: ClockFrameContext,
-        config: ClockKitConfig
+        config: LockscreenConfig
     ): Matrix? {
         if (!config.isGravityEnabled ||
             style.handlesGravityManually ||
