@@ -34,10 +34,6 @@ enum class NotificationStyle(
     }
 }
 
-/**
- * Single Source of Truth for lockscreen notification appearance across
- * App Preview, Xposed Editor, and Live SystemUI.
- */
 enum class NotificationSurfaceMode(val id: Int, val label: String) {
     AUTO_CONTRAST(0, "Solid"),
     FROSTED_GLASS(1, "Blur Glass"),
@@ -144,11 +140,137 @@ data class NotificationHitLayout(
 )
 
 object NotificationKitSampleProvider {
+
+    private class SampleAssets {
+        val waApp = makeAppTile(0xFF25D366.toInt()) { c, s -> drawChatGlyph(c, s, Color.WHITE, fill = true) }
+        val waSmall = makeSmallGlyph { c, s -> drawChatGlyph(c, s, Color.WHITE, fill = false) }
+        val alexAvatar = makeSampleAvatar()
+
+        val gmApp = makeAppTile(Color.WHITE) { c, s -> drawMailGlyph(c, s, 0xFFEA4335.toInt()) }
+        val gmSmall = makeSmallGlyph { c, s -> drawMailGlyph(c, s, Color.WHITE) }
+
+        val playApp = makeAppTile(0xFF0B57D0.toInt()) { c, s -> drawPlayGlyph(c, s, Color.WHITE) }
+        val playSmall = makeSmallGlyph { c, s -> drawPlayGlyph(c, s, Color.WHITE) }
+
+        val igApp = makeGradientTile(0xFF833AB4.toInt(), 0xFFE1306C.toInt(), 0xFFF77737.toInt()) { c, s ->
+            drawCamGlyph(c, s, Color.WHITE)
+        }
+        val igSmall = makeSmallGlyph { c, s -> drawCamGlyph(c, s, Color.WHITE) }
+
+        private fun makeAppTile(bg: Int, drawGlyph: (Canvas, Float) -> Unit): Bitmap {
+            val sz = 84
+            val bmp = Bitmap.createBitmap(sz, sz, Bitmap.Config.ARGB_8888)
+            val c = Canvas(bmp)
+            c.drawColor(bg)
+            drawGlyph(c, sz.toFloat())
+            return bmp
+        }
+
+        private fun makeGradientTile(c1: Int, c2: Int, c3: Int, drawGlyph: (Canvas, Float) -> Unit): Bitmap {
+            val sz = 84
+            val bmp = Bitmap.createBitmap(sz, sz, Bitmap.Config.ARGB_8888)
+            val c = Canvas(bmp)
+            val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                shader = LinearGradient(0f, sz.toFloat(), sz.toFloat(), 0f, intArrayOf(c1, c2, c3), null, Shader.TileMode.CLAMP)
+            }
+            c.drawRect(0f, 0f, sz.toFloat(), sz.toFloat(), p)
+            drawGlyph(c, sz.toFloat())
+            return bmp
+        }
+
+        private fun makeSmallGlyph(drawGlyph: (Canvas, Float) -> Unit): Bitmap {
+            val sz = 48
+            val bmp = Bitmap.createBitmap(sz, sz, Bitmap.Config.ARGB_8888)
+            drawGlyph(Canvas(bmp), sz.toFloat())
+            return bmp
+        }
+
+        private fun makeSampleAvatar(): Bitmap {
+            val sz = 84
+            val s = sz.toFloat()
+            val bmp = Bitmap.createBitmap(sz, sz, Bitmap.Config.ARGB_8888)
+            val c = Canvas(bmp)
+            val bg = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                shader = LinearGradient(0f, 0f, s, s, intArrayOf(0xFF4F8FF7.toInt(), 0xFF1E3C72.toInt()), null, Shader.TileMode.CLAMP)
+            }
+            c.drawRect(0f, 0f, s, s, bg)
+            val fg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(235, 240, 246, 255) }
+            c.drawCircle(s * 0.5f, s * 0.38f, s * 0.17f, fg)
+            c.drawOval(RectF(s * 0.21f, s * 0.60f, s * 0.79f, s * 1.05f), fg)
+            return bmp
+        }
+
+        private fun drawChatGlyph(c: Canvas, s: Float, color: Int, fill: Boolean) {
+            val u = s / 24f
+            val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                this.color = color
+                style = if (fill) Paint.Style.FILL else Paint.Style.STROKE
+                strokeWidth = 2.1f * u
+                strokeJoin = Paint.Join.ROUND
+                strokeCap = Paint.Cap.ROUND
+            }
+            val path = Path().apply {
+                moveTo(5.5f * u, 18.5f * u)
+                lineTo(6.2f * u, 15.2f * u)
+                cubicTo(4.6f * u, 12.6f * u, 5.4f * u, 6.2f * u, 12f * u, 5.8f * u)
+                cubicTo(18.6f * u, 5.4f * u, 19.6f * u, 12.4f * u, 16.4f * u, 16.0f * u)
+                cubicTo(14.2f * u, 18.2f * u, 10.6f * u, 18.5f * u, 8.6f * u, 17.6f * u)
+                close()
+            }
+            c.drawPath(path, p)
+        }
+
+        private fun drawMailGlyph(c: Canvas, s: Float, color: Int) {
+            val u = s / 24f
+            val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                this.color = color
+                style = Paint.Style.STROKE
+                strokeWidth = 2.1f * u
+                strokeJoin = Paint.Join.ROUND
+                strokeCap = Paint.Cap.ROUND
+            }
+            c.drawRoundRect(RectF(4.2f * u, 6.2f * u, 19.8f * u, 17.8f * u), 2.2f * u, 2.2f * u, p)
+            c.drawPath(Path().apply {
+                moveTo(4.8f * u, 7.2f * u); lineTo(12f * u, 13.0f * u); lineTo(19.2f * u, 7.2f * u)
+            }, p)
+        }
+
+        private fun drawPlayGlyph(c: Canvas, s: Float, color: Int) {
+            val u = s / 24f
+            val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                this.color = color
+                style = Paint.Style.FILL
+            }
+            c.drawPath(Path().apply {
+                moveTo(7.5f * u, 5.5f * u)
+                lineTo(18.5f * u, 12f * u)
+                lineTo(7.5f * u, 18.5f * u)
+                close()
+            }, p)
+        }
+
+        private fun drawCamGlyph(c: Canvas, s: Float, color: Int) {
+            val u = s / 24f
+            val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                this.color = color
+                style = Paint.Style.STROKE
+                strokeWidth = 2.0f * u
+            }
+            c.drawRoundRect(RectF(4.8f * u, 4.8f * u, 19.2f * u, 19.2f * u), 4.2f * u, 4.2f * u, p)
+            c.drawCircle(12f * u, 12f * u, 3.6f * u, p)
+        }
+    }
+
+    private val assets by lazy { SampleAssets() }
+
     fun getSamples(nowMs: Long = System.currentTimeMillis()): List<LockNotifAppGroup> = listOf(
         LockNotifAppGroup(
             groupId = "com.whatsapp:0",
             packageName = "com.whatsapp",
             appName = "WhatsApp",
+            smallIcon = assets.waSmall,
+            appIcon = assets.waApp,
+            avatarIcon = assets.alexAvatar,
             accentColor = 0xFF25D366.toInt(),
             items = listOf(
                 LockNotifMessage(
@@ -156,13 +278,15 @@ object NotificationKitSampleProvider {
                     title = "Alex",
                     text = "See you at 7:30 near the metro station!",
                     postTimeMs = nowMs - 2 * 60_000L,
+                    avatarIcon = assets.alexAvatar,
                     actions = listOf(LockNotifAction("Mark read"))
                 ),
                 LockNotifMessage(
                     key = "sample_wa_2",
                     title = "Alex",
                     text = "Sent a photo",
-                    postTimeMs = nowMs - 4 * 60_000L
+                    postTimeMs = nowMs - 4 * 60_000L,
+                    avatarIcon = assets.alexAvatar
                 )
             ),
             latestPostTimeMs = nowMs - 2 * 60_000L,
@@ -173,6 +297,8 @@ object NotificationKitSampleProvider {
             groupId = "com.google.android.gm:0",
             packageName = "com.google.android.gm",
             appName = "Gmail",
+            smallIcon = assets.gmSmall,
+            appIcon = assets.gmApp,
             accentColor = 0xFFEA4335.toInt(),
             items = listOf(
                 LockNotifMessage(
@@ -191,6 +317,8 @@ object NotificationKitSampleProvider {
             groupId = "com.android.vending:0",
             packageName = "com.android.vending",
             appName = "Play Store",
+            smallIcon = assets.playSmall,
+            appIcon = assets.playApp,
             accentColor = 0xFF0B57D0.toInt(),
             items = listOf(
                 LockNotifMessage(
@@ -212,6 +340,8 @@ object NotificationKitSampleProvider {
             groupId = "com.instagram.android:0",
             packageName = "com.instagram.android",
             appName = "Instagram",
+            smallIcon = assets.igSmall,
+            appIcon = assets.igApp,
             accentColor = 0xFFE1306C.toInt(),
             items = listOf(
                 LockNotifMessage(
@@ -314,6 +444,7 @@ object NotificationKitRenderer {
 
     private data class ResolvedPalette(
         val isLightWallpaper: Boolean,
+        val isLightBackdrop: Boolean,
         val frostActive: Boolean,
         val surfaceColor: Int,
         val lipColor: Int,
@@ -378,6 +509,7 @@ object NotificationKitRenderer {
                     val baseA = if (hasBackdropBitmap) 0.42f else 0.72f
                     ResolvedPalette(
                         isLightWallpaper = false,
+                        isLightBackdrop = isLightWallpaper,
                         frostActive = hasBackdropBitmap,
                         surfaceColor = Color.argb((alphaInt * baseA).roundToInt(), 16, 18, 24),
                         lipColor = Color.TRANSPARENT,
@@ -396,6 +528,7 @@ object NotificationKitRenderer {
                     val baseA = if (hasBackdropBitmap) 0.56f else 0.86f
                     ResolvedPalette(
                         isLightWallpaper = true,
+                        isLightBackdrop = isLightWallpaper,
                         frostActive = hasBackdropBitmap,
                         surfaceColor = Color.argb((alphaInt * baseA).roundToInt(), 246, 248, 252),
                         lipColor = Color.TRANSPARENT,
@@ -417,6 +550,7 @@ object NotificationKitRenderer {
                     val baseA = if (hasBackdropBitmap) BackdropSpec.AMBIENT_SCRIM_ALPHA_DARK else 0.78f
                     ResolvedPalette(
                         isLightWallpaper = false,
+                        isLightBackdrop = isLightWallpaper,
                         frostActive = hasBackdropBitmap,
                         surfaceColor = Color.argb((alphaInt * baseA).roundToInt(), 20, 22, 28),
                         lipColor = Color.TRANSPARENT,
@@ -435,6 +569,7 @@ object NotificationKitRenderer {
                     val baseA = if (hasBackdropBitmap) BackdropSpec.AMBIENT_SCRIM_ALPHA_LIGHT else 0.86f
                     ResolvedPalette(
                         isLightWallpaper = true,
+                        isLightBackdrop = isLightWallpaper,
                         frostActive = hasBackdropBitmap,
                         surfaceColor = Color.argb((alphaInt * baseA).roundToInt(), 244, 246, 250),
                         lipColor = Color.TRANSPARENT,
@@ -463,6 +598,7 @@ object NotificationKitRenderer {
                     val accent = Color.HSVToColor(alphaInt, floatArrayOf(hue, hsv[1].coerceIn(0.40f, 0.72f), 0.88f))
                     ResolvedPalette(
                         isLightWallpaper = false,
+                        isLightBackdrop = isLightWallpaper,
                         frostActive = false,
                         surfaceColor = surfCol,
                         lipColor = Color.TRANSPARENT,
@@ -484,6 +620,7 @@ object NotificationKitRenderer {
                     val accent = Color.HSVToColor(alphaInt, floatArrayOf(hue, hsv[1].coerceIn(0.50f, 0.82f), 0.48f))
                     ResolvedPalette(
                         isLightWallpaper = true,
+                        isLightBackdrop = isLightWallpaper,
                         frostActive = false,
                         surfaceColor = surfCol,
                         lipColor = Color.TRANSPARENT,
@@ -503,6 +640,7 @@ object NotificationKitRenderer {
                 if (isNightMode) {
                     ResolvedPalette(
                         isLightWallpaper = false,
+                        isLightBackdrop = isLightWallpaper,
                         frostActive = false,
                         surfaceColor = Color.argb(
                             (alphaInt * 0.92f).roundToInt(),
@@ -524,6 +662,7 @@ object NotificationKitRenderer {
                 } else {
                     ResolvedPalette(
                         isLightWallpaper = true,
+                        isLightBackdrop = isLightWallpaper,
                         frostActive = false,
                         surfaceColor = Color.argb((alphaInt * 0.95f).roundToInt(), 246, 248, 251),
                         lipColor = Color.TRANSPARENT,
@@ -668,7 +807,8 @@ object NotificationKitRenderer {
         pressScale: Float = 1f,
         newGroupIds: Set<String> = emptySet(),
         entryProgress: Float = 1f,
-        isNightMode: Boolean = true
+        isNightMode: Boolean = true,
+        clockAvoidRect: RectF? = null
     ): NotificationHitLayout {
         val style = NotificationStyle.fromId(config.notificationStyle)
         if (groups.isEmpty() || style == NotificationStyle.STOCK || style == NotificationStyle.HIDDEN) {
@@ -745,7 +885,7 @@ object NotificationKitRenderer {
             return drawIconsOnly(
                 canvas, groups, config, screenW, centerX, topY, maxBottomY, density,
                 nowMillis, palette, backdropBmp, backdropMatrix, effDoze >= 0.5f,
-                peekGroupId, peekProgress, peekSwipeOffsetPx, pressedTarget
+                peekGroupId, peekProgress, peekSwipeOffsetPx, pressedTarget, clockAvoidRect
             )
         }
 
@@ -925,7 +1065,8 @@ object NotificationKitRenderer {
         peekGroupId: String?,
         peekProgress: Float,
         peekSwipeOffsetPx: Float,
-        pressedTarget: NotificationHitTarget?
+        pressedTarget: NotificationHitTarget?,
+        clockAvoidRect: RectF? = null
     ): NotificationHitLayout {
         val visible = groups.take(5)
         val overflowCount = (groups.size - visible.size).coerceAtLeast(0)
@@ -951,7 +1092,7 @@ object NotificationKitRenderer {
         var cursorX = centerX - totalW / 2f
         val iconTop = rect.centerY() - iconSz / 2f
         val iconTint = if (useBackdrop) palette.primaryInk else palette.glyphInk
-        val shadowCol = if (isDozing || useBackdrop) Color.TRANSPARENT else if (palette.isLightWallpaper) {
+        val shadowCol = if (isDozing || useBackdrop) Color.TRANSPARENT else if (palette.isLightBackdrop) {
             Color.argb(85, 255, 255, 255)
         } else {
             Color.argb(140, 0, 0, 0)
@@ -1030,7 +1171,7 @@ object NotificationKitRenderer {
             val peekTarget = drawPeekCard(
                 canvas, peekGroup, config, screenW, centerX, rect, maxBottomY,
                 density, nowMillis, palette, frostBitmap, frostMatrix, peekProgress,
-                peekSwipeOffsetPx, pressedTarget
+                peekSwipeOffsetPx, pressedTarget, clockAvoidRect
             )
             targets.add(peekTarget)
             totalBounds.union(peekTarget.bounds)
@@ -1055,7 +1196,8 @@ object NotificationKitRenderer {
         frostMatrix: Matrix?,
         peekProgress: Float,
         peekSwipeOffsetPx: Float,
-        pressedTarget: NotificationHitTarget?
+        pressedTarget: NotificationHitTarget?,
+        clockAvoidRect: RectF? = null
     ): NotificationHitTarget {
         val p = peekProgress.coerceIn(0f, 1f)
         val cardW = min(screenW - 32f * density, 344f * density)
@@ -1063,11 +1205,24 @@ object NotificationKitRenderer {
         val hasProg = lead?.hasProgress == true
         val cardH = (if (hasProg) 86f else 74f) * density
         val gap = 10f * density
-        val placeBelow = (anchorRowRect.bottom + gap + cardH) <= maxBottomY
+        val belowTop = anchorRowRect.bottom + gap
+        val aboveTop = anchorRowRect.top - gap - cardH
+        val belowFits = (belowTop + cardH) <= maxBottomY
+        val aboveFits = aboveTop >= 44f * density
+        val belowHitsClock = clockAvoidRect != null && !clockAvoidRect.isEmpty &&
+            RectF.intersects(RectF(centerX - cardW / 2f, belowTop, centerX + cardW / 2f, belowTop + cardH), clockAvoidRect)
+        val aboveHitsClock = clockAvoidRect != null && !clockAvoidRect.isEmpty &&
+            RectF.intersects(RectF(centerX - cardW / 2f, aboveTop, centerX + cardW / 2f, aboveTop + cardH), clockAvoidRect)
+
+        val placeBelow = when {
+            belowFits && !belowHitsClock -> true
+            aboveFits && !aboveHitsClock -> false
+            else -> belowFits
+        }
         val cardTop = if (placeBelow) {
-            anchorRowRect.bottom + gap
+            belowTop
         } else {
-            (anchorRowRect.top - gap - cardH).coerceAtLeast(86f * density)
+            aboveTop.coerceAtLeast(44f * density)
         }
         val slideOffset = (1f - p) * (if (placeBelow) -8f * density else 8f * density)
         val peekRect = RectF(centerX - cardW / 2f, cardTop + slideOffset, centerX + cardW / 2f, cardTop + slideOffset + cardH)
@@ -1403,11 +1558,13 @@ object NotificationKitRenderer {
                         msgTop += rowH
                     }
 
-                    if (config.notificationShowActions && lead != null && !lead.isRedacted && lead.actions.isNotEmpty() && cardExpandP > 0.7f) {
+                    if (config.notificationShowActions && lead != null && !lead.isRedacted && lead.actions.isNotEmpty() && cardExpandP > 0.85f) {
+                        val actAlpha = ((cardExpandP - 0.85f) / 0.15f).coerceIn(0f, 1f) * contentAlpha
+                        val actTop = max(msgTop + 4f * density, cardRect.bottom - 38f * density)
                         val actionTargets = drawActionPills(
                             canvas, lead.actions, group.groupId, 0,
-                            textLeft, cardRect.right - padH, cardRect.bottom - 38f * density,
-                            density, palette, contentAlpha, pressedTarget
+                            textLeft, cardRect.right - padH, actTop,
+                            density, palette, actAlpha, pressedTarget
                         )
                         if (!isSwiping) targets.addAll(actionTargets)
                     }
@@ -1461,11 +1618,14 @@ object NotificationKitRenderer {
                         drawCenterCroppedPicture(canvas, pic, bannerRect, 14f * density, picAlpha)
                     }
 
-                    if (config.notificationShowActions && !lead.isRedacted && lead.actions.isNotEmpty() && cardExpandP > 0.7f) {
+                    if (config.notificationShowActions && !lead.isRedacted && lead.actions.isNotEmpty() && cardExpandP > 0.85f) {
+                        val actAlpha = ((cardExpandP - 0.85f) / 0.15f).coerceIn(0f, 1f) * contentAlpha
+                        val contentEnd = nextY + if (pic != null) 102f * density else 0f
+                        val actTop = max(contentEnd, cardRect.bottom - 38f * density)
                         val actionTargets = drawActionPills(
                             canvas, lead.actions, group.groupId, 0,
-                            textLeft, cardRect.right - padH, cardRect.bottom - 38f * density,
-                            density, palette, contentAlpha, pressedTarget
+                            textLeft, cardRect.right - padH, actTop,
+                            density, palette, actAlpha, pressedTarget
                         )
                         if (!isSwiping) targets.addAll(actionTargets)
                     }
@@ -1566,26 +1726,44 @@ object NotificationKitRenderer {
         val hasClearable = groups.any { it.isClearable }
         if ((remainingApps > 0 || hasClearable) && cursorY + 30f * density <= maxBottomY) {
             val pillH = 29f * density
-            val footerLabel = if (remainingApps > 0) "+$remainingApps more  •  Clear all" else "Clear all"
+            val padH = 14f * density
+            val pillGap = 8f * density
             metaPaint.textSize = 11.5f * density
-            val labelW = metaPaint.measureText(footerLabel)
-            val pillW = labelW + 28f * density
-            val cx = screenW / 2f
-            val pillRect = RectF(cx - pillW / 2f, cursorY, cx + pillW / 2f, cursorY + pillH)
 
-            val isClearPressed = pressedTarget?.kind == NotificationHitKind.CLEAR_ALL
-            canvas.save()
-            if (isClearPressed) canvas.scale(0.95f, 0.95f, pillRect.centerX(), pillRect.centerY())
-            drawSurfaceRect(canvas, pillRect, pillH / 2f, palette, frostBitmap, frostMatrix, 0.92f, density, isPressed = isClearPressed)
+            val moreLabel = if (remainingApps > 0) "+$remainingApps more" else null
+            val clearLabel = if (hasClearable) "Clear all" else null
+            val moreW = if (moreLabel != null) metaPaint.measureText(moreLabel) + padH * 2f else 0f
+            val clearW = if (clearLabel != null) metaPaint.measureText(clearLabel) + padH * 2f else 0f
+            val totalRowW = moreW + clearW + if (moreLabel != null && clearLabel != null) pillGap else 0f
+            var px = (screenW / 2f) - (totalRowW / 2f)
 
-            metaPaint.color = palette.primaryInk
-            val ty = pillRect.centerY() - (metaPaint.descent() + metaPaint.ascent()) / 2f
-            canvas.drawText(footerLabel, pillRect.left + 14f * density, ty, metaPaint)
-            canvas.restore()
+            if (moreLabel != null) {
+                val moreRect = RectF(px, cursorY, px + moreW, cursorY + pillH)
+                val isMorePressed = pressedTarget?.kind == NotificationHitKind.ICONS_CONTAINER
+                canvas.save()
+                if (isMorePressed) canvas.scale(0.95f, 0.95f, moreRect.centerX(), moreRect.centerY())
+                drawSurfaceRect(canvas, moreRect, pillH / 2f, palette, frostBitmap, frostMatrix, 0.92f, density, isPressed = isMorePressed)
+                metaPaint.color = palette.primaryInk
+                val ty = moreRect.centerY() - (metaPaint.descent() + metaPaint.ascent()) / 2f
+                canvas.drawText(moreLabel, moreRect.left + padH, ty, metaPaint)
+                canvas.restore()
+                totalBounds.union(moreRect)
+                targets.add(NotificationHitTarget(NotificationHitKind.ICONS_CONTAINER, moreRect))
+                px += moreW + pillGap
+            }
 
-            totalBounds.union(pillRect)
-            if (hasClearable) {
-                targets.add(NotificationHitTarget(NotificationHitKind.CLEAR_ALL, pillRect))
+            if (clearLabel != null) {
+                val clearRect = RectF(px, cursorY, px + clearW, cursorY + pillH)
+                val isClearPressed = pressedTarget?.kind == NotificationHitKind.CLEAR_ALL
+                canvas.save()
+                if (isClearPressed) canvas.scale(0.95f, 0.95f, clearRect.centerX(), clearRect.centerY())
+                drawSurfaceRect(canvas, clearRect, pillH / 2f, palette, frostBitmap, frostMatrix, 0.92f, density, isPressed = isClearPressed)
+                metaPaint.color = palette.primaryInk
+                val ty = clearRect.centerY() - (metaPaint.descent() + metaPaint.ascent()) / 2f
+                canvas.drawText(clearLabel, clearRect.left + padH, ty, metaPaint)
+                canvas.restore()
+                totalBounds.union(clearRect)
+                targets.add(NotificationHitTarget(NotificationHitKind.CLEAR_ALL, clearRect))
             }
         }
 

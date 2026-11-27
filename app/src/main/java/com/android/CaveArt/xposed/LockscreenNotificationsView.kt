@@ -63,7 +63,19 @@ class LockscreenNotificationsView(context: Context) : View(context) {
     private var entrySpring: SpringAnimation? = null
 
     private var lastHitLayout = NotificationHitLayout()
+    private var lastExpansionDeltaPx = 0f
     private val screenPos = IntArray(2)
+
+    fun containsScreenPoint(sx: Float, sy: Float): Boolean {
+        if (visibility != View.VISIBLE || alpha < 0.1f || groups.isEmpty()) return false
+        if (lastHitLayout.targets.any { it.bounds.contains(sx, sy) }) return true
+        if (!lastHitLayout.totalBounds.isEmpty) {
+            val pad = 6f * resources.displayMetrics.density
+            return sx in (lastHitLayout.totalBounds.left - pad)..(lastHitLayout.totalBounds.right + pad) &&
+                sy in (lastHitLayout.totalBounds.top - pad)..(lastHitLayout.totalBounds.bottom + pad)
+        }
+        return false
+    }
     private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
     private var velocityTracker: VelocityTracker? = null
 
@@ -76,6 +88,38 @@ class LockscreenNotificationsView(context: Context) : View(context) {
     private var cachedWallpaperThumb: Bitmap? = null
     private var cachedWallpaperColors: WallpaperColors? = null
     private var colorsChangedListener: Any? = null
+
+    private val progressWatcherHandler = Handler(Looper.getMainLooper())
+    private var progressWatcherActive = false
+    private val progressWatcherRunnable = object : Runnable {
+        override fun run() {
+            if (!isAttachedToWindow || visibility != View.VISIBLE || isDozingState || dozeAmount >= 0.5f ||
+                !CaveArtXposedModule.isKeyguardActive(context) ||
+                groups.none { g -> g.items.any { it.hasProgress } }
+            ) {
+                progressWatcherActive = false
+                return
+            }
+            CaveArtNotifSystemBridge.scheduleRefresh(context, immediate = false)
+            progressWatcherHandler.postDelayed(this, 450L)
+        }
+    }
+
+    private fun syncProgressWatcher() {
+        val shouldWatch = isAttachedToWindow &&
+            visibility == View.VISIBLE &&
+            !isDozingState &&
+            dozeAmount < 0.5f &&
+            CaveArtXposedModule.isKeyguardActive(context) &&
+            groups.any { g -> g.items.any { it.hasProgress } }
+        if (shouldWatch && !progressWatcherActive) {
+            progressWatcherActive = true
+            progressWatcherHandler.postDelayed(progressWatcherRunnable, 450L)
+        } else if (!shouldWatch && progressWatcherActive) {
+            progressWatcherActive = false
+            progressWatcherHandler.removeCallbacks(progressWatcherRunnable)
+        }
+    }
 
     private val notifListener: (List<LockNotifAppGroup>) -> Unit = { updated ->
         val incomingIds = updated.map { it.groupId }.toSet()
@@ -127,6 +171,7 @@ class LockscreenNotificationsView(context: Context) : View(context) {
     fun updateVisibilityState() {
         val style = NotificationStyle.fromId(clockConfig.notificationStyle)
         val shouldShow = !CaveArtXposedModule.isEditModeActive &&
+            !CaveArtXposedModule.isEditorDismissing &&
             !CaveArtXposedModule.isBouncerShowing &&
             !CaveArtXposedModule.isQsExpanded &&
             CaveArtXposedModule.isKeyguardActive(context) &&
@@ -135,6 +180,11 @@ class LockscreenNotificationsView(context: Context) : View(context) {
             groups.isNotEmpty()
         if (shouldShow && alpha < 1f) alpha = 1f
         visibility = if (shouldShow) View.VISIBLE else View.GONE
+        if (!shouldShow && lastExpansionDeltaPx != 0f) {
+            lastExpansionDeltaPx = 0f
+            CaveArtXposedModule.updateMediaCarouselPushForExpansion(0f)
+        }
+        syncProgressWatcher()
     }
 
     private fun decodeSampledFd(fd: java.io.FileDescriptor, maxDim: Int): Bitmap? {
@@ -159,17 +209,18 @@ class LockscreenNotificationsView(context: Context) : View(context) {
                     wmColors = wm.getWallpaperColors(WallpaperManager.FLAG_LOCK)
                         ?: wm.getWallpaperColors(WallpaperManager.FLAG_SYSTEM)
                 }
-                val isLive = wm.wallpaperInfo != null
+                val isCaveArtLive = wm.wallpaperInfo?.packageName == "com.android.CaveArt"
+                val isOtherLive = wm.wallpaperInfo != null && !isCaveArtLive
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                     val lockFd = try { wm.getWallpaperFile(WallpaperManager.FLAG_LOCK) } catch (_: Throwable) { null }
                     if (lockFd != null) {
                         lockFd.use { thumb = decodeSampledFd(it.fileDescriptor, 384) }
-                    } else if (!isLive) {
+                    } else if (!isOtherLive && !isCaveArtLive) {
                         val sysFd = try { wm.getWallpaperFile(WallpaperManager.FLAG_SYSTEM) } catch (_: Throwable) { null }
                         sysFd?.use { thumb = decodeSampledFd(it.fileDescriptor, 384) }
                     }
                 }
-                if (thumb == null && !isLive) {
+                if (thumb == null && !isOtherLive) {
                     try {
                         context.contentResolver.openFileDescriptor(
                             Uri.parse("content://com.android.CaveArt.settings/lock_wallpaper"), "r"
@@ -199,6 +250,7 @@ class LockscreenNotificationsView(context: Context) : View(context) {
         CaveArtNotifSystemBridge.scheduleRefresh(context)
         reloadWallpaperAppearanceAsync()
         updateVisibilityState()
+        syncProgressWatcher()
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1 && colorsChangedListener == null) {
             try {
@@ -215,6 +267,8 @@ class LockscreenNotificationsView(context: Context) : View(context) {
     }
 
     override fun onDetachedFromWindow() {
+        progressWatcherActive = false
+        progressWatcherHandler.removeCallbacks(progressWatcherRunnable)
         CaveArtNotifSystemBridge.removeListener(notifListener)
         swipeSpring?.cancel()
         expandSpring?.cancel()
@@ -232,6 +286,10 @@ class LockscreenNotificationsView(context: Context) : View(context) {
             }
         }
         colorsChangedListener = null
+        if (lastExpansionDeltaPx != 0f) {
+            lastExpansionDeltaPx = 0f
+            CaveArtXposedModule.updateMediaCarouselPushForExpansion(0f)
+        }
         val oldThumb = cachedWallpaperThumb
         cachedWallpaperThumb = null
         oldThumb?.takeIf { !it.isRecycled }?.recycle()
@@ -257,6 +315,7 @@ class LockscreenNotificationsView(context: Context) : View(context) {
             return
         }
         if (CaveArtXposedModule.isEditModeActive ||
+            CaveArtXposedModule.isEditorDismissing ||
             CaveArtXposedModule.isBouncerShowing ||
             CaveArtXposedModule.isQsExpanded ||
             !CaveArtXposedModule.isKeyguardActive(context)
@@ -288,7 +347,24 @@ class LockscreenNotificationsView(context: Context) : View(context) {
             dismissCollapseScale = dismissCollapseScale,
             screenW = sw
         )
+        val collapsedNotifH = if (activeExpanded != null) {
+            NotificationKitRenderer.measureTotalHeightPx(
+                groups = groups,
+                config = clockConfig,
+                density = density,
+                dismissingGroupId = dismissingGroupId,
+                dismissCollapseScale = dismissCollapseScale,
+                screenW = sw
+            )
+        } else notifH
+        val expansionDeltaPx = kotlin.math.max(0f, notifH - collapsedNotifH)
+        if (abs(expansionDeltaPx - lastExpansionDeltaPx) > 1f) {
+            lastExpansionDeltaPx = expansionDeltaPx
+            CaveArtXposedModule.updateMediaCarouselPushForExpansion(expansionDeltaPx)
+        }
+
         val (clockTopPx, dateBottomPx) = CaveArtXposedModule.computeCurrentHeaderBoundsPx(context)
+        val dateTopPx = CaveArtXposedModule.computeCurrentDateTopPx(context)
         val topY = LockscreenSceneRenderer.computeNotificationsTopPx(
             anchorBottomPx = anchorBottom,
             notifHeightPx = notifH,
@@ -297,7 +373,8 @@ class LockscreenNotificationsView(context: Context) : View(context) {
             isCollapsingStyle = style.collapsesClockWhenNotifsPresent,
             isIconsOnly = style == NotificationStyle.ICONS_ONLY,
             clockTopPx = clockTopPx,
-            dateBottomPx = dateBottomPx
+            dateBottomPx = dateBottomPx,
+            dateTopPx = dateTopPx
         )
 
         getLocationOnScreen(screenPos)
@@ -333,10 +410,13 @@ class LockscreenNotificationsView(context: Context) : View(context) {
             pressScale = pressScale,
             newGroupIds = newGroupIds,
             entryProgress = entryProgress,
-            isNightMode = NotificationKitRenderer.isSystemNightMode(context)
+            isNightMode = NotificationKitRenderer.isSystemNightMode(context),
+            clockAvoidRect = CaveArtXposedModule.activeClock?.lastRenderedBounds
         )
 
-        if (groups.any { g -> g.items.any { it.hasProgress && it.progressIndeterminate } }) {
+        val progressVisible = !isDozingState && dozeAmount < 0.98f &&
+            (style == NotificationStyle.GROUPED_CARDS || (style == NotificationStyle.ICONS_ONLY && peekGroupId != null))
+        if (progressVisible && groups.any { g -> g.items.any { it.hasProgress && it.progressIndeterminate } }) {
             postInvalidateOnAnimation()
         }
 

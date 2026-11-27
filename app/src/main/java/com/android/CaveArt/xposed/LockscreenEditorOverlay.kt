@@ -87,6 +87,21 @@ class LockscreenEditorOverlay(context: Context) : FrameLayout(context) {
         }
     }
 
+    companion object {
+        private var cachedWpBitmap: Bitmap? = null
+        private var cachedBlurBitmap: Bitmap? = null
+        private var cachedBlurStyle: BackdropStyle? = null
+
+        fun invalidateBackdropCache() {
+            cachedBlurBitmap?.takeIf { !it.isRecycled }?.recycle()
+            cachedBlurBitmap = null
+            cachedWpBitmap?.takeIf { !it.isRecycled }?.recycle()
+            cachedWpBitmap = null
+            cachedBlurStyle = null
+        }
+    }
+
+    private val backdropOpaqueBase = View(context)
     private val backdropImageView = ImageView(context)
     private val backdropTintView = View(context)
     private val rootColumn = LinearLayout(context)
@@ -96,6 +111,7 @@ class LockscreenEditorOverlay(context: Context) : FrameLayout(context) {
     private val styleCarouselView = StyleCarouselPagerView(context)
     private val styleNamePill = TextView(context)
     private val notifToggleBtn = TextView(context)
+    private val notifModeHintPill = TextView(context)
     private val notifControlsRow = LinearLayout(context)
     private val notifStylePill = TextView(context)
     private val notifSurfacePill = TextView(context)
@@ -130,6 +146,7 @@ class LockscreenEditorOverlay(context: Context) : FrameLayout(context) {
     }
 
     private fun buildUi() {
+        addView(backdropOpaqueBase, LayoutParams(-1, -1))
         backdropImageView.scaleType = ImageView.ScaleType.CENTER_CROP
         addView(backdropImageView, LayoutParams(-1, -1))
         addView(backdropTintView, LayoutParams(-1, -1))
@@ -247,6 +264,16 @@ class LockscreenEditorOverlay(context: Context) : FrameLayout(context) {
         notifControlsRow.addView(notifStylePill, LinearLayout.LayoutParams(-2, dp(32f)).apply { marginEnd = dp(6f) })
         notifControlsRow.addView(notifSurfacePill, LinearLayout.LayoutParams(-2, dp(32f)).apply { marginEnd = dp(6f) })
         notifControlsRow.addView(notifMaxPill, LinearLayout.LayoutParams(-2, dp(32f)))
+        notifModeHintPill.apply {
+            gravity = Gravity.CENTER
+            setTextColor(Color.WHITE)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+            setPadding(dp(14f), dp(7f), dp(14f), dp(7f))
+            background = pillBg()
+            visibility = View.GONE
+        }
+        previewCardFrame.addView(notifModeHintPill, LayoutParams(-2, -2, Gravity.CENTER_HORIZONTAL or Gravity.BOTTOM).apply { bottomMargin = dp(64f) })
         previewCardFrame.addView(notifControlsRow, LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = dp(12f) })
 
         previewAreaContainer.addView(previewCardFrame, LayoutParams(-1, -1, Gravity.CENTER))
@@ -321,6 +348,17 @@ class LockscreenEditorOverlay(context: Context) : FrameLayout(context) {
         notifMaxPill.visibility = if (st == NotificationStyle.GROUPED_CARDS) View.VISIBLE else View.GONE
         notifControlsRow.visibility = if (showNotifPreview) View.VISIBLE else View.GONE
 
+        if (showNotifPreview && (st == NotificationStyle.STOCK || st == NotificationStyle.HIDDEN)) {
+            notifModeHintPill.text = if (st == NotificationStyle.STOCK) {
+                "Using Stock Android Notifications"
+            } else {
+                "Lockscreen Notifications Hidden"
+            }
+            notifModeHintPill.visibility = View.VISIBLE
+        } else {
+            notifModeHintPill.visibility = View.GONE
+        }
+
         notifToggleBtn.background = GradientDrawable().apply {
             setColor(if (showNotifPreview) theme.accentColor else Color.argb(115, 0, 0, 0))
             cornerRadius = dpf(18f)
@@ -376,6 +414,12 @@ class LockscreenEditorOverlay(context: Context) : FrameLayout(context) {
 
     fun openEditor() {
         val clock = CaveArtXposedModule.activeClock ?: return
+        animate().cancel()
+        animate().setListener(null)
+        previewCardFrame.animate().cancel()
+        rootColumn.animate().cancel()
+        backdropImageView.animate().cancel()
+
         isClickable = true
         isFocusable = true
         isFocusableInTouchMode = true
@@ -396,26 +440,48 @@ class LockscreenEditorOverlay(context: Context) : FrameLayout(context) {
 
         activeLayerScope = EditorLayerScope.CLOCK; isStyleBrowseMode = false; activeActionIndex = 0
         isLayersSheetVisible = false; layersScrim.visibility = View.GONE; unlockPromptPill.visibility = View.GONE
-        backdropImageView.visibility = if (backdropStyle == BackdropStyle.OFF) View.GONE else View.VISIBLE
-        backdropTintView.visibility = View.VISIBLE
-        rootColumn.visibility = View.VISIBLE; visibility = View.VISIBLE
 
         val (resolvedTheme, resolvedPalette) = LockscreenOverlayPanels.resolveTheme(context, paletteColors, backdropStyle)
         theme = resolvedTheme; paletteColors = resolvedPalette
+        backdropOpaqueBase.setBackgroundColor(if (theme.isNight) Color.BLACK else Color.parseColor("#E8EEF2"))
         backdropTintView.background = LockscreenOverlayPanels.buildBackdropOverlayDrawable(theme, backdropStyle)
-        syncNotifPreviewUI()
+        backdropTintView.visibility = View.VISIBLE
 
+        val hasCachedWp = cachedWpBitmap?.let { !it.isRecycled } == true
+        val hasCachedBlur = cachedBlurBitmap?.let { !it.isRecycled } == true && cachedBlurStyle == backdropStyle
+        if (hasCachedWp) wallpaperBitmap = cachedWpBitmap
+        if (backdropStyle == BackdropStyle.OFF) {
+            backdropImageView.visibility = View.GONE
+        } else {
+            backdropImageView.visibility = View.VISIBLE
+            if (hasCachedBlur) {
+                blurredBackdrop = cachedBlurBitmap
+                backdropImageView.setImageBitmap(cachedBlurBitmap)
+                backdropImageView.alpha = 1f
+            } else {
+                backdropImageView.setImageDrawable(null)
+                backdropImageView.alpha = 0f
+            }
+        }
+
+        CaveArtXposedModule.setEditMode(true)
+        rootColumn.visibility = View.VISIBLE
+        visibility = View.VISIBLE
+        alpha = 1f
+
+        syncNotifPreviewUI()
         loadAssetsAsync()
         rebuildActionsList()
         syncModeViews(animate = false)
-
-        CaveArtXposedModule.setEditMode(true)
         startKeepAwake(); syncContinuousFrameLoop()
 
-        alpha = 0f; previewCardFrame.scaleX = 1.08f; previewCardFrame.scaleY = 1.08f; rootColumn.translationY = dpf(36f)
-        animate().alpha(1f).setDuration(220L).start()
-        previewCardFrame.animate().scaleX(1f).scaleY(1f).setDuration(280L).setInterpolator(DecelerateInterpolator()).start()
-        rootColumn.animate().translationY(0f).setDuration(280L).setInterpolator(DecelerateInterpolator()).start()
+        previewCardFrame.alpha = 0f
+        previewCardFrame.scaleX = 1.06f
+        previewCardFrame.scaleY = 1.06f
+        rootColumn.alpha = 0f
+        rootColumn.translationY = dpf(32f)
+        previewCardFrame.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(230L).setInterpolator(DecelerateInterpolator()).start()
+        rootColumn.animate().alpha(1f).translationY(0f).setDuration(250L).setInterpolator(DecelerateInterpolator()).start()
         requestApplyInsets(); requestFocus()
     }
 
@@ -441,16 +507,25 @@ class LockscreenEditorOverlay(context: Context) : FrameLayout(context) {
             CaveArtXposedModule.applyLiveEditPreview(initialConfig, CaveArtXposedModule.activeClock?.collisionMap)
         }
 
+        CaveArtXposedModule.isEditorDismissing = true
         CaveArtXposedModule.setEditMode(false)
         isClickable = false
         isFocusable = false
         isFocusableInTouchMode = false
-        animate().alpha(0f).setDuration(190L).withEndAction {
+        animate().cancel()
+        animate().alpha(0f).setDuration(170L).withEndAction {
             visibility = View.GONE
             backdropImageView.setImageDrawable(null)
-            blurredBackdrop?.takeIf { !it.isRecycled }?.recycle(); blurredBackdrop = null
-            wallpaperBitmap?.takeIf { !it.isRecycled }?.recycle(); wallpaperBitmap = null
+            if (blurredBackdrop !== cachedBlurBitmap) {
+                blurredBackdrop?.takeIf { !it.isRecycled }?.recycle()
+            }
+            blurredBackdrop = null
+            if (wallpaperBitmap !== cachedWpBitmap) {
+                wallpaperBitmap?.takeIf { !it.isRecycled }?.recycle()
+            }
+            wallpaperBitmap = null
             (parent as? ViewGroup)?.removeView(this@LockscreenEditorOverlay)
+            CaveArtXposedModule.revealNotificationsAfterDismiss()
         }.start()
     }
 
@@ -458,24 +533,42 @@ class LockscreenEditorOverlay(context: Context) : FrameLayout(context) {
         val clock = CaveArtXposedModule.activeClock
         val styleNow = backdropStyle
         depthMaskBitmap = clock?.depthMaskBitmap; rawDepthBitmap = clock?.rawDepthBitmap
+        val reuseWp = cachedWpBitmap?.takeIf { !it.isRecycled }
+        val reuseBlur = if (cachedBlurStyle == styleNow) cachedBlurBitmap?.takeIf { !it.isRecycled } else null
         Thread {
             val latestScroll = getSettingInt(context, "scroll_style", fastScrollStyle)
-            val wp = LockscreenOverlayPanels.loadLockWallpaperBitmap(context)
+            val wp = reuseWp ?: LockscreenOverlayPanels.loadLockWallpaperBitmap(context)
             val blurred = if (styleNow != BackdropStyle.OFF) {
-                wp?.let { LockscreenSceneRenderer.createBlurredBackdrop(it, styleNow) }
+                reuseBlur ?: wp?.let { LockscreenSceneRenderer.createBlurredBackdrop(it, styleNow) }
             } else null
             val mask = depthMaskBitmap ?: LockscreenOverlayPanels.decodeStreamBitmap(context, "content://com.android.CaveArt.settings/depth_mask")
             val raw = rawDepthBitmap ?: LockscreenOverlayPanels.decodeStreamBitmap(context, "content://com.android.CaveArt.settings/raw_depth")
             val extracted = if (paletteColors.isEmpty() && wp != null) MonetEngine.extractPaletteFromBitmap(wp, theme.isNight).allColors else null
 
             post {
-                if (!CaveArtXposedModule.isEditModeActive) { wp?.recycle(); blurred?.recycle(); return@post }
+                if (!CaveArtXposedModule.isEditModeActive) {
+                    if (wp !== cachedWpBitmap) wp?.takeIf { !it.isRecycled }?.recycle()
+                    if (blurred !== cachedBlurBitmap) blurred?.takeIf { !it.isRecycled }?.recycle()
+                    return@post
+                }
                 fastScrollStyle = latestScroll
                 fastScrollView.setScrollStyle(latestScroll)
-                if (wp != null) wallpaperBitmap = wp
+                if (wp != null) {
+                    if (cachedWpBitmap !== wp) cachedWpBitmap?.takeIf { !it.isRecycled }?.recycle()
+                    cachedWpBitmap = wp
+                    wallpaperBitmap = wp
+                }
                 if (blurred != null && styleNow != BackdropStyle.OFF) {
-                    blurredBackdrop = blurred; backdropImageView.setImageBitmap(blurred)
-                    backdropImageView.alpha = 0f; backdropImageView.animate().alpha(1f).setDuration(240L).start()
+                    val wasAlreadyShowing = blurredBackdrop === blurred && backdropImageView.alpha >= 0.99f
+                    if (cachedBlurBitmap !== blurred) cachedBlurBitmap?.takeIf { !it.isRecycled }?.recycle()
+                    cachedBlurBitmap = blurred
+                    cachedBlurStyle = styleNow
+                    blurredBackdrop = blurred
+                    backdropImageView.setImageBitmap(blurred)
+                    if (!wasAlreadyShowing) {
+                        backdropImageView.alpha = 0f
+                        backdropImageView.animate().alpha(1f).setDuration(180L).start()
+                    }
                 }
                 if (mask != null) depthMaskBitmap = mask
                 if (raw != null) rawDepthBitmap = raw
@@ -633,7 +726,9 @@ class LockscreenEditorOverlay(context: Context) : FrameLayout(context) {
         udfpsY = CaveArtXposedModule.cachedUdfpsY,
         udfpsRadius = CaveArtXposedModule.cachedUdfpsRadius,
         notificationProgress = notifPreviewProgress,
-        previewNotifications = if (showNotifPreview) NotificationKitSampleProvider.getSamples() else null
+        previewNotifications = if (showNotifPreview) {
+            CaveArtNotifSystemBridge.activeGroups.ifEmpty { NotificationKitSampleProvider.getSamples() }
+        } else null
     )
 
     private fun syncContinuousFrameLoop() {

@@ -3,6 +3,7 @@ package com.android.CaveArt.xposed
 import android.content.Context
 import android.view.View
 import android.view.ViewGroup
+import java.lang.ref.WeakReference
 
 object SystemUIHider {
     var nativeNotificationStackId = 0
@@ -19,6 +20,9 @@ object SystemUIHider {
 
     @Volatile
     private var savedAodVisibility = View.VISIBLE
+
+    private var cachedNsslRef: WeakReference<View>? = null
+    private var cachedAodIconsRef: WeakReference<View>? = null
 
     fun initIds(context: Context) {
         val pkg = context.packageName
@@ -41,8 +45,24 @@ object SystemUIHider {
             ?: (rootLayout.rootView as? ViewGroup)?.findViewById(viewId)
     }
 
+    private fun getCachedNssl(rootLayout: ViewGroup): View? {
+        val existing = cachedNsslRef?.get()
+        if (existing != null && existing.isAttachedToWindow) return existing
+        return findInRootOrWindow(rootLayout, nativeNotificationStackId)?.also {
+            cachedNsslRef = WeakReference(it)
+        }
+    }
+
+    private fun getCachedAodIcons(rootLayout: ViewGroup): View? {
+        val existing = cachedAodIconsRef?.get()
+        if (existing != null && existing.isAttachedToWindow) return existing
+        return findInRootOrWindow(rootLayout, nativeAodIconsId)?.also {
+            cachedAodIconsRef = WeakReference(it)
+        }
+    }
+
     fun syncKeyguardNotificationVisibility(rootLayout: ViewGroup, hideStockNotifs: Boolean) {
-        val nssl = findInRootOrWindow(rootLayout, nativeNotificationStackId)
+        val nssl = getCachedNssl(rootLayout)
         if (nssl != null) {
             if (hideStockNotifs) {
                 if (!didWeHideNssl) {
@@ -60,7 +80,7 @@ object SystemUIHider {
             }
         }
 
-        val aodIcons = findInRootOrWindow(rootLayout, nativeAodIconsId)
+        val aodIcons = getCachedAodIcons(rootLayout)
         if (aodIcons != null) {
             if (hideStockNotifs) {
                 if (!didWeHideAodIcons) {

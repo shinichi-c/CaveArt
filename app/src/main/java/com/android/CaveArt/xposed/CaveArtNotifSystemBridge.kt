@@ -56,7 +56,10 @@ object CaveArtNotifSystemBridge {
     private val workerExecutor = Executors.newSingleThreadExecutor()
     private val dismissedPendingKeys = HashMap<String, Long>()
     private val recentPostedCache = HashMap<String, Pair<StatusBarNotification, Long>>()
+    private val recentRemovedCache = HashMap<String, Long>()
     private val refreshLock = Any()
+    private var delayedFollowupRunnable: Runnable? = null
+    private val hookedHandlerClasses = java.util.Collections.synchronizedSet(HashSet<Class<*>>())
 
     private val appNameCache = LruCache<String, String>(64)
     private val appIconCache = LruCache<String, Bitmap>(64)
@@ -109,6 +112,7 @@ object CaveArtNotifSystemBridge {
                             if (methodName == "onNotificationPosted" && argSbn?.key != null) {
                                 val k = argSbn.key
                                 synchronized(dismissedPendingKeys) { dismissedPendingKeys.remove(k) }
+                                synchronized(recentRemovedCache) { recentRemovedCache.remove(k) }
                                 synchronized(recentPostedCache) {
                                     recentPostedCache[k] = argSbn to System.currentTimeMillis()
                                 }
@@ -116,11 +120,40 @@ object CaveArtNotifSystemBridge {
                                 val k = argSbn.key
                                 synchronized(dismissedPendingKeys) { dismissedPendingKeys.remove(k) }
                                 synchronized(recentPostedCache) { recentPostedCache.remove(k) }
+                                synchronized(recentRemovedCache) { recentRemovedCache[k] = System.currentTimeMillis() }
                             }
-                            val isUrgent = methodName == "onNotificationPosted" ||
-                                methodName == "onNotificationRemoved" ||
-                                methodName == "onListenerConnected"
-                            scheduleRefresh(svc, immediate = isUrgent)
+                            try {
+                                val isUrgent = methodName == "onNotificationPosted" ||
+                                    methodName == "onNotificationRemoved" ||
+                                    methodName == "onListenerConnected"
+                                scheduleRefresh(svc, immediate = isUrgent)
+                                if (methodName == "onNotificationPosted") {
+                                    delayedFollowupRunnable?.let { mainHandler.removeCallbacks(it) }
+                                    val follow = Runnable {
+                                        delayedFollowupRunnable = null
+                                        scheduleRefresh(svc, immediate = false)
+                                    }
+                                    delayedFollowupRunnable = follow
+                                    mainHandler.postDelayed(follow, 80L)
+                                }
+                            } catch (_: Throwable) {}
+                        }
+                        res
+                    }
+                }
+            }
+        } catch (_: Throwable) {}
+
+        try {
+            listOf("onListenerConnected", "onNotificationPosted", "onNotificationRemoved").forEach { mName ->
+                NotificationListenerService::class.java.declaredMethods.filter { it.name == mName }.forEach { m ->
+                    module.hook(m).intercept { chain ->
+                        val res = chain.proceed()
+                        (chain.thisObject as? NotificationListenerService)?.let { svc ->
+                            if (listenerService == null) {
+                                listenerService = svc
+                                scheduleRefresh(svc, immediate = true)
+                            }
                         }
                         res
                     }
@@ -138,6 +171,7 @@ object CaveArtNotifSystemBridge {
                         if (mName == "onNotificationPosted" && argSbn?.key != null) {
                             val k = argSbn.key
                             synchronized(dismissedPendingKeys) { dismissedPendingKeys.remove(k) }
+                            synchronized(recentRemovedCache) { recentRemovedCache.remove(k) }
                             synchronized(recentPostedCache) {
                                 recentPostedCache[k] = argSbn to System.currentTimeMillis()
                             }
@@ -145,6 +179,7 @@ object CaveArtNotifSystemBridge {
                             val k = argSbn.key
                             synchronized(dismissedPendingKeys) { dismissedPendingKeys.remove(k) }
                             synchronized(recentPostedCache) { recentPostedCache.remove(k) }
+                            synchronized(recentRemovedCache) { recentRemovedCache[k] = System.currentTimeMillis() }
                         }
                         val ctx = listenerService ?: CaveArtXposedModule.activeClock?.context
                         if (ctx != null) {
@@ -173,7 +208,101 @@ object CaveArtNotifSystemBridge {
             shadeListClass.declaredMethods.filter { it.name == "buildList" }.forEach { m ->
                 module.hook(m).intercept { chain ->
                     val res = chain.proceed()
-                    CaveArtXposedModule.activeClock?.context?.let { scheduleRefresh(it) }
+                    try {
+                        val ctx = listenerService ?: CaveArtXposedModule.activeClock?.context
+                            ?: CaveArtXposedModule.activeRootLayout?.context
+                        if (ctx != null) scheduleRefresh(ctx, immediate = false)
+                    } catch (_: Throwable) {}
+                    res
+                }
+            }
+        } catch (_: Throwable) {}
+
+        try {
+            val nlClass = classLoader.loadClass("com.android.systemui.statusbar.NotificationListener")
+            nlClass.declaredMethods.filter { it.name == "addNotificationHandler" }.forEach { m ->
+                module.hook(m).intercept { chain ->
+                    val res = chain.proceed()
+                    try {
+                        val handlerObj = chain.args.firstOrNull()
+                        val handlerCls = handlerObj?.javaClass
+                        if (handlerCls != null && hookedHandlerClasses.add(handlerCls)) {
+                            listOf(
+                                "onNotificationPosted",
+                                "onNotificationBatchPosted",
+                                "onNotificationRemoved",
+                                "onNotificationRankingUpdate"
+                            ).forEach { hMethod ->
+                                handlerCls.declaredMethods.filter { it.name == hMethod }.forEach { hm ->
+                                    module.hook(hm).intercept { hChain ->
+                                        val hRes = hChain.proceed()
+                                        try {
+                                            val argSbn = hChain.args.firstOrNull() as? StatusBarNotification
+                                            if (hMethod == "onNotificationPosted" && argSbn?.key != null) {
+                                                val k = argSbn.key
+                                                synchronized(dismissedPendingKeys) { dismissedPendingKeys.remove(k) }
+                                                synchronized(recentRemovedCache) { recentRemovedCache.remove(k) }
+                                                synchronized(recentPostedCache) {
+                                                    recentPostedCache[k] = argSbn to System.currentTimeMillis()
+                                                }
+                                            } else if (hMethod == "onNotificationRemoved" && argSbn?.key != null) {
+                                                val k = argSbn.key
+                                                synchronized(dismissedPendingKeys) { dismissedPendingKeys.remove(k) }
+                                                synchronized(recentPostedCache) { recentPostedCache.remove(k) }
+                                                synchronized(recentRemovedCache) {
+                                                    recentRemovedCache[k] = System.currentTimeMillis()
+                                                }
+                                            }
+                                            val ctx = listenerService ?: CaveArtXposedModule.activeClock?.context
+                                                ?: CaveArtXposedModule.activeRootLayout?.context
+                                            if (ctx != null) {
+                                                scheduleRefresh(ctx, immediate = hMethod == "onNotificationRemoved")
+                                            }
+                                        } catch (_: Throwable) {}
+                                        hRes
+                                    }
+                                }
+                            }
+                        }
+                    } catch (_: Throwable) {}
+                    res
+                }
+            }
+        } catch (_: Throwable) {}
+
+        try {
+            val entryClass = classLoader.loadClass("com.android.systemui.statusbar.notification.collection.NotificationEntry")
+            entryClass.declaredMethods.filter { it.name == "setSbn" }.forEach { m ->
+                module.hook(m).intercept { chain ->
+                    val res = chain.proceed()
+                    try {
+                        val sbn = chain.args.firstOrNull() as? StatusBarNotification
+                        if (sbn?.key != null) {
+                            synchronized(dismissedPendingKeys) { dismissedPendingKeys.remove(sbn.key) }
+                            synchronized(recentRemovedCache) { recentRemovedCache.remove(sbn.key) }
+                            synchronized(recentPostedCache) {
+                                recentPostedCache[sbn.key] = sbn to System.currentTimeMillis()
+                            }
+                        }
+                        val ctx = listenerService ?: CaveArtXposedModule.activeClock?.context
+                            ?: CaveArtXposedModule.activeRootLayout?.context
+                        if (ctx != null) scheduleRefresh(ctx, immediate = false)
+                    } catch (_: Throwable) {}
+                    res
+                }
+            }
+        } catch (_: Throwable) {}
+
+        try {
+            val liveStoreClass = classLoader.loadClass("com.android.systemui.statusbar.notification.collection.NotifLiveDataStoreImpl")
+            liveStoreClass.declaredMethods.filter { it.name == "setActiveNotifList" }.forEach { m ->
+                module.hook(m).intercept { chain ->
+                    val res = chain.proceed()
+                    try {
+                        val ctx = listenerService ?: CaveArtXposedModule.activeClock?.context
+                            ?: CaveArtXposedModule.activeRootLayout?.context
+                        if (ctx != null) scheduleRefresh(ctx, immediate = false)
+                    } catch (_: Throwable) {}
                     res
                 }
             }
@@ -246,38 +375,81 @@ object CaveArtNotifSystemBridge {
         }
     }
 
+    private fun snapshotPipelineEntriesOnMainThread(): List<Pair<StatusBarNotification, NotificationListenerService.Ranking?>>? {
+        val pipeline = notifPipelineObj ?: return null
+        return try {
+            val entries = pipeline.javaClass.getMethod("getAllNotifs").invoke(pipeline) as? Collection<*> ?: return null
+            val out = ArrayList<Pair<StatusBarNotification, NotificationListenerService.Ranking?>>(entries.size)
+            for (entry in entries) {
+                val sbn = entry?.javaClass?.getMethod("getSbn")?.invoke(entry) as? StatusBarNotification ?: continue
+                val ranking = try {
+                    entry.javaClass.getMethod("getRanking").invoke(entry) as? NotificationListenerService.Ranking
+                } catch (_: Throwable) { null }
+                out.add(sbn to ranking)
+            }
+            out
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
     fun refreshNow(context: Context) {
         val appCtx = context.applicationContext ?: context
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            mainHandler.post { refreshNow(appCtx) }
+            return
+        }
+        val pipelineSnapshot = snapshotPipelineEntriesOnMainThread()
         val gen = refreshGeneration.incrementAndGet()
         workerExecutor.execute {
             val groups = try {
-                collectGroupedNotifications(appCtx)
+                collectGroupedNotifications(appCtx, pipelineSnapshot)
             } catch (_: Throwable) {
                 emptyList()
             }
             mainHandler.post {
                 if (gen != refreshGeneration.get()) return@post
-                activeGroups = groups
-                listeners.forEach { it(groups) }
-                CaveArtXposedModule.onNotificationsChanged(appCtx, groups)
+                try {
+                    activeGroups = groups
+                    listeners.forEach { it(groups) }
+                    CaveArtXposedModule.onNotificationsChanged(appCtx, groups)
+                } catch (_: Throwable) {}
             }
         }
+    }
+
+    private fun pruneClearedFromGroup(g: LockNotifAppGroup): LockNotifAppGroup? {
+        val kept = g.items.filterNot { it.isClearable }
+        if (kept.isEmpty()) return null
+        val lead = kept.first()
+        return g.copy(
+            items = kept,
+            latestPostTimeMs = lead.postTimeMs,
+            primaryTitle = lead.title,
+            primaryText = lead.text,
+            primaryIntent = lead.contentIntent,
+            avatarIcon = lead.avatarIcon,
+            pictureBitmap = lead.pictureBitmap,
+            isRedacted = kept.any { it.isRedacted },
+            isClearable = false
+        )
     }
 
     fun dismissGroup(context: Context, group: LockNotifAppGroup) {
         val keys = group.items.filter { it.isClearable }.map { it.key }
         if (keys.isEmpty()) return
-        val now = System.currentTimeMillis()
-        synchronized(dismissedPendingKeys) {
-            keys.forEach { dismissedPendingKeys[it] = now }
-        }
-        val remaining = activeGroups.filterNot { it.groupId == group.groupId }
-        activeGroups = remaining
-        listeners.forEach { it(remaining) }
-        CaveArtXposedModule.onNotificationsChanged(context, remaining)
-
         val svc = listenerService
         if (svc != null) {
+            val now = System.currentTimeMillis()
+            synchronized(dismissedPendingKeys) {
+                keys.forEach { dismissedPendingKeys[it] = now }
+            }
+            val remaining = activeGroups.mapNotNull {
+                if (it.groupId == group.groupId) pruneClearedFromGroup(it) else it
+            }
+            activeGroups = remaining
+            listeners.forEach { it(remaining) }
+            CaveArtXposedModule.onNotificationsChanged(context, remaining)
             keys.forEach { key ->
                 try {
                     svc.cancelNotification(key)
@@ -290,17 +462,16 @@ object CaveArtNotifSystemBridge {
     fun dismissAllClearable(context: Context) {
         val keys = activeGroups.flatMap { it.items }.filter { it.isClearable }.map { it.key }
         if (keys.isEmpty()) return
-        val now = System.currentTimeMillis()
-        synchronized(dismissedPendingKeys) {
-            keys.forEach { dismissedPendingKeys[it] = now }
-        }
-        val remaining = activeGroups.filterNot { it.isClearable }
-        activeGroups = remaining
-        listeners.forEach { it(remaining) }
-        CaveArtXposedModule.onNotificationsChanged(context, remaining)
-
         val svc = listenerService
         if (svc != null) {
+            val now = System.currentTimeMillis()
+            synchronized(dismissedPendingKeys) {
+                keys.forEach { dismissedPendingKeys[it] = now }
+            }
+            val remaining = activeGroups.mapNotNull { pruneClearedFromGroup(it) }
+            activeGroups = remaining
+            listeners.forEach { it(remaining) }
+            CaveArtXposedModule.onNotificationsChanged(context, remaining)
             keys.forEach { key ->
                 try {
                     svc.cancelNotification(key)
@@ -386,33 +557,38 @@ object CaveArtNotifSystemBridge {
         } catch (_: Throwable) {}
     }
 
-    private fun fetchRawEntries(nowMs: Long): List<Pair<StatusBarNotification, NotificationListenerService.Ranking?>> {
+    private fun fetchRawEntries(
+        nowMs: Long,
+        pipelineSnapshot: List<Pair<StatusBarNotification, NotificationListenerService.Ranking?>>?
+    ): List<Pair<StatusBarNotification, NotificationListenerService.Ranking?>> {
         val byKey = LinkedHashMap<String, Pair<StatusBarNotification, NotificationListenerService.Ranking?>>()
+        var pipelineActive = false
 
-        val pipeline = notifPipelineObj
-        if (pipeline != null) {
-            try {
-                val entries = pipeline.javaClass.getMethod("getAllNotifs").invoke(pipeline) as? Collection<*>
-                if (entries != null) {
-                    for (entry in entries) {
-                        val sbn = entry?.javaClass?.getMethod("getSbn")?.invoke(entry) as? StatusBarNotification ?: continue
-                        val key = sbn.key ?: continue
-                        val ranking = try {
-                            entry.javaClass.getMethod("getRanking").invoke(entry) as? NotificationListenerService.Ranking
-                        } catch (_: Throwable) { null }
-                        byKey[key] = sbn to ranking
-                    }
-                }
-            } catch (_: Throwable) {}
+        if (pipelineSnapshot != null) {
+            pipelineActive = true
+            for ((sbn, ranking) in pipelineSnapshot) {
+                val key = sbn.key ?: continue
+                byKey[key] = sbn to ranking
+            }
         }
 
         val svc = listenerService
-        if (svc != null) {
+        if (!pipelineActive && svc != null) {
             try {
                 val arr = svc.activeNotifications
                 if (arr != null) {
                     for (sbn in arr) {
                         val key = sbn?.key ?: continue
+                        val removedRecently = synchronized(recentRemovedCache) {
+                            val rmAt = recentRemovedCache[key]
+                            if (rmAt != null && (nowMs - rmAt) < RECENT_POST_TTL_MS) {
+                                sbn.postTime <= rmAt
+                            } else {
+                                if (rmAt != null) recentRemovedCache.remove(key)
+                                false
+                            }
+                        }
+                        if (removedRecently) continue
                         val existing = byKey[key]
                         if (existing == null || sbn.postTime > existing.first.postTime) {
                             byKey[key] = sbn to existing?.second
@@ -431,9 +607,16 @@ object CaveArtNotifSystemBridge {
                     it.remove()
                 } else {
                     val sbn = e.value.first
+                    val removedAfter = synchronized(recentRemovedCache) {
+                        val rmAt = recentRemovedCache[e.key]
+                        rmAt != null && (nowMs - rmAt) < RECENT_POST_TTL_MS && sbn.postTime <= rmAt
+                    }
                     val existing = byKey[e.key]
-                    if (existing == null || sbn.postTime > existing.first.postTime) {
-                        byKey[e.key] = sbn to existing?.second
+                    val canUpdateActive = existing != null && sbn.postTime >= existing.first.postTime
+                    if (!removedAfter && (!pipelineActive || canUpdateActive)) {
+                        if (existing == null || sbn.postTime >= existing.first.postTime) {
+                            byKey[e.key] = sbn to existing?.second
+                        }
                     }
                 }
             }
@@ -442,7 +625,10 @@ object CaveArtNotifSystemBridge {
         return byKey.values.toList()
     }
 
-    private fun collectGroupedNotifications(context: Context): List<LockNotifAppGroup> {
+    private fun collectGroupedNotifications(
+        context: Context,
+        pipelineSnapshot: List<Pair<StatusBarNotification, NotificationListenerService.Ranking?>>? = null
+    ): List<LockNotifAppGroup> {
         val km = context.getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
         val isLocked = km?.isKeyguardLocked == true
         if (isLocked) {
@@ -452,14 +638,20 @@ object CaveArtNotifSystemBridge {
             if (!showLockNotifs) return emptyList()
         }
 
-        val allowPrivate = if (isLocked) {
+        val isTrustUnlocked = try {
+            val ksc = CaveArtXposedModule.keyguardStateControllerObj
+            (ksc?.javaClass?.getMethod("canDismissLockScreen")?.invoke(ksc) as? Boolean) == true
+        } catch (_: Throwable) { false }
+        val mustRedactLockscreen = isLocked && (km?.isKeyguardSecure == true) && !isTrustUnlocked
+
+        val allowPrivate = if (mustRedactLockscreen) {
             try {
                 Settings.Secure.getInt(context.contentResolver, "lock_screen_allow_private_notifications", 1) != 0
             } catch (_: Throwable) { true }
         } else true
 
         val nowMs = System.currentTimeMillis()
-        val rawEntries = fetchRawEntries(nowMs)
+        val rawEntries = fetchRawEntries(nowMs, pipelineSnapshot)
         if (rawEntries.isEmpty()) return emptyList()
 
         val rankingMap = try { listenerService?.currentRanking } catch (_: Throwable) { null }
@@ -495,7 +687,6 @@ object CaveArtNotifSystemBridge {
             val isSummary = (n.flags and Notification.FLAG_GROUP_SUMMARY) != 0
             if (isSummary && groupsWithChildren.contains(sbn.groupKey)) continue
             if (n.category == Notification.CATEGORY_TRANSPORT) continue
-            if (isLocked && n.visibility == Notification.VISIBILITY_SECRET) continue
 
             val pkg = sbn.packageName ?: continue
             val extras = n.extras
@@ -507,7 +698,7 @@ object CaveArtNotifSystemBridge {
             val isProgressOrInstallerPkg = pkg == "com.android.vending" ||
                 pkg == "com.android.providers.downloads" ||
                 pkg.contains("packageinstaller")
-            val isPromotedOngoing = (n.flags and 0x1000) != 0 ||
+            val isPromotedOngoing = (n.flags and 0x00040000) != 0 ||
                 (extras?.getBoolean("android.requestPromotedOngoing", false) == true)
 
             val isEssentialOngoing = hasProgressMeta ||
@@ -525,6 +716,12 @@ object CaveArtNotifSystemBridge {
                 rankingMap != null && rankingMap.getRanking(key, rankingOut)
             }
             val effRanking = entryRanking ?: if (hasRanking) rankingOut else null
+            val visOverride = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && effRanking != null) {
+                effRanking.lockscreenVisibilityOverride
+            } else -1000
+            val effectiveVisibility = if (visOverride != -1000) visOverride else n.visibility
+            if (isLocked && effectiveVisibility == Notification.VISIBILITY_SECRET) continue
+
             val importance = effRanking?.importance ?: NotificationManager.IMPORTANCE_DEFAULT
             val isAmbient = effRanking?.isAmbient == true
 
@@ -546,8 +743,17 @@ object CaveArtNotifSystemBridge {
                 !sbn.isClearable && !isEssentialOngoing && importance <= NotificationManager.IMPORTANCE_LOW
             if (isBackgroundServiceNoise) continue
 
+            val hasSensitiveContent = if (effRanking != null) {
+                try {
+                    (effRanking.javaClass.getMethod("hasSensitiveContent").invoke(effRanking) as? Boolean) == true
+                } catch (_: Throwable) { false }
+            } else false
+
             val appName = resolveAppName(pm, pkg)
-            val isRedacted = isLocked && !allowPrivate && n.visibility == Notification.VISIBILITY_PRIVATE
+            val isRedacted = mustRedactLockscreen && (
+                hasSensitiveContent ||
+                (!allowPrivate && effectiveVisibility == Notification.VISIBILITY_PRIVATE)
+            )
 
             val (title, text) = if (isRedacted) {
                 val pub = n.publicVersion
@@ -566,8 +772,9 @@ object CaveArtNotifSystemBridge {
                 rawProgIndet || (template.contains("ProgressStyle", ignoreCase = true) && rawProgMax <= 0)
             } else false
             val actions = if (!isRedacted) extractActions(n) else emptyList()
+            val avHint = if (hasProgressMeta) key else "$key:${sbn.postTime}"
             val avatarBmp = if (!isRedacted) {
-                resolveIconBitmap(context, pkg, extractAvatarIcon(n), avatarPx, avatarCache, "av", "$key:${sbn.postTime}")
+                resolveIconBitmap(context, pkg, extractAvatarIcon(n), avatarPx, avatarCache, "av", avHint)
             } else null
             val picBmp = if (!isRedacted) {
                 extractPictureBitmap(context, pkg, n, "$key:${sbn.postTime}")
@@ -605,7 +812,8 @@ object CaveArtNotifSystemBridge {
             val pkg = leadSbn.packageName
             val appName = resolveAppName(pm, pkg)
 
-            val smallBmp = resolveIconBitmap(context, pkg, leadSbn.notification.smallIcon, smallPx, smallIconCache, "sm", "${leadSbn.key}:${leadMsg.postTimeMs}")
+            val smHint = if (leadMsg.hasProgress) leadSbn.key else "${leadSbn.key}:${leadMsg.postTimeMs}"
+            val smallBmp = resolveIconBitmap(context, pkg, leadSbn.notification.smallIcon, smallPx, smallIconCache, "sm", smHint)
             val appBmp = resolveAppIcon(pm, pkg, appPx)
             val msgs = pairs.map { it.second }
 
@@ -807,11 +1015,28 @@ object CaveArtNotifSystemBridge {
     private fun drawableToBitmap(drawable: Drawable, sizePx: Int): Bitmap? {
         if (drawable is BitmapDrawable && drawable.bitmap != null && !drawable.bitmap.isRecycled) {
             val src = drawable.bitmap
-            return if (src.width == sizePx && src.height == sizePx) {
-                src
+            val swSrc = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && src.config == Bitmap.Config.HARDWARE) {
+                src.copy(Bitmap.Config.ARGB_8888, false) ?: return null
+            } else src
+            val result = if (swSrc.width == sizePx && swSrc.height == sizePx) {
+                if (swSrc === src) swSrc.copy(Bitmap.Config.ARGB_8888, false) else swSrc
+            } else if (swSrc.width == swSrc.height) {
+                Bitmap.createScaledBitmap(swSrc, sizePx, sizePx, true)
             } else {
-                Bitmap.createScaledBitmap(src, sizePx, sizePx, true)
+                val bmp = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
+                val c = Canvas(bmp)
+                val scale = maxOf(sizePx / swSrc.width.toFloat(), sizePx / swSrc.height.toFloat())
+                val dx = (sizePx - swSrc.width * scale) * 0.5f
+                val dy = (sizePx - swSrc.height * scale) * 0.5f
+                val m = Matrix().apply {
+                    postScale(scale, scale)
+                    postTranslate(dx, dy)
+                }
+                c.drawBitmap(swSrc, m, Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
+                bmp
             }
+            if (swSrc !== src && swSrc !== result) swSrc.recycle()
+            return result
         }
         val bmp = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)

@@ -216,7 +216,8 @@ object LockscreenSceneRenderer {
         isCollapsingStyle: Boolean = true,
         isIconsOnly: Boolean = false,
         clockTopPx: Float = -1f,
-        dateBottomPx: Float = -1f
+        dateBottomPx: Float = -1f,
+        dateTopPx: Float = -1f
     ): Float {
         val idealTop = anchorBottomPx + (LockscreenLayoutSpec.NOTIF_PUSH_MARGIN_DP * density)
         if (idealTop + notifHeightPx <= maxBottomPx) {
@@ -235,6 +236,11 @@ object LockscreenSceneRenderer {
                 }
                 if (upperSlotTop + notifHeightPx + (10f * density) <= clockTopPx) {
                     return upperSlotTop
+                }
+                val minTop = LockscreenLayoutSpec.COMPACT_DATE_TOP_DP * density
+                val topObstacle = if (dateTopPx > 0f) min(dateTopPx, clockTopPx) else clockTopPx
+                if (minTop + notifHeightPx + (10f * density) <= topObstacle) {
+                    return (topObstacle - notifHeightPx - (12f * density)).coerceAtLeast(minTop)
                 }
             }
         }
@@ -534,6 +540,7 @@ object LockscreenSceneRenderer {
             zoomFactor = params.wallpaperZoom
         )
 
+        var dateTopPx = -1f
         var dateBottomPx = 0f
         if (params.showClock) {
             if (isExternalDate) {
@@ -564,6 +571,7 @@ object LockscreenSceneRenderer {
                     bgOpacity = effectiveBgOpacity,
                     fallbackColors = params.fallbackWallpaperColors
                 )
+                dateTopPx = nativeDateY
                 dateBottomPx = nativeDateY + glanceDrawn.heightPx
             }
 
@@ -609,7 +617,8 @@ object LockscreenSceneRenderer {
                 isCollapsingStyle = notifStyle.collapsesClockWhenNotifsPresent,
                 isIconsOnly = notifStyle == NotificationStyle.ICONS_ONLY,
                 clockTopPx = if (!localBounds.isEmpty) localBounds.top else frameCtx.clockTopY,
-                dateBottomPx = if (isExternalDate) dateBottomPx else -1f
+                dateBottomPx = if (isExternalDate) dateBottomPx else -1f,
+                dateTopPx = if (isExternalDate) dateTopPx else -1f
             )
             val effectiveBgOpacity = if (params.showBackground) params.bgOpacity else 0f
 
@@ -632,7 +641,8 @@ object LockscreenSceneRenderer {
                 expandProgress = params.previewExpandProgress,
                 peekGroupId = params.previewPeekGroupId,
                 peekProgress = params.previewPeekProgress,
-                isNightMode = NotificationKitRenderer.isSystemNightMode(context)
+                isNightMode = NotificationKitRenderer.isSystemNightMode(context),
+                clockAvoidRect = if (!localBounds.isEmpty) localBounds else null
             )
             notifBounds.set(hitLayoutOut.totalBounds)
         }
