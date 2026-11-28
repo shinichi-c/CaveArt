@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.res.Configuration
 import android.graphics.*
 import android.os.Build
+import android.service.notification.StatusBarNotification
 import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
@@ -72,8 +73,14 @@ object NotificationThemeSpec {
 
 data class LockNotifAction(
     val title: String,
-    val intent: PendingIntent? = null
-)
+    val intent: PendingIntent? = null,
+    val remoteInputs: List<android.app.RemoteInput> = emptyList(),
+    val smartChoices: List<String> = emptyList(),
+    val isAuthenticationRequired: Boolean = false,
+    val semanticAction: Int = 0
+) {
+    val hasRemoteInput: Boolean get() = remoteInputs.isNotEmpty()
+}
 
 data class LockNotifMessage(
     val key: String,
@@ -88,7 +95,11 @@ data class LockNotifMessage(
     val progress: Int = -1,
     val progressMax: Int = 0,
     val progressIndeterminate: Boolean = false,
-    val actions: List<LockNotifAction> = emptyList()
+    val actions: List<LockNotifAction> = emptyList(),
+    val sbn: StatusBarNotification? = null,
+    val usesChronometer: Boolean = false,
+    val chronometerBaseMs: Long = 0L,
+    val chronometerCountDown: Boolean = false
 ) {
     val hasProgress: Boolean get() = !isRedacted && (progressIndeterminate || (progressMax > 0 && progress >= 0))
     val isExpandableSingle: Boolean get() = !isRedacted && (text.length > 52 || actions.isNotEmpty() || (pictureBitmap != null && !pictureBitmap.isRecycled))
@@ -109,7 +120,8 @@ data class LockNotifAppGroup(
     val primaryText: String,
     val primaryIntent: PendingIntent? = null,
     val isRedacted: Boolean = false,
-    val isClearable: Boolean = true
+    val isClearable: Boolean = true,
+    val leadSbn: StatusBarNotification? = null
 ) {
     val count: Int get() = items.size
     val canExpand: Boolean get() = count > 1 || (items.firstOrNull()?.isExpandableSingle == true)
@@ -131,7 +143,8 @@ data class NotificationHitTarget(
     val bounds: RectF,
     val groupId: String? = null,
     val messageIndex: Int = -1,
-    val actionIndex: Int = -1
+    val actionIndex: Int = -1,
+    val choiceIndex: Int = -1
 )
 
 data class NotificationHitLayout(
@@ -938,6 +951,172 @@ object NotificationKitRenderer {
             )
             else -> NotificationHitLayout()
         }
+    }
+
+    fun drawSingleCardSurface(
+        canvas: Canvas,
+        width: Float,
+        height: Float,
+        cornerRadius: Float,
+        config: LockscreenConfig,
+        screenW: Float,
+        screenH: Float,
+        viewLocX: Float,
+        viewLocY: Float,
+        density: Float,
+        wallpaperBitmap: Bitmap?,
+        wallpaperZoom: Float,
+        fallbackColors: WallpaperColors?,
+        isNightMode: Boolean,
+        alphaScale: Float = 1f,
+        isPressed: Boolean = false
+    ) {
+        val alphaInt = (alphaScale.coerceIn(0f, 1f) * 255f).roundToInt().coerceIn(0, 255)
+        if (alphaInt <= 2 || width < 4f || height < 4f) return
+
+        val surfaceMode = NotificationSurfaceMode.fromId(config.notificationSurfaceMode)
+        val backdropBmp = when (surfaceMode) {
+            NotificationSurfaceMode.FROSTED_GLASS -> getOrCreateFrostBitmap(wallpaperBitmap)
+            NotificationSurfaceMode.AMBIENT_GLOW -> getOrCreateAmbientBitmap(wallpaperBitmap)
+            else -> null
+        }
+
+        val hasMatrix = backdropBmp != null && wallpaperBitmap != null && !wallpaperBitmap.isRecycled && screenW > 0f && screenH > 0f
+        if (hasMatrix && backdropBmp != null && wallpaperBitmap != null) {
+            val bw = wallpaperBitmap.width.toFloat().coerceAtLeast(1f)
+            val bh = wallpaperBitmap.height.toFloat().coerceAtLeast(1f)
+            val baseScale = max(screenW / bw, screenH / bh) * wallpaperZoom.coerceAtLeast(0.5f)
+            val destW = bw * baseScale
+            val destH = bh * baseScale
+            val tx = (screenW - destW) / 2f
+            val ty = (screenH - destH) / 2f
+            scratchMatrix.reset()
+            scratchMatrix.postScale(destW / backdropBmp.width.toFloat(), destH / backdropBmp.height.toFloat())
+            scratchMatrix.postTranslate(tx - viewLocX, ty - viewLocY)
+        }
+
+        val resolvedInk = AtAGlanceColorResolver.resolveForWallpaper(
+            wallpaperBitmap = wallpaperBitmap,
+            screenW = screenW,
+            screenH = screenH,
+            zoom = wallpaperZoom,
+            centerX = viewLocX + width * 0.5f,
+            topY = viewLocY,
+            widthPx = width.coerceAtLeast(120f * density),
+            heightPx = height.coerceAtLeast(36f * density),
+            bgOpacity = 1f,
+            fallbackColors = fallbackColors,
+            lightThreshold = NotificationThemeSpec.LIGHT_WALLPAPER_THRESHOLD
+        )
+        val isLightWp = resolvedInk == AtAGlanceColorResolver.DARK_INK_COLOR
+
+        val palette = resolvePalette(
+            surfaceMode = surfaceMode,
+            isNightMode = isNightMode,
+            isLightWallpaper = isLightWp,
+            alphaInt = alphaInt,
+            hasBackdropBitmap = hasMatrix,
+            config = config,
+            fallbackColors = fallbackColors,
+            wallpaperBitmap = wallpaperBitmap
+        )
+
+        scratchRect.set(0f, 0f, width, height)
+        clipPath.rewind()
+        clipPath.addRoundRect(scratchRect, cornerRadius, cornerRadius, Path.Direction.CW)
+
+        if (palette.frostActive && backdropBmp != null && !backdropBmp.isRecycled && hasMatrix) {
+            canvas.save()
+            canvas.clipPath(clipPath)
+            iconPaint.colorFilter = null
+            iconPaint.alpha = alphaInt
+            canvas.drawBitmap(backdropBmp, scratchMatrix, iconPaint)
+            fillPaint.clearShadowLayer()
+            fillPaint.shader = null
+            fillPaint.color = palette.surfaceColor
+            canvas.drawRect(scratchRect, fillPaint)
+            canvas.restore()
+        } else {
+            fillPaint.clearShadowLayer()
+            fillPaint.shader = null
+            fillPaint.color = palette.surfaceColor
+            canvas.drawRoundRect(scratchRect, cornerRadius, cornerRadius, fillPaint)
+
+            if (palette.glowColor != 0) {
+                val gAlpha = (alphaInt * (if (palette.isLightWallpaper) 0.18f else 0.24f)).roundToInt()
+                val glowCol = Color.argb(
+                    gAlpha,
+                    Color.red(palette.glowColor),
+                    Color.green(palette.glowColor),
+                    Color.blue(palette.glowColor)
+                )
+                fillPaint.shader = RadialGradient(
+                    scratchRect.left + scratchRect.width() * 0.22f,
+                    scratchRect.top + scratchRect.height() * 0.25f,
+                    max(scratchRect.width(), scratchRect.height()).coerceAtLeast(1f) * 0.85f,
+                    glowCol,
+                    Color.TRANSPARENT,
+                    Shader.TileMode.CLAMP
+                )
+                canvas.drawRoundRect(scratchRect, cornerRadius, cornerRadius, fillPaint)
+                fillPaint.shader = null
+            }
+        }
+
+        if (isPressed) {
+            fillPaint.shader = null
+            fillPaint.color = if (palette.isLightWallpaper) {
+                Color.argb((alphaInt * 0.08f).roundToInt(), 0, 0, 0)
+            } else {
+                Color.argb((alphaInt * 0.12f).roundToInt(), 255, 255, 255)
+            }
+            canvas.drawRoundRect(scratchRect, cornerRadius, cornerRadius, fillPaint)
+        }
+
+        if (palette.frostActive) {
+            borderStrokePaint.strokeWidth = 0.9f * density
+            val topHighlight = if (palette.isLightWallpaper) 0.34f else 0.36f
+            borderStrokePaint.shader = LinearGradient(
+                scratchRect.left, scratchRect.top, scratchRect.left, scratchRect.bottom,
+                intArrayOf(
+                    Color.argb((alphaInt * topHighlight).roundToInt(), 255, 255, 255),
+                    Color.argb((alphaInt * 0.11f).roundToInt(), 255, 255, 255),
+                    Color.argb((alphaInt * 0.04f).roundToInt(), 255, 255, 255)
+                ),
+                floatArrayOf(0f, 0.35f, 1f),
+                Shader.TileMode.CLAMP
+            )
+            canvas.drawRoundRect(scratchRect, cornerRadius, cornerRadius, borderStrokePaint)
+            borderStrokePaint.shader = null
+        } else if (Color.alpha(palette.borderColor) > 0) {
+            borderStrokePaint.shader = null
+            borderStrokePaint.strokeWidth = 0.75f * density
+            borderStrokePaint.color = palette.borderColor
+            canvas.drawRoundRect(scratchRect, cornerRadius, cornerRadius, borderStrokePaint)
+        }
+    }
+
+    fun resolveSurfaceTextColors(
+        config: LockscreenConfig,
+        screenW: Float,
+        screenH: Float,
+        wallpaperBitmap: Bitmap?,
+        wallpaperZoom: Float,
+        fallbackColors: WallpaperColors?,
+        isNightMode: Boolean
+    ): Pair<Int, Int> {
+        val surfaceMode = NotificationSurfaceMode.fromId(config.notificationSurfaceMode)
+        val palette = resolvePalette(
+            surfaceMode = surfaceMode,
+            isNightMode = isNightMode,
+            isLightWallpaper = !isNightMode,
+            alphaInt = 255,
+            hasBackdropBitmap = wallpaperBitmap != null,
+            config = config,
+            fallbackColors = fallbackColors,
+            wallpaperBitmap = wallpaperBitmap
+        )
+        return palette.primaryInk to palette.secondaryInk
     }
 
     private fun drawSurfaceRect(

@@ -44,6 +44,8 @@ object CaveArtNotifSystemBridge {
     @Volatile
     var centralSurfacesObj: Any? = null
 
+    private val liveEntries = java.util.concurrent.ConcurrentHashMap<String, java.lang.ref.WeakReference<Any>>()
+
     @Volatile
     var activeGroups: List<LockNotifAppGroup> = emptyList()
         private set
@@ -150,10 +152,22 @@ object CaveArtNotifSystemBridge {
                     module.hook(m).intercept { chain ->
                         val res = chain.proceed()
                         (chain.thisObject as? NotificationListenerService)?.let { svc ->
-                            if (listenerService == null) {
-                                listenerService = svc
-                                scheduleRefresh(svc, immediate = true)
+                            if (listenerService == null) listenerService = svc
+                            val argSbn = chain.args.firstOrNull() as? StatusBarNotification
+                            if (mName == "onNotificationPosted" && argSbn?.key != null) {
+                                val k = argSbn.key
+                                synchronized(dismissedPendingKeys) { dismissedPendingKeys.remove(k) }
+                                synchronized(recentRemovedCache) { recentRemovedCache.remove(k) }
+                                synchronized(recentPostedCache) {
+                                    recentPostedCache[k] = argSbn to System.currentTimeMillis()
+                                }
+                            } else if (mName == "onNotificationRemoved" && argSbn?.key != null) {
+                                val k = argSbn.key
+                                synchronized(dismissedPendingKeys) { dismissedPendingKeys.remove(k) }
+                                synchronized(recentPostedCache) { recentPostedCache.remove(k) }
+                                synchronized(recentRemovedCache) { recentRemovedCache[k] = System.currentTimeMillis() }
                             }
+                            scheduleRefresh(svc, immediate = mName == "onNotificationRemoved")
                         }
                         res
                     }
@@ -308,6 +322,23 @@ object CaveArtNotifSystemBridge {
             }
         } catch (_: Throwable) {}
 
+        try {
+            val rowCls = classLoader.loadClass(
+                "com.android.systemui.statusbar.notification.row.ExpandableNotificationRow"
+            )
+            rowCls.declaredMethods.filter { it.name == "onNotificationUpdated" }.forEach { m ->
+                module.hook(m).intercept { chain ->
+                    val res = chain.proceed()
+                    try {
+                        val ctx = listenerService ?: CaveArtXposedModule.activeClock?.context
+                            ?: CaveArtXposedModule.activeRootLayout?.context
+                        if (ctx != null) scheduleRefresh(ctx, immediate = false)
+                    } catch (_: Throwable) {}
+                    res
+                }
+            }
+        } catch (_: Throwable) {}
+
         listOf(
             "com.android.systemui.statusbar.phone.ActivityStarterImpl",
             "com.android.systemui.statusbar.phone.StatusBarActivityStarter"
@@ -380,13 +411,20 @@ object CaveArtNotifSystemBridge {
         return try {
             val entries = pipeline.javaClass.getMethod("getAllNotifs").invoke(pipeline) as? Collection<*> ?: return null
             val out = ArrayList<Pair<StatusBarNotification, NotificationListenerService.Ranking?>>(entries.size)
+            val activeKeys = HashSet<String>(entries.size)
             for (entry in entries) {
                 val sbn = entry?.javaClass?.getMethod("getSbn")?.invoke(entry) as? StatusBarNotification ?: continue
+                val key = sbn.key
+                if (key != null) {
+                    activeKeys.add(key)
+                    liveEntries[key] = java.lang.ref.WeakReference(entry)
+                }
                 val ranking = try {
                     entry.javaClass.getMethod("getRanking").invoke(entry) as? NotificationListenerService.Ranking
                 } catch (_: Throwable) { null }
                 out.add(sbn to ranking)
             }
+            liveEntries.keys.retainAll(activeKeys)
             out
         } catch (_: Throwable) {
             null
@@ -450,11 +488,53 @@ object CaveArtNotifSystemBridge {
             activeGroups = remaining
             listeners.forEach { it(remaining) }
             CaveArtXposedModule.onNotificationsChanged(context, remaining)
-            keys.forEach { key ->
-                try {
-                    svc.cancelNotification(key)
-                } catch (_: Throwable) {}
+            try {
+                svc.cancelNotifications(keys.toTypedArray())
+            } catch (_: Throwable) {
+                keys.forEach { key ->
+                    try { svc.cancelNotification(key) } catch (_: Throwable) {}
+                }
             }
+        }
+        scheduleRefresh(context)
+    }
+
+    fun dismissMessage(context: Context, groupId: String, key: String) {
+        val svc = listenerService
+        if (svc != null) {
+            val now = System.currentTimeMillis()
+            synchronized(dismissedPendingKeys) {
+                dismissedPendingKeys[key] = now
+            }
+            val remaining = activeGroups.mapNotNull { grp ->
+                if (grp.groupId != groupId) {
+                    grp
+                } else {
+                    val kept = grp.items.filterNot { it.key == key }
+                    if (kept.isEmpty()) null
+                    else {
+                        val lead = kept.first()
+                        grp.copy(
+                            items = kept,
+                            latestPostTimeMs = lead.postTimeMs,
+                            primaryTitle = lead.title,
+                            primaryText = lead.text,
+                            primaryIntent = lead.contentIntent,
+                            avatarIcon = lead.avatarIcon,
+                            pictureBitmap = lead.pictureBitmap,
+                            isRedacted = kept.any { it.isRedacted },
+                            isClearable = kept.any { it.isClearable },
+                            leadSbn = lead.sbn
+                        )
+                    }
+                }
+            }
+            activeGroups = remaining
+            listeners.forEach { it(remaining) }
+            CaveArtXposedModule.onNotificationsChanged(context, remaining)
+            try {
+                svc.cancelNotification(key)
+            } catch (_: Throwable) {}
         }
         scheduleRefresh(context)
     }
@@ -472,13 +552,394 @@ object CaveArtNotifSystemBridge {
             activeGroups = remaining
             listeners.forEach { it(remaining) }
             CaveArtXposedModule.onNotificationsChanged(context, remaining)
-            keys.forEach { key ->
-                try {
-                    svc.cancelNotification(key)
-                } catch (_: Throwable) {}
+            try {
+                svc.cancelNotifications(keys.toTypedArray())
+            } catch (_: Throwable) {
+                keys.forEach { key ->
+                    try { svc.cancelNotification(key) } catch (_: Throwable) {}
+                }
             }
         }
         scheduleRefresh(context)
+    }
+
+    fun launchNotificationByKey(context: Context, key: String?, fallbackIntent: PendingIntent?) {
+        val entry = key?.let { liveEntries[it]?.get() }
+        val sbn = if (entry != null) {
+            try { entry.javaClass.getMethod("getSbn").invoke(entry) as? StatusBarNotification } catch (_: Throwable) { null }
+        } else null
+        val flags = sbn?.notification?.flags ?: 0
+        val targetIntent = fallbackIntent ?: sbn?.notification?.contentIntent
+        launchPendingIntent(context, targetIntent)
+
+        if (key != null && targetIntent != null && (flags and Notification.FLAG_AUTO_CANCEL) != 0) {
+            mainHandler.postDelayed({
+                try {
+                    listenerService?.cancelNotification(key)
+                    scheduleRefresh(context, immediate = true)
+                } catch (_: Throwable) {}
+            }, 350L)
+        }
+    }
+
+    private fun isKeyguardSecureLocked(context: Context): Boolean {
+        val km = context.getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager ?: return false
+        if (!km.isKeyguardLocked || !km.isKeyguardSecure) return false
+        val canDismiss = try {
+            val ksc = CaveArtXposedModule.keyguardStateControllerObj
+            (ksc?.javaClass?.getMethod("canDismissLockScreen")?.invoke(ksc) as? Boolean) == true
+        } catch (_: Throwable) { false }
+        return !canDismiss
+    }
+
+    private fun executeWithKeyguardIfNeeded(
+        context: Context,
+        requireUnlock: Boolean,
+        dismissShade: Boolean = false,
+        action: () -> Unit
+    ) {
+        if (!requireUnlock || !isKeyguardSecureLocked(context)) {
+            mainHandler.post { action() }
+            return
+        }
+        val runnable = Runnable { mainHandler.post { action() } }
+        for (target in listOfNotNull(activityStarterObj, centralSurfacesObj)) {
+            try {
+                val m = target.javaClass.methods.firstOrNull {
+                    it.name == "executeRunnableDismissingKeyguard" && it.parameterTypes.size == 5
+                }
+                if (m != null) {
+                    m.invoke(target, runnable, null, dismissShade, true, false)
+                    return
+                }
+            } catch (_: Throwable) {}
+        }
+    }
+
+    fun createRemoteViewsInteractionHandler(
+        context: Context,
+        sbnProvider: () -> StatusBarNotification?
+    ): Any? {
+        return try {
+            val handlerCls = Class.forName("android.widget.RemoteViews\$InteractionHandler")
+            var proxyRef: Any? = null
+            val proxy = java.lang.reflect.Proxy.newProxyInstance(
+                handlerCls.classLoader,
+                arrayOf(handlerCls)
+            ) { _, method, args ->
+                when (method.name) {
+                    "equals" -> proxyRef === args?.getOrNull(0)
+                    "hashCode" -> System.identityHashCode(proxyRef)
+                    "toString" -> "CaveArtRemoteViewsInteractionHandler"
+                    "onInteraction" -> {
+                        val clickedView = args?.getOrNull(0) as? android.view.View
+                        val pendingIntent = args?.getOrNull(1) as? PendingIntent
+                        val response = args?.getOrNull(2)
+                        handleRemoteViewsInteraction(context, sbnProvider(), clickedView, pendingIntent, response)
+                    }
+                    else -> null
+                }
+            }
+            proxyRef = proxy
+            proxy
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    private fun handleRemoteViewsInteraction(
+        context: Context,
+        sbn: StatusBarNotification?,
+        clickedView: android.view.View?,
+        pendingIntent: PendingIntent?,
+        response: Any?
+    ): Boolean {
+        if (pendingIntent == null) return false
+
+        var fillInIntent: android.content.Intent? = null
+        var launchOpts: android.app.ActivityOptions? = null
+        if (response != null && clickedView != null) {
+            try {
+                val pair = response.javaClass.getMethod("getLaunchOptions", android.view.View::class.java)
+                    .invoke(response, clickedView) as? android.util.Pair<*, *>
+                fillInIntent = pair?.first as? android.content.Intent
+                launchOpts = pair?.second as? android.app.ActivityOptions
+            } catch (_: Throwable) {}
+        }
+
+        val notif = sbn?.notification
+        val matchedAction = notif?.actions?.firstOrNull { a ->
+            a?.actionIntent == pendingIntent ||
+                (clickedView != null && a?.title != null && clickedView is android.widget.TextView &&
+                    clickedView.text?.toString() == a.title.toString())
+        }
+        val tagInputs = if (clickedView != null) {
+            try {
+                val riTagId = android.content.res.Resources.getSystem().getIdentifier("remote_input_tag", "id", "android")
+                if (riTagId != 0) clickedView.getTag(riTagId) as? Array<*> else null
+            } catch (_: Throwable) { null }
+        } else null
+        val riList = matchedAction?.remoteInputs?.toList()
+            ?: tagInputs?.filterIsInstance<RemoteInput>().orEmpty()
+
+        if (riList.isNotEmpty()) {
+            val choices = riList.flatMap { ri ->
+                ri.choices?.mapNotNull { it?.toString()?.trim()?.takeIf { s -> s.isNotEmpty() } }.orEmpty()
+            }.distinct()
+            val authReq = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && matchedAction != null) {
+                matchedAction.isAuthenticationRequired
+            } else false
+            val replyAction = LockNotifAction(
+                title = matchedAction?.title?.toString() ?: "Reply",
+                intent = pendingIntent,
+                remoteInputs = riList,
+                smartChoices = choices,
+                isAuthenticationRequired = authReq
+            )
+            val titleHint = notif?.extras?.getCharSequence(Notification.EXTRA_TITLE)?.toString()
+                ?: sbn?.packageName?.substringAfterLast('.') ?: "Reply"
+            triggerNotificationAction(context, notif?.contentIntent, replyAction, -1, titleHint)
+            return true
+        }
+
+        if (sbn != null && pendingIntent == notif?.contentIntent) {
+            launchNotificationByKey(context, sbn.key, pendingIntent)
+            return true
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && pendingIntent.isActivity) {
+            launchPendingIntent(context, pendingIntent)
+            return true
+        }
+
+        val authReq = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && matchedAction != null) {
+            matchedAction.isAuthenticationRequired
+        } else false
+
+        executeWithKeyguardIfNeeded(context, authReq) {
+            sendActionPendingIntent(context, pendingIntent, fillInIntent, launchOpts)
+            scheduleRefresh(context, immediate = true)
+            mainHandler.postDelayed({ scheduleRefresh(context, immediate = false) }, 160L)
+            mainHandler.postDelayed({ scheduleRefresh(context, immediate = false) }, 450L)
+        }
+        return true
+    }
+
+    fun triggerNotificationAction(
+        context: Context,
+        fallbackIntent: PendingIntent?,
+        action: LockNotifAction,
+        choiceIndex: Int = -1,
+        replyTitle: String = "Reply"
+    ) {
+        if (choiceIndex >= 0 && action.hasRemoteInput) {
+            val choice = action.smartChoices.getOrNull(choiceIndex) ?: return
+            val needsUnlock = action.isAuthenticationRequired || isKeyguardSecureLocked(context)
+            executeWithKeyguardIfNeeded(context, needsUnlock) {
+                sendRemoteInput(context, action, choice, isChoice = true)
+            }
+            return
+        }
+
+        if (action.hasRemoteInput) {
+            val needsUnlock = isKeyguardSecureLocked(context)
+            executeWithKeyguardIfNeeded(context, needsUnlock, dismissShade = false) {
+                showQuickReplyDialog(context, action, replyTitle)
+            }
+            return
+        }
+
+        val intent = action.intent ?: fallbackIntent ?: return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && intent.isActivity) {
+            launchPendingIntent(context, intent)
+            return
+        }
+
+        executeWithKeyguardIfNeeded(context, action.isAuthenticationRequired) {
+            sendActionPendingIntent(context, intent, null, null)
+            scheduleRefresh(context, immediate = true)
+            mainHandler.postDelayed({ scheduleRefresh(context, immediate = false) }, 160L)
+            mainHandler.postDelayed({ scheduleRefresh(context, immediate = false) }, 450L)
+        }
+    }
+
+    private fun sendActionPendingIntent(
+        context: Context,
+        intent: PendingIntent,
+        fillIn: android.content.Intent?,
+        customOpts: android.app.ActivityOptions?
+    ) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                val opts = (customOpts ?: android.app.ActivityOptions.makeBasic())
+                    .setPendingIntentBackgroundActivityStartMode(
+                        android.app.ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED
+                    )
+                    .toBundle()
+                intent.send(context, 0, fillIn, null, null, null, opts)
+            } else {
+                intent.send(context, 0, fillIn)
+            }
+        } catch (_: Throwable) {}
+    }
+
+    fun sendRemoteInput(
+        context: Context,
+        action: LockNotifAction,
+        replyText: String,
+        isChoice: Boolean
+    ) {
+        val intent = action.intent ?: return
+        val inputs = action.remoteInputs.toTypedArray()
+        if (inputs.isEmpty()) return
+
+        val fillIn = android.content.Intent()
+        val results = Bundle()
+        for (ri in inputs) {
+            results.putCharSequence(ri.resultKey, replyText)
+        }
+        RemoteInput.addResultsToIntent(inputs, fillIn, results)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            RemoteInput.setResultsSource(
+                fillIn,
+                if (isChoice) RemoteInput.SOURCE_CHOICE else RemoteInput.SOURCE_FREE_FORM_INPUT
+            )
+        }
+        sendActionPendingIntent(context, intent, fillIn, null)
+        scheduleRefresh(context, immediate = true)
+        mainHandler.postDelayed({ scheduleRefresh(context, immediate = false) }, 180L)
+    }
+
+    private fun showQuickReplyDialog(
+        context: Context,
+        action: LockNotifAction,
+        titleText: String
+    ) {
+        val themedCtx = android.view.ContextThemeWrapper(
+            CaveArtXposedModule.activeClock?.context ?: context,
+            android.R.style.Theme_DeviceDefault_Dialog_Alert
+        )
+        val d = themedCtx.resources.displayMetrics.density
+        val pad = (16f * d).toInt()
+
+        val root = android.widget.LinearLayout(themedCtx).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(pad, (10f * d).toInt(), pad, (6f * d).toInt())
+        }
+
+        lateinit var dialogRef: android.app.AlertDialog
+
+        if (action.smartChoices.isNotEmpty()) {
+            val scroll = android.widget.HorizontalScrollView(themedCtx).apply {
+                isHorizontalScrollBarEnabled = false
+            }
+            val row = android.widget.LinearLayout(themedCtx).apply {
+                orientation = android.widget.LinearLayout.HORIZONTAL
+            }
+            action.smartChoices.take(4).forEach { choice ->
+                val chip = android.widget.TextView(themedCtx).apply {
+                    text = choice
+                    setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 13f)
+                    setPadding((12f * d).toInt(), (7f * d).toInt(), (12f * d).toInt(), (7f * d).toInt())
+                    background = android.graphics.drawable.GradientDrawable().apply {
+                        setColor(Color.argb(38, 128, 160, 220))
+                        cornerRadius = 18f * d
+                    }
+                    setOnClickListener {
+                        sendRemoteInput(context, action, choice, isChoice = true)
+                        dialogRef.dismiss()
+                    }
+                }
+                row.addView(
+                    chip,
+                    android.widget.LinearLayout.LayoutParams(-2, -2).apply {
+                        marginEnd = (8f * d).toInt()
+                    }
+                )
+            }
+            scroll.addView(row)
+            root.addView(
+                scroll,
+                android.widget.LinearLayout.LayoutParams(-1, -2).apply {
+                    bottomMargin = (10f * d).toInt()
+                }
+            )
+        }
+
+        val input = android.widget.EditText(themedCtx).apply {
+            hint = action.remoteInputs.firstOrNull()?.label ?: "Type a reply..."
+            maxLines = 4
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES or
+                android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE
+            imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEND
+        }
+        root.addView(input, android.widget.LinearLayout.LayoutParams(-1, -2))
+
+        val dialog = android.app.AlertDialog.Builder(themedCtx)
+            .setTitle(titleText.ifBlank { action.title })
+            .setView(root)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Send") { _, _ ->
+                val txt = input.text?.toString()?.trim().orEmpty()
+                if (txt.isNotEmpty()) {
+                    sendRemoteInput(context, action, txt, isChoice = false)
+                }
+            }
+            .create()
+        dialogRef = dialog
+
+        input.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_SEND) {
+                val txt = input.text?.toString()?.trim().orEmpty()
+                if (txt.isNotEmpty()) {
+                    sendRemoteInput(context, action, txt, isChoice = false)
+                    dialog.dismiss()
+                }
+                true
+            } else false
+        }
+
+        dialog.window?.let { w ->
+            try {
+                w.setType(android.view.WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY)
+            } catch (_: Throwable) {
+                try { w.setType(2009) } catch (_: Throwable) {}
+            }
+            w.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
+        }
+        dialog.show()
+        input.post {
+            input.requestFocus()
+            val imm = themedCtx.getSystemService(Context.INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager
+            imm?.showSoftInput(input, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+        }
+    }
+
+    private fun invokeActivityStarter(target: Any?, intent: PendingIntent): Boolean {
+        if (target == null) return false
+        val candidates = target.javaClass.methods.filter {
+            (it.name == "postStartActivityDismissingKeyguard" ||
+                it.name == "startPendingIntentDismissingKeyguard") &&
+                it.parameterTypes.firstOrNull() == PendingIntent::class.java
+        }.sortedBy { it.parameterTypes.size }
+
+        for (m in candidates) {
+            try {
+                val params = m.parameterTypes
+                val args = Array<Any?>(params.size) { idx ->
+                    if (idx == 0) intent
+                    else when (params[idx]) {
+                        Boolean::class.javaPrimitiveType, Boolean::class.javaObjectType -> false
+                        Int::class.javaPrimitiveType, Int::class.javaObjectType -> 0
+                        else -> null
+                    }
+                }
+                m.invoke(target, *args)
+                return true
+            } catch (_: Throwable) {}
+        }
+        return false
     }
 
     fun launchPendingIntent(context: Context, intent: PendingIntent?) {
@@ -490,60 +951,13 @@ object CaveArtNotifSystemBridge {
             } catch (_: Throwable) {}
         }
 
-        val starter = activityStarterObj
-        if (starter != null) {
-            try {
-                val m1 = starter.javaClass.methods.firstOrNull {
-                    it.name == "postStartActivityDismissingKeyguard" &&
-                        it.parameterTypes.size == 1 &&
-                        it.parameterTypes[0] == PendingIntent::class.java
-                }
-                if (m1 != null) {
-                    m1.invoke(starter, intent)
-                    return
-                }
-                val m2 = starter.javaClass.methods.firstOrNull {
-                    it.name == "postStartActivityDismissingKeyguard" &&
-                        it.parameterTypes.size == 2 &&
-                        it.parameterTypes[0] == PendingIntent::class.java &&
-                        !it.parameterTypes[1].isPrimitive
-                }
-                if (m2 != null) {
-                    m2.invoke(starter, intent, null)
-                    return
-                }
-            } catch (_: Throwable) {}
-        }
-
-        val cs = centralSurfacesObj
-        if (cs != null) {
-            try {
-                val m1 = cs.javaClass.methods.firstOrNull {
-                    it.name == "postStartActivityDismissingKeyguard" &&
-                        it.parameterTypes.size == 1 &&
-                        it.parameterTypes[0] == PendingIntent::class.java
-                }
-                if (m1 != null) {
-                    m1.invoke(cs, intent)
-                    return
-                }
-                val m2 = cs.javaClass.methods.firstOrNull {
-                    it.name == "postStartActivityDismissingKeyguard" &&
-                        it.parameterTypes.size == 2 &&
-                        it.parameterTypes[0] == PendingIntent::class.java &&
-                        !it.parameterTypes[1].isPrimitive
-                }
-                if (m2 != null) {
-                    m2.invoke(cs, intent, null)
-                    return
-                }
-            } catch (_: Throwable) {}
-        }
+        if (invokeActivityStarter(activityStarterObj, intent)) return
+        if (invokeActivityStarter(centralSurfacesObj, intent)) return
 
         try {
             val km = context.getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
             if (km?.isKeyguardLocked != true) {
-                intent.send()
+                sendActionPendingIntent(context, intent, null, null)
             }
         } catch (_: Throwable) {}
     }
@@ -701,9 +1115,16 @@ object CaveArtNotifSystemBridge {
             val isPromotedOngoing = (n.flags and 0x00040000) != 0 ||
                 (extras?.getBoolean("android.requestPromotedOngoing", false) == true)
 
+            val hasChronometer = (extras?.getBoolean(Notification.EXTRA_SHOW_CHRONOMETER, false) == true) && n.`when` > 0L
+            val hasControls = !n.actions.isNullOrEmpty()
+            val hasCustomView = n.contentView != null || n.bigContentView != null
+
             val isEssentialOngoing = hasProgressMeta ||
                 isProgressOrInstallerPkg ||
                 isPromotedOngoing ||
+                hasChronometer ||
+                hasControls ||
+                hasCustomView ||
                 n.category == Notification.CATEGORY_CALL ||
                 n.category == Notification.CATEGORY_ALARM ||
                 n.category == Notification.CATEGORY_NAVIGATION ||
@@ -732,11 +1153,8 @@ object CaveArtNotifSystemBridge {
             if (isSystemBackgroundNoise) continue
 
             val includeSilent = CaveArtXposedModule.activeClock?.clockConfig?.notificationIncludeSilent ?: true
-            if (!includeSilent && importance <= NotificationManager.IMPORTANCE_LOW) {
-                if (n.category != Notification.CATEGORY_CALL &&
-                    n.category != Notification.CATEGORY_ALARM &&
-                    n.category != Notification.CATEGORY_NAVIGATION
-                ) continue
+            if (!includeSilent && importance <= NotificationManager.IMPORTANCE_LOW && !isEssentialOngoing) {
+                continue
             }
 
             val isBackgroundServiceNoise = (n.flags and Notification.FLAG_FOREGROUND_SERVICE) != 0 &&
@@ -771,7 +1189,8 @@ object CaveArtNotifSystemBridge {
             val progIndet = if (!isRedacted) {
                 rawProgIndet || (template.contains("ProgressStyle", ignoreCase = true) && rawProgMax <= 0)
             } else false
-            val actions = if (!isRedacted) extractActions(n) else emptyList()
+            val liveEntry = liveEntries[key]?.get()
+            val actions = if (!isRedacted) extractActions(n, liveEntry, effRanking) else emptyList()
             val avHint = if (hasProgressMeta) key else "$key:${sbn.postTime}"
             val avatarBmp = if (!isRedacted) {
                 resolveIconBitmap(context, pkg, extractAvatarIcon(n), avatarPx, avatarCache, "av", avHint)
@@ -780,6 +1199,7 @@ object CaveArtNotifSystemBridge {
                 extractPictureBitmap(context, pkg, n, "$key:${sbn.postTime}")
             } else null
 
+            val chronoCountDown = extras?.getBoolean("android.chronometerCountDown", false) == true
             val msg = LockNotifMessage(
                 key = key,
                 title = title,
@@ -793,7 +1213,11 @@ object CaveArtNotifSystemBridge {
                 progress = progVal,
                 progressMax = progMax,
                 progressIndeterminate = progIndet,
-                actions = actions
+                actions = actions,
+                sbn = sbn,
+                usesChronometer = hasChronometer && !isRedacted,
+                chronometerBaseMs = n.`when`,
+                chronometerCountDown = chronoCountDown
             )
             val groupId = "$pkg:${sbn.user}"
             byApp.getOrPut(groupId) { mutableListOf() }.add(sbn to msg)
@@ -833,7 +1257,8 @@ object CaveArtNotifSystemBridge {
                     primaryText = leadMsg.text,
                     primaryIntent = leadMsg.contentIntent,
                     isRedacted = msgs.any { it.isRedacted },
-                    isClearable = msgs.any { it.isClearable }
+                    isClearable = msgs.any { it.isClearable },
+                    leadSbn = leadSbn
                 )
             )
         }
@@ -959,16 +1384,90 @@ object CaveArtNotifSystemBridge {
         return n.getLargeIcon()
     }
 
-    private fun extractActions(n: Notification): List<LockNotifAction> {
-        val raw = n.actions ?: return emptyList()
-        if (raw.isEmpty()) return emptyList()
+    private fun extractActions(
+        n: Notification,
+        entry: Any? = null,
+        ranking: NotificationListenerService.Ranking? = null
+    ): List<LockNotifAction> {
+        val allRawActions = ArrayList<Notification.Action>()
+        n.actions?.filterNotNull()?.let { allRawActions.addAll(it) }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try {
+                n.contextualActions?.filterNotNull()?.let { ctxActions ->
+                    for (ca in ctxActions) {
+                        if (allRawActions.none { it.actionIntent == ca.actionIntent && it.title == ca.title }) {
+                            allRawActions.add(ca)
+                        }
+                    }
+                }
+            } catch (_: Throwable) {}
+        }
+
+        if (entry != null) {
+            try {
+                val smarts = entry.javaClass.getMethod("getSmartActions").invoke(entry) as? List<*>
+                smarts?.filterIsInstance<Notification.Action>()?.let { sList ->
+                    for (sa in sList) {
+                        if (allRawActions.none { it.actionIntent == sa.actionIntent && it.title == sa.title }) {
+                            allRawActions.add(sa)
+                        }
+                    }
+                }
+            } catch (_: Throwable) {}
+        }
+
+        if (ranking != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try {
+                ranking.smartActions?.filterNotNull()?.let { rSmarts ->
+                    for (sa in rSmarts) {
+                        if (allRawActions.none { it.actionIntent == sa.actionIntent && it.title == sa.title }) {
+                            allRawActions.add(sa)
+                        }
+                    }
+                }
+            } catch (_: Throwable) {}
+        }
+
+        if (allRawActions.isEmpty()) return emptyList()
+
         val out = ArrayList<LockNotifAction>(3)
-        for (a in raw) {
-            val title = a?.title?.toString()?.trim().orEmpty()
-            if (title.isEmpty()) continue
-            val remoteInputs: Array<RemoteInput>? = a.remoteInputs
-            if (!remoteInputs.isNullOrEmpty()) continue
-            out.add(LockNotifAction(title = title, intent = a.actionIntent))
+        for (a in allRawActions) {
+            val rawTitle = a.title?.toString()?.trim().orEmpty()
+            val semantic = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) a.semanticAction else 0
+            val resolvedTitle = if (rawTitle.isNotEmpty()) {
+                rawTitle
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                when (semantic) {
+                    Notification.Action.SEMANTIC_ACTION_REPLY -> "Reply"
+                    Notification.Action.SEMANTIC_ACTION_MARK_AS_READ -> "Mark read"
+                    Notification.Action.SEMANTIC_ACTION_MARK_AS_UNREAD -> "Mark unread"
+                    Notification.Action.SEMANTIC_ACTION_DELETE -> "Delete"
+                    Notification.Action.SEMANTIC_ACTION_ARCHIVE -> "Archive"
+                    Notification.Action.SEMANTIC_ACTION_MUTE -> "Mute"
+                    Notification.Action.SEMANTIC_ACTION_UNMUTE -> "Unmute"
+                    else -> ""
+                }
+            } else ""
+
+            if (resolvedTitle.isEmpty()) continue
+
+            val riList = a.remoteInputs?.toList().orEmpty()
+            val choices = riList.flatMap { ri ->
+                ri.choices?.mapNotNull { it?.toString()?.trim()?.takeIf { s -> s.isNotEmpty() } }.orEmpty()
+            }.distinct()
+            val authReq = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) a.isAuthenticationRequired else false
+
+            out.add(
+                LockNotifAction(
+                    title = resolvedTitle,
+                    intent = a.actionIntent,
+                    remoteInputs = riList,
+                    smartChoices = choices,
+                    isAuthenticationRequired = authReq,
+                    semanticAction = semantic
+                )
+            )
             if (out.size >= 3) break
         }
         return out

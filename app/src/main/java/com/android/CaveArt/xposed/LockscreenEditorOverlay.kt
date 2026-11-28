@@ -491,6 +491,44 @@ class LockscreenEditorOverlay(context: Context) : FrameLayout(context) {
         return true
     }
 
+    fun dismissImmediate(save: Boolean = false) {
+        stopKeepAwake(); stopContinuousFrameLoop()
+        notifPreviewAnimator?.cancel()
+        animate().cancel()
+        animate().setListener(null)
+        previewCardFrame.animate().cancel()
+        rootColumn.animate().cancel()
+        backdropImageView.animate().cancel()
+        isLayersSheetVisible = false; layersScrim.visibility = View.GONE
+
+        if (save) {
+            val finalCfg = syncDate(editConfig.copy(isDepthEnabled = isDepthEnabled, depthOcclusionLimit = depthOcclusionLimit))
+            CaveArtXposedModule.applyLiveEditPreview(finalCfg, editCollisionMap)
+            LockscreenOverlayPanels.persistAllToCaveArt(
+                context, finalCfg, editCollisionMap, isDepthEnabled, depthOcclusionLimit, bgVibrance, subjectOpacity, bgOpacity
+            )
+        } else if (CaveArtXposedModule.isEditModeActive) {
+            CaveArtXposedModule.applyLiveEditPreview(initialConfig, CaveArtXposedModule.activeClock?.collisionMap)
+        }
+
+        CaveArtXposedModule.isEditorDismissing = false
+        CaveArtXposedModule.setEditMode(false)
+        isClickable = false
+        isFocusable = false
+        isFocusableInTouchMode = false
+        visibility = View.GONE
+        backdropImageView.setImageDrawable(null)
+        if (blurredBackdrop !== cachedBlurBitmap) {
+            blurredBackdrop?.takeIf { !it.isRecycled }?.recycle()
+        }
+        blurredBackdrop = null
+        if (wallpaperBitmap !== cachedWpBitmap) {
+            wallpaperBitmap?.takeIf { !it.isRecycled }?.recycle()
+        }
+        wallpaperBitmap = null
+        (parent as? ViewGroup)?.removeView(this)
+    }
+
     fun dismiss(save: Boolean) {
         if (!CaveArtXposedModule.isEditModeActive) return
         stopKeepAwake(); stopContinuousFrameLoop()

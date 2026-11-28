@@ -629,10 +629,11 @@ class CaveArtXposedModule : XposedModule() {
                 isEditorDismissing = false
                 updateNotificationShift(root.context, false)
                 hideStockSettingsPopupIfPresent(root)
-                savedChildAlphas.clear()
                 for (i in 0 until root.childCount) {
                     val child = root.getChildAt(i)
-                    savedChildAlphas[child] = child.alpha
+                    if (!savedChildAlphas.containsKey(child)) {
+                        savedChildAlphas[child] = if (child.alpha > 0.01f) child.alpha else 1f
+                    }
                     child.animate().cancel()
                     child.alpha = 0f
                 }
@@ -1033,8 +1034,8 @@ class CaveArtXposedModule : XposedModule() {
                             } else if (newState == 1) {
                                 isBouncerShowing = false
                             }
-                            if (newState != 1 && isEditModeActive) {
-                                activeEditorOverlay?.dismiss(save = false)
+                            if (newState != 1 && (isEditModeActive || isEditorDismissing)) {
+                                activeEditorOverlay?.dismissImmediate(save = false)
                             }
                             activeRootLayout?.post {
                                 activeRootLayout?.let { root ->
@@ -1052,8 +1053,8 @@ class CaveArtXposedModule : XposedModule() {
                         val res = chain.proceed()
                         (chain.args.firstOrNull() as? Boolean)?.let { dozing ->
                             isDozing = dozing
-                            if (dozing && isEditModeActive) {
-                                activeEditorOverlay?.dismiss(save = false)
+                            if (dozing && (isEditModeActive || isEditorDismissing)) {
+                                activeEditorOverlay?.dismissImmediate(save = false)
                             }
                             activeNotifsView?.post {
                                 activeNotifsView?.isDozingState = dozing
@@ -1421,8 +1422,8 @@ class CaveArtXposedModule : XposedModule() {
                                         Intent.ACTION_SCREEN_OFF -> {
                                             isBouncerShowing = false
                                             isQsExpanded = false
-                                            if (isEditModeActive) {
-                                                activeEditorOverlay?.dismiss(save = false)
+                                            if (isEditModeActive || isEditorDismissing) {
+                                                activeEditorOverlay?.dismissImmediate(save = false)
                                             }
                                             myCustomNotifs.updateVisibilityState()
                                         }
@@ -1470,6 +1471,12 @@ class CaveArtXposedModule : XposedModule() {
                                                 myCustomNotifs.dozeAmount = 0f
                                             }
                                             if (intent.action == Intent.ACTION_SCREEN_ON) {
+                                                if ((isEditModeActive || isEditorDismissing) &&
+                                                    activeEditorOverlay?.isAttachedToWindow != true
+                                                ) {
+                                                    isEditorDismissing = false
+                                                    setEditMode(false)
+                                                }
                                                 refreshCachedLockEditSettings(context)
                                                 scanHiddenSmartspaceOrOmniJaws(context, rootLayout)
                                                 myCustomDate.reloadWallpaperAppearanceAsync()
